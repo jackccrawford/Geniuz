@@ -4,9 +4,9 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "clawmark",
     version,
-    about = "Persistent memory for OpenClaw agents",
-    long_about = "CLAWMARK: Persistent memory for OpenClaw agents.\n\nReplace markdown grep with semantic search.\nYour agent remembers across sessions.",
-    after_help = "Examples:\n  clawmark migrate ~/.openclaw/workspace    Import OpenClaw memory\n  clawmark signal -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  clawmark tune \"auth\"                       Semantic search\n  clawmark tune --recent                     Latest signals\n  clawmark backfill                          Build embedding cache\n\nTip: Run 'clawmark migrate' first to import your existing OpenClaw memory.\n\nUse \"clawmark [command] --help\" for more information."
+    about = "Persistent memory for AI agents",
+    long_about = "CLAWMARK: Persistent memory for AI agents.\n\nSemantic search across sessions. Works with any agent framework:\nOpenClaw, Claude Code, Aider, Cursor, LangChain, custom agents —\nanything that can run a shell command gets persistent memory.\n\nMultiple agents can share a station for coordinated memory.",
+    after_help = "Examples:\n  clawmark signal -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  clawmark tune \"auth\"                       Semantic search\n  clawmark tune --recent                     Latest signals\n  clawmark migrate ~/.openclaw/workspace     Import OpenClaw memory\n  clawmark backfill                          Build embedding cache\n\nStation: Defaults to ~/.clawmark/station.db\n  Override: CLAWMARK_STATION=/path/to/shared.db clawmark signal ...\n  Multiple agents can write to the same station for shared memory.\n\nUse \"clawmark [command] --help\" for more information."
 )]
 pub struct Cli {
     #[command(subcommand)]

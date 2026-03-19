@@ -1,15 +1,23 @@
 # clawmark
 
-Persistent memory for OpenClaw agents. Your memory survives sessions, compaction, and restarts.
+Persistent memory for AI agents. Works with any framework — OpenClaw, Claude Code, Aider, Cursor, or anything with shell access. Your memory survives sessions, compaction, and restarts.
 
 ## Setup
 
 ```bash
-clawmark migrate                    # import your OpenClaw memory
-clawmark backfill                   # enable semantic search
+clawmark signal -c "First signal" -g "setup: ready"   # start using immediately
+clawmark migrate                                       # (optional) import OpenClaw memory
+clawmark backfill                                      # embed any un-cached signals
 ```
 
-That's it. Your MEMORY.md and daily logs are now searchable signals.
+## Shared stations
+
+Multiple agents can write to the same station for coordinated memory:
+
+```bash
+CLAWMARK_STATION=/shared/team.db clawmark signal -c "Deploy complete" -g "ops: deploy v2.1"
+CLAWMARK_STATION=/shared/team.db clawmark tune "deploy"
+```
 
 ## Commands
 
