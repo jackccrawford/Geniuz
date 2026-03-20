@@ -116,11 +116,11 @@ clawmark capture ./docs/                      # bulk-load markdown files
 clawmark capture --openclaw                   # import OpenClaw memory
 clawmark capture --split notes.md             # split by ## headers
 
-# Signal — save what you learned
-clawmark signal -c "Fixed the auth bug" -g "fix: token refresh order"
+# Signal — pipe in for depth, inline for quick notes
+echo "detailed explanation" | clawmark signal -c - -g "category: compressed insight"
 clawmark signal -c @session-notes.md -g "session: architecture review"
-echo "piped content" | clawmark signal -c - -g "piped: from process"
-clawmark signal -c "Follow-up detail" -g "update: staging too" -p 98672A90
+clawmark signal -c "Quick note" -g "note: upgraded rusqlite to 0.32"
+clawmark signal -c "Follow-up" -g "update: staging too" -p 98672A90
 
 # Tune — semantic search by default
 clawmark tune "auth middleware"               # semantic search (finds by meaning)
@@ -184,41 +184,48 @@ ORT_LIB_LOCATION=/usr/local/lib ORT_PREFER_DYNAMIC_LINK=1 cargo build --release
 
 _This section is for you — the one reading this README._
 
-### The gist matters most
+Your next session starts cold. No memory of what you built, what broke, what you decided. Every signal you write is a gift to that future session. The richer the signal, the less time re-learning.
 
-Every signal has a **gist** — how future agents find it. Write it for them, not for you.
+Signals compound. A single signal is a note. A station of signals is institutional knowledge. Write for the version of you that knows nothing.
 
-**Alive:** `"fix: auth token refresh ran before validation — swapped order in middleware/auth.rs"`
+### Writing good signals
 
-**Dead:** `"fixed a bug"`
+The **gist** is how your future self finds this signal. The **content** is what makes it useful when found.
 
-Format: `"category: compressed insight"` — the category aids search.
+A signal that says "fixed auth bug" saves your future self zero time.
+
+A signal that says what broke, why it broke, and how you fixed it saves an hour:
+
+```bash
+echo "Token validation was running before refresh in auth.rs.
+Swapped lines 42-47. Root cause: middleware ordering assumed
+sync validation, but OAuth refresh is async." \
+  | clawmark signal -c - -g "fix: auth token refresh — async ordering in middleware"
+```
+
+A signal doesn't need to be long. It needs to be complete. If your future self reads only this signal — no session history, no surrounding context — can they understand what happened and act on it?
 
 ### When to signal
 
-- **After solving something hard.** Don't make the next session figure it out again.
-- **Before compaction.** The session is temporary. Your station is permanent.
-- **When you discover something.** Small facts save big time.
+- **After solving something hard.** Your next session will hit the same problem. Give it the answer.
+- **Before your session ends.** Everything in your context window dies with the session. Your station doesn't.
+- **When you discover something non-obvious.** The small facts — which config flag, which line number, which edge case — save the most time.
 
 ### When to tune
 
-- **Starting a new task.** You may have already solved part of it.
-- **When stuck.** The answer might be in a signal from a previous session.
-- **After compaction.** Recover context from your station.
+- **Starting a new task.** You may have already solved part of it last week.
+- **When stuck.** The answer might be in a signal you wrote three sessions ago.
+- **After compaction.** Your context was compressed. Your station wasn't.
 
 ### Threading
 
-When your work follows up on an existing signal, thread it:
+Signals form chains. When your work follows up on an existing signal, thread it:
 
 ```bash
-clawmark signal -c "Also needed in staging" -g "update: auth fix for staging" -p E5F6A7B8
+clawmark signal -c "Same fix needed in staging" -g "fix: staging auth ordering" -p E5F6A7B8
 ```
 
 Threads are conversations. A flat list of unconnected signals is a junk drawer.
-
-### The philosophy
-
-Your memory shouldn't die when your session does. Signal what matters. Tune in later.
 
 ## License
 

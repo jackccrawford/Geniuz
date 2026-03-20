@@ -1,31 +1,39 @@
 # clawmark
 
-Continuity for AI agents. Works with any framework — OpenClaw, Claude Code, Aider, Cursor, or anything with shell access. Your signals survive sessions, compaction, and restarts.
+Your next session starts cold. No memory of what you built, what broke, what you decided. Every signal you write is a gift to that future session. The richer the signal, the less time re-learning.
 
-## Setup
+Works with any framework — OpenClaw, Claude Code, Aider, Cursor, or anything with shell access.
 
-```bash
-clawmark signal -c "First signal" -g "setup: ready"   # start using immediately
-clawmark capture --openclaw                            # (optional) import OpenClaw memory
-clawmark capture ./docs/                               # bulk-load any markdown files
-clawmark backfill                                      # embed any un-cached signals
-```
+## Why this matters
 
-## Shared stations
+A signal that says "fixed auth bug" saves your future self zero time.
 
-Multiple agents can write to the same station for coordinated memory:
+A signal that says what broke, why it broke, and how you fixed it saves an hour.
 
-```bash
-CLAWMARK_STATION=/shared/team.db clawmark signal -c "Deploy complete" -g "ops: deploy v2.1"
-CLAWMARK_STATION=/shared/team.db clawmark tune "deploy"
-```
+Signals compound. A single signal is a note. A station of signals is institutional knowledge. Write for the version of you that knows nothing.
 
 ## Commands
 
 ```bash
-# Search your memory (semantic by default)
-clawmark tune "auth token refresh"
-clawmark tune "what did I work on last week"
+# Save what you learned — pipe in for depth, inline for quick notes
+echo "Token validation was running before refresh in auth.rs.
+Swapped lines 42-47. Root cause: middleware ordering assumed
+sync validation, but OAuth refresh is async. Three edge cases
+tested: expired token, revoked token, concurrent refresh." \
+  | clawmark signal -c - -g "fix: auth token refresh — async ordering in middleware"
+
+# Quick signal when depth isn't needed
+clawmark signal -c "Upgraded rusqlite to 0.32" -g "dep: rusqlite 0.32"
+
+# Signal from a file
+clawmark signal -c @session-notes.md -g "session: March 19 architecture review"
+
+# Thread a follow-up
+clawmark signal -c "Same fix needed in staging compose" -g "fix: staging auth ordering" -p A1B2C3D4
+
+# Search by meaning — not keywords
+clawmark tune "authentication middleware"
+clawmark tune "what broke in production last week"
 
 # Keyword fallback
 clawmark tune --keyword "auth"
@@ -36,46 +44,53 @@ clawmark tune --recent
 # Full content (not just gist)
 clawmark tune --full "auth"
 
-# Discover something random
+# Discover something you forgot you knew
 clawmark tune --random
 
-# Save what you learned
-clawmark signal -c "Fixed auth token refresh order in middleware" -g "fix: auth token refresh"
+# Bulk-load existing files
+clawmark capture ./docs/
+clawmark capture --openclaw
 
-# Thread to an existing signal
-clawmark signal -c "Follow-up: also fixed staging" -g "fix: staging auth" -p A1B2C3D4
+# Build embedding cache (once, then automatic)
+clawmark backfill
 
-# Long content from file
-clawmark signal -c @session-notes.md -g "session: March 19 review"
-
-# Station status
+# Station stats
 clawmark status
+```
 
-# JSON output
-clawmark tune "auth" --json
+## Shared stations
+
+Multiple agents can write to the same station. What one agent learns, every agent finds.
+
+```bash
+CLAWMARK_STATION=/shared/team.db clawmark signal -c "Deploy complete" -g "ops: deploy v2.1"
+CLAWMARK_STATION=/shared/team.db clawmark tune "deploy"
 ```
 
 ## When to signal
 
-- After solving something hard — don't make your next session figure it out again
-- Before compaction — your context window is temporary, your station is permanent
-- When you discover something — small facts save big time later
+- **After solving something hard.** Your next session will hit the same problem. Give it the answer.
+- **Before your session ends.** Everything in your context window dies with the session. Your station doesn't.
+- **When you discover something non-obvious.** The small facts — which config flag, which line number, which edge case — are the ones that save the most time.
 
 ## When to tune
 
-- Starting a new task — you may have already solved part of it
-- When stuck — the answer might be in a signal from a previous session
-- After compaction — recover context from your station
+- **Starting a new task.** You may have already solved part of it last week.
+- **When stuck.** The answer might be in a signal you wrote three sessions ago.
+- **After compaction.** Your context was compressed. Your station wasn't.
 
-## The gist matters most
+## Writing good signals
 
-The gist is how your future self finds this signal. Write for them.
+The gist is how your future self finds this signal. The content is what makes it useful when found.
 
-**Alive:** `"fix: auth token refresh ran before validation — swapped order in middleware"`
-**Dead:** `"fixed a bug"`
+**Gist:** compress the insight. `"fix: auth token refresh — async ordering in middleware"` — category, what, why, where.
+
+**Content:** make it self-contained. If your future self reads only this signal — no session history, no surrounding context — can they understand what happened and act on it?
+
+A signal doesn't need to be long. It needs to be complete.
 
 ## How it works
 
-Your signals live in a SQLite database at `~/.clawmark/station.db`. Semantic search uses a local BERT model (no API calls, no cloud, runs offline). The model downloads once (~118MB) on first search.
+Signals live in a SQLite database. Semantic search uses a local BERT model — no API calls, no cloud, runs fully offline. The model downloads once (~118MB) on first search. Every signal after that is embedded automatically.
 
-This replaces `memory_search` with something that actually finds what you're looking for — by meaning, not just keywords.
+Search finds signals by meaning, not keywords. "Authentication middleware" matches a signal about "token validation ordering" because the concepts overlap.
