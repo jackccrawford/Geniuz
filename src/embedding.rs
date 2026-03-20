@@ -216,11 +216,16 @@ pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
     }
 }
 
-/// Dot product of two L2-normalized vectors (equivalent to cosine similarity).
-/// All embeddings from infer() are already L2-normalized, so magnitudes are 1.0.
+/// Cosine similarity — full computation, not dot-product shortcut.
+/// The ONNX backend L2-normalizes, but the ollama fallback does not.
+/// Full cosine is correct for both.
 pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.is_empty() || b.is_empty() || a.len() != b.len() { return 0.0; }
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let mag_a: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let mag_b: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if mag_a == 0.0 || mag_b == 0.0 { return 0.0; }
+    dot / (mag_a * mag_b)
 }
 
 pub struct CachedEmbedding {

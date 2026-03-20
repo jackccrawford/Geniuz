@@ -42,7 +42,7 @@ pub enum Command {
         paths: Vec<String>,
 
         /// Import an OpenClaw workspace
-        #[arg(long)]
+        #[arg(long, conflicts_with = "paths")]
         openclaw: Option<Option<String>>,
 
         /// Split files by ## headers into threaded signals

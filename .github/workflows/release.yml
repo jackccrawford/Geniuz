@@ -44,17 +44,20 @@ jobs:
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Package
+      - name: Package and checksum
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../clawmark-${{ matrix.name }}.tar.gz clawmark
           cd ../../..
+          sha256sum clawmark-${{ matrix.name }}.tar.gz > clawmark-${{ matrix.name }}.tar.gz.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: clawmark-${{ matrix.name }}
-          path: clawmark-${{ matrix.name }}.tar.gz
+          path: |
+            clawmark-${{ matrix.name }}.tar.gz
+            clawmark-${{ matrix.name }}.tar.gz.sha256
 
   release:
     needs: build
@@ -67,5 +70,7 @@ jobs:
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          files: clawmark-*.tar.gz
+          files: |
+            clawmark-*.tar.gz
+            clawmark-*.tar.gz.sha256
           generate_release_notes: true

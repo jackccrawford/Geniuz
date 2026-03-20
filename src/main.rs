@@ -144,18 +144,26 @@ fn run(cli: Cli) -> Result<String, String> {
 
                 if split {
                     let sections = adapter::split_sections(content);
-                    let mut root_uuid: Option<String> = None;
+                    // Create file-level root signal, then thread sections under it
+                    let root_gist = format!("{}capture: {}", prefix, filename);
+                    let root_uuid = match db.signal_with_backend(content, Some(&root_gist), None, None, Some(backend.as_ref())) {
+                        Ok(uuid) => {
+                            created += 1;
+                            uuid
+                        }
+                        Err(e) => {
+                            eprintln!("[capture] Failed: {}", e);
+                            errors += 1;
+                            continue;
+                        }
+                    };
                     for (i, section) in sections.iter().enumerate() {
                         let gist = match &section.header {
                             Some(h) => format!("{}capture: {} — {}", prefix, filename, h),
                             None => format!("{}capture: {} (section {})", prefix, filename, i + 1),
                         };
-                        let parent = root_uuid.as_deref();
-                        match db.signal_with_backend(&section.content, Some(&gist), parent, None, Some(backend.as_ref())) {
-                            Ok(short_uuid) => {
-                                if root_uuid.is_none() { root_uuid = Some(short_uuid); }
-                                created += 1;
-                            }
+                        match db.signal_with_backend(&section.content, Some(&gist), Some(&root_uuid), None, Some(backend.as_ref())) {
+                            Ok(_) => { created += 1; }
                             Err(e) => {
                                 eprintln!("[capture] Failed: {}", e);
                                 errors += 1;
