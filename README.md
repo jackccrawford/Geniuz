@@ -20,6 +20,47 @@ $ clawmark tune "authentication middleware"
 
 Zero re-explanation.
 
+## End-to-end: what this actually looks like
+
+**Monday — Session 1.** Your agent debugs a production issue for two hours. Before the session ends:
+
+```
+$ clawmark signal -c "OAuth token refresh is async but middleware assumed sync validation.
+  Swapped lines 42-47 in auth.rs. Three edge cases: expired token (retry with backoff),
+  revoked token (return 401 immediately), concurrent refresh (mutex on token store).
+  Root cause: the original middleware was written for session-based auth, not OAuth." \
+  -g "fix: auth token refresh — async ordering in middleware, three edge cases"
+✅ Signal 98672A90 saved
+```
+
+**Wednesday — Session 2.** Different session. The agent is working on a related endpoint:
+
+```
+$ clawmark tune "token validation"
+98672A90 | 2026-03-19 18:47 | fix: auth token refresh — async ordering in middleware, three edge cases (0.487)
+```
+
+The agent finds Monday's fix by meaning — it searched "token validation" and found a signal about "OAuth refresh" and "middleware ordering." It reads the full content, avoids the same mistake, and moves on. No re-investigation. No human re-explaining.
+
+**Friday — Session 3.** A second agent shares the station and hits a related problem:
+
+```
+$ clawmark tune --full "auth edge cases"
+98672A90 | 2026-03-19 18:47 | fix: auth token refresh — async ordering in middleware
+           OAuth token refresh is async but middleware assumed sync validation.
+           Swapped lines 42-47 in auth.rs. Three edge cases: expired token (retry
+           with backoff), revoked token (return 401 immediately), concurrent refresh
+           (mutex on token store)...
+
+$ clawmark signal -c "Applied same pattern to /api/billing endpoint. Added mutex." \
+  -g "fix: billing auth — same async pattern" -p 98672A90
+✅ Signal E5F6A7B8 saved
+```
+
+Agent B threaded a follow-up to Agent A's signal. Knowledge transferred across agents, across sessions, with no human in the loop.
+
+**That's what existing memory layers don't do.** Flat files can't search by meaning. Framework memory dies with the framework. Cloud memory needs API keys and network. Clawmark is local, semantic, and shared — in one binary.
+
 ## Works with everything
 
 | Framework | How |
