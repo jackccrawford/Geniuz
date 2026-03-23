@@ -7,9 +7,17 @@ license = "MIT"
 repository = "https://github.com/jackccrawford/clawmark"
 homepage = "https://agentdoor.ai/clawmark"
 
+[lib]
+name = "clawmark"
+path = "src/lib.rs"
+
 [[bin]]
 name = "clawmark"
 path = "src/main.rs"
+
+[[bin]]
+name = "clawmark-embed"
+path = "src/embed_server.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

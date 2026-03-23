@@ -61,7 +61,7 @@ impl DatabaseManager {
     pub fn signal_with_backend(
         &self, content: &str, gist: Option<&str>, parent: Option<&str>,
         created_at: Option<&str>,
-        backend: Option<&dyn crate::embedding::EmbeddingBackend>,
+        backend: Option<&dyn clawmark::embedding::EmbeddingBackend>,
     ) -> Result<String, String> {
         if content.trim().is_empty() {
             return Err("Content cannot be empty".to_string());
@@ -106,7 +106,7 @@ impl DatabaseManager {
                 let _ = self.cache_embedding(&uuid, &emb);
             }
         } else {
-            match crate::embedding::embed_content(content) {
+            match clawmark::embedding::embed_content(content) {
                 Ok(emb) => { let _ = self.cache_embedding(&uuid, &emb); }
                 Err(_) => {}
             }
@@ -189,7 +189,7 @@ impl DatabaseManager {
             return self.keyword_search(query, limit);
         }
 
-        let results = crate::embedding::semantic_search_cached(query, cached, limit)?;
+        let results = clawmark::embedding::semantic_search_cached(query, cached, limit)?;
         Ok(results.into_iter().map(|r| SignalEntry {
             signal_uuid: r.signal_uuid, gist: r.gist, created_at: r.created_at,
             parent_uuid: None, content: None, score: Some(r.score),
@@ -247,7 +247,7 @@ impl DatabaseManager {
 
     pub fn cache_embedding(&self, uuid: &str, embedding: &[f32]) -> Result<(), String> {
         let conn = self.conn()?;
-        let blob = crate::embedding::embedding_to_blob(embedding);
+        let blob = clawmark::embedding::embedding_to_blob(embedding);
         conn.execute(
             "INSERT OR REPLACE INTO signal_embeddings (signal_uuid, embedding) VALUES (?1, ?2)",
             rusqlite::params![uuid, blob],
@@ -255,7 +255,7 @@ impl DatabaseManager {
         Ok(())
     }
 
-    pub fn get_cached_embeddings(&self) -> Result<Vec<crate::embedding::CachedEmbedding>, String> {
+    pub fn get_cached_embeddings(&self) -> Result<Vec<clawmark::embedding::CachedEmbedding>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT e.signal_uuid,
@@ -267,9 +267,9 @@ impl DatabaseManager {
 
         let rows = stmt.query_map([], |row| {
             let blob: Vec<u8> = row.get(3)?;
-            Ok(crate::embedding::CachedEmbedding {
+            Ok(clawmark::embedding::CachedEmbedding {
                 signal_uuid: row.get(0)?, gist: row.get(1)?,
-                created_at: row.get(2)?, embedding: crate::embedding::blob_to_embedding(&blob),
+                created_at: row.get(2)?, embedding: clawmark::embedding::blob_to_embedding(&blob),
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
 

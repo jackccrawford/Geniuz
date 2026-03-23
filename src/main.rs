@@ -1,7 +1,6 @@
 mod adapter;
 mod cli;
 mod db;
-pub mod embedding;
 
 use clap::FromArgMatches;
 use cli::{Cli, Command};
@@ -121,7 +120,7 @@ fn run(cli: Cli) -> Result<String, String> {
             }
 
             let db = get_db()?;
-            let backend = embedding::create_backend()?;
+            let backend = clawmark::embedding::create_backend()?;
             let prefix = gist_prefix.as_deref().unwrap_or("");
             let mut created = 0usize;
             let mut errors = 0usize;
@@ -300,7 +299,7 @@ fn run(cli: Cli) -> Result<String, String> {
 
         Command::Backfill => {
             let db = get_db()?;
-            db.set_embedding_model(embedding::model_id())?;
+            db.set_embedding_model(clawmark::embedding::model_id())?;
 
             let uncached = db.get_uncached_signals()?;
             if uncached.is_empty() {
@@ -308,7 +307,7 @@ fn run(cli: Cli) -> Result<String, String> {
             }
 
             println!("[backfill] {} signals to embed...", uncached.len());
-            let backend = embedding::create_backend()?;
+            let backend = clawmark::embedding::create_backend()?;
 
             let mut cached = 0;
             let mut failed = 0;

@@ -256,7 +256,15 @@ pub fn semantic_search_cached(
     Ok(scored)
 }
 
+/// Embed content — socket first, inline fallback.
+/// If clawmark-embed is running, uses the warm session (~3ms).
+/// Otherwise loads ONNX inline (~500ms). Either way, it works.
 pub fn embed_content(text: &str) -> Result<Vec<f32>, String> {
+    // Try socket (warm ONNX session, ~3ms)
+    if let Some(emb) = crate::embed_client::embed_via_socket(text) {
+        return Ok(emb);
+    }
+    // Fallback: load model inline (~500ms)
     let backend = create_backend()?;
     backend.embed(text)
 }
