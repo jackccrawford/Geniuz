@@ -270,3 +270,133 @@ pub fn serve() {
         let _ = stdout.flush();
     }
 }
+
+// =============================================================================
+// Install / Status
+// =============================================================================
+
+fn config_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    if cfg!(target_os = "macos") {
+        std::path::PathBuf::from(home)
+            .join("Library/Application Support/Claude/claude_desktop_config.json")
+    } else {
+        std::path::PathBuf::from(home)
+            .join(".config/Claude/claude_desktop_config.json")
+    }
+}
+
+fn clawmark_binary_path() -> String {
+    // Use the currently running binary's path
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "clawmark".to_string())
+}
+
+pub fn install() -> Result<String, String> {
+    let config_file = config_path();
+
+    // Read existing config or create new
+    let mut config: serde_json::Value = if config_file.exists() {
+        let content = std::fs::read_to_string(&config_file)
+            .map_err(|e| format!("Failed to read {}: {}", config_file.display(), e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("Failed to parse config: {}", e))?
+    } else {
+        // Create parent directories
+        if let Some(parent) = config_file.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create config directory: {}", e))?;
+        }
+        serde_json::json!({})
+    };
+
+    // Ensure mcpServers exists
+    if config.get("mcpServers").is_none() {
+        config["mcpServers"] = serde_json::json!({});
+    }
+
+    let binary = clawmark_binary_path();
+
+    // Add geniuz server
+    config["mcpServers"]["geniuz"] = serde_json::json!({
+        "command": binary,
+        "args": ["mcp", "serve"]
+    });
+
+    // Write back
+    let formatted = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    std::fs::write(&config_file, &formatted)
+        .map_err(|e| format!("Failed to write {}: {}", config_file.display(), e))?;
+
+    let mut lines = vec![
+        "✅ Geniuz installed in Claude Desktop.".to_string(),
+        String::new(),
+        format!("  Config: {}", config_file.display()),
+        format!("  Binary: {}", binary),
+        String::new(),
+        "  Restart Claude Desktop to activate.".to_string(),
+        "  Your Claude will have: remember, recall, recall_recent".to_string(),
+    ];
+
+    // Check if station exists
+    let station = crate::default_station_path();
+    if station.exists() {
+        let db = crate::get_db()?;
+        let count = db.count().unwrap_or(0);
+        if count > 0 {
+            lines.push(String::new());
+            lines.push(format!("  Station has {} existing memories — Claude will find them.", count));
+        }
+    }
+
+    Ok(lines.join("\n"))
+}
+
+pub fn status() -> Result<String, String> {
+    let config_file = config_path();
+
+    if !config_file.exists() {
+        return Ok("Claude Desktop config not found. Run 'clawmark mcp install' first.".to_string());
+    }
+
+    let content = std::fs::read_to_string(&config_file)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+    let config: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse config: {}", e))?;
+
+    let installed = config.get("mcpServers")
+        .and_then(|s| s.get("geniuz"))
+        .is_some();
+
+    let mut lines = vec![
+        format!("Config: {}", config_file.display()),
+        format!("Geniuz: {}", if installed { "installed" } else { "not installed" }),
+    ];
+
+    if installed {
+        if let Some(cmd) = config["mcpServers"]["geniuz"].get("command").and_then(|c| c.as_str()) {
+            lines.push(format!("Binary: {}", cmd));
+        }
+    }
+
+    // Station info
+    let station = crate::default_station_path();
+    if station.exists() {
+        if let Ok(db) = crate::get_db() {
+            let count = db.count().unwrap_or(0);
+            let embeddings = db.embedding_count().unwrap_or(0);
+            lines.push(format!("Station: {} ({} memories, {}/{} embedded)", station.display(), count, embeddings, count));
+        }
+    } else {
+        lines.push("Station: not created yet (will be created on first remember)".to_string());
+    }
+
+    if !installed {
+        lines.push(String::new());
+        lines.push("Run 'clawmark mcp install' to add Geniuz to Claude Desktop.".to_string());
+    }
+
+    Ok(lines.join("\n"))
+}

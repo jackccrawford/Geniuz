@@ -348,9 +348,20 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(lines.join("\n"))
         }
 
-        Command::Mcp => {
-            mcp::serve();
-            Ok(String::new())
+        Command::Mcp(mcp_cmd) => {
+            use cli::McpCommand;
+            match mcp_cmd {
+                McpCommand::Serve => {
+                    mcp::serve();
+                    Ok(String::new())
+                }
+                McpCommand::Install => {
+                    mcp::install()
+                }
+                McpCommand::Status => {
+                    mcp::status()
+                }
+            }
         }
     }
 }
