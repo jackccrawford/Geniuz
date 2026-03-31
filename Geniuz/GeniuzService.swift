@@ -12,27 +12,36 @@ class GeniuzService: ObservableObject {
 
     private var timer: Timer?
 
+    /// Real home directory via getpwuid — not remapped by sandbox
+    private var realHome: String {
+        if let pw = getpwuid(getuid()), let home = pw.pointee.pw_dir {
+            return String(cString: home)
+        }
+        return NSHomeDirectory()
+    }
+
     var stationPath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/.geniuz/station.db"
+        return "\(realHome)/.geniuz/station.db"
     }
 
     var geniuzBinaryPath: String {
-        // Bundled binary inside the .app
         Bundle.main.path(forResource: "geniuz", ofType: nil) ?? "/usr/local/bin/geniuz"
     }
 
     var claudeConfigPath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/Library/Application Support/Claude/claude_desktop_config.json"
+        return "\(realHome)/Library/Application Support/Claude/claude_desktop_config.json"
     }
 
     init() {
+        NSLog("[geniuz-app] init — realHome=%@ stationPath=%@", realHome, stationPath)
         refresh()
-        // Poll every 10 seconds for updates
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+    }
+
+    deinit {
+        timer?.invalidate()
     }
 
     func refresh() {
@@ -52,7 +61,7 @@ class GeniuzService: ObservableObject {
         }
     }
 
-    // MARK: - Station reading
+    // MARK: - Direct SQLite station read
 
     private struct StationInfo {
         var exists: Bool = false
@@ -66,11 +75,18 @@ class GeniuzService: ObservableObject {
         var info = StationInfo()
         let path = stationPath
 
-        guard FileManager.default.fileExists(atPath: path) else { return info }
+        let fileExists = FileManager.default.fileExists(atPath: path)
+        NSLog("[geniuz-app] readStation path=%@ exists=%d", path, fileExists ? 1 : 0)
+
+        guard fileExists else { return info }
         info.exists = true
 
         var db: OpaquePointer?
-        guard sqlite3_open_v2(path, &db, SQLITE_OPEN_READONLY, nil) == SQLITE_OK else { return info }
+        // Open as immutable — skips WAL, no write access needed
+        let uri = "file:\(path)?mode=ro&immutable=1"
+        let rc = sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_URI, nil)
+        NSLog("[geniuz-app] sqlite3_open rc=%d path=%@", rc, uri)
+        guard rc == SQLITE_OK else { return info }
         defer { sqlite3_close(db) }
 
         // Memory count
@@ -90,8 +106,8 @@ class GeniuzService: ObservableObject {
         }
         sqlite3_finalize(stmt)
 
-        // Last signal
-        if sqlite3_prepare_v2(db, "SELECT gist, created_at FROM signals ORDER BY created_at DESC LIMIT 1", -1, &stmt, nil) == SQLITE_OK {
+        // Last signal — gist is inside payload JSON
+        if sqlite3_prepare_v2(db, "SELECT COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 100)), created_at FROM signals ORDER BY created_at DESC LIMIT 1", -1, &stmt, nil) == SQLITE_OK {
             if sqlite3_step(stmt) == SQLITE_ROW {
                 if let cStr = sqlite3_column_text(stmt, 0) {
                     info.lastGist = String(cString: cStr)
@@ -104,32 +120,34 @@ class GeniuzService: ObservableObject {
         }
         sqlite3_finalize(stmt)
 
+        NSLog("[geniuz-app] station: %d memories, %d embeddings, lastGist=%@", info.memories, info.embeddings, info.lastGist ?? "nil")
         return info
     }
 
     // MARK: - MCP config
 
     func checkMcpInstalled() -> Bool {
-        guard let data = FileManager.default.contents(atPath: claudeConfigPath),
+        let path = claudeConfigPath
+        guard let data = FileManager.default.contents(atPath: path),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let servers = json["mcpServers"] as? [String: Any] else {
+            NSLog("[geniuz-app] MCP config not readable at %@", path)
             return false
         }
-        // Check for any geniuz entry (case-insensitive key match)
-        return servers.keys.contains { $0.lowercased() == "geniuz" }
+        let found = servers.keys.contains { $0.lowercased() == "geniuz" }
+        NSLog("[geniuz-app] MCP installed=%d", found ? 1 : 0)
+        return found
     }
 
     func installMcp() {
         let binary = geniuzBinaryPath
 
-        // Read or create config
         var config: [String: Any]
         if let data = FileManager.default.contents(atPath: claudeConfigPath),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             config = json
         } else {
             config = [:]
-            // Create directory if needed
             let dir = (claudeConfigPath as NSString).deletingLastPathComponent
             try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         }
@@ -155,7 +173,6 @@ class GeniuzService: ObservableObject {
             return
         }
 
-        // Remove geniuz entry (case-insensitive)
         let key = servers.keys.first { $0.lowercased() == "geniuz" }
         if let key = key {
             servers.removeValue(forKey: key)
