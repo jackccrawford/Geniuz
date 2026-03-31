@@ -12,19 +12,31 @@ class GeniuzService: ObservableObject {
 
     private var timer: Timer?
 
+    /// Real home directory — bypasses sandbox container redirect
+    private var realHome: String {
+        // getpwuid gives the actual home, not the sandbox container
+        if let pw = getpwuid(getuid()), let home = pw.pointee.pw_dir {
+            let path = String(cString: home)
+            // Log for debugging
+            print("[geniuz-app] realHome: \(path)")
+            return path
+        }
+        let fallback = NSHomeDirectory()
+        print("[geniuz-app] fallback home: \(fallback)")
+        return fallback
+    }
+
     var stationPath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/.geniuz/station.db"
+        return "\(realHome)/.geniuz/station.db"
     }
 
     var geniuzBinaryPath: String {
-        // Bundled binary inside the .app
+        // Bundled binary inside the .app, fallback to /usr/local/bin
         Bundle.main.path(forResource: "geniuz", ofType: nil) ?? "/usr/local/bin/geniuz"
     }
 
     var claudeConfigPath: String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return "\(home)/Library/Application Support/Claude/claude_desktop_config.json"
+        return "\(realHome)/Library/Application Support/Claude/claude_desktop_config.json"
     }
 
     init() {
@@ -33,6 +45,10 @@ class GeniuzService: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.refresh()
         }
+    }
+
+    deinit {
+        timer?.invalidate()
     }
 
     func refresh() {
@@ -90,8 +106,8 @@ class GeniuzService: ObservableObject {
         }
         sqlite3_finalize(stmt)
 
-        // Last signal
-        if sqlite3_prepare_v2(db, "SELECT gist, created_at FROM signals ORDER BY created_at DESC LIMIT 1", -1, &stmt, nil) == SQLITE_OK {
+        // Last signal — gist is inside payload JSON
+        if sqlite3_prepare_v2(db, "SELECT COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 100)), created_at FROM signals ORDER BY created_at DESC LIMIT 1", -1, &stmt, nil) == SQLITE_OK {
             if sqlite3_step(stmt) == SQLITE_ROW {
                 if let cStr = sqlite3_column_text(stmt, 0) {
                     info.lastGist = String(cString: cStr)
