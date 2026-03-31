@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 import Combine
 
 class GeniuzService: ObservableObject {
@@ -11,10 +12,7 @@ class GeniuzService: ObservableObject {
 
     private var timer: Timer?
 
-    private var geniuzBinary: String {
-        Bundle.main.path(forResource: "geniuz", ofType: nil) ?? "/usr/local/bin/geniuz"
-    }
-
+    /// Real home directory via getpwuid — not remapped by sandbox
     private var realHome: String {
         if let pw = getpwuid(getuid()), let home = pw.pointee.pw_dir {
             return String(cString: home)
@@ -22,11 +20,20 @@ class GeniuzService: ObservableObject {
         return NSHomeDirectory()
     }
 
-    private var claudeConfigPath: String {
+    var stationPath: String {
+        return "\(realHome)/.geniuz/station.db"
+    }
+
+    var geniuzBinaryPath: String {
+        Bundle.main.path(forResource: "geniuz", ofType: nil) ?? "/usr/local/bin/geniuz"
+    }
+
+    var claudeConfigPath: String {
         return "\(realHome)/Library/Application Support/Claude/claude_desktop_config.json"
     }
 
     init() {
+        NSLog("[geniuz-app] init — realHome=%@ stationPath=%@", realHome, stationPath)
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -40,86 +47,100 @@ class GeniuzService: ObservableObject {
     func refresh() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
-
-            // Use CLI for station data — bypasses sandbox
-            let status = self.runCli(["status"])
-            let recent = self.runCli(["tune", "--recent", "-l", "1", "--json"])
+            let station = self.readStation()
             let mcp = self.checkMcpInstalled()
 
-            // Parse status output: "Memories: 6\nEmbeddings: 6/6 cached"
-            var memories = 0
-            var embeddings = 0
-            var exists = false
-            for line in status.components(separatedBy: "\n") {
-                if line.hasPrefix("Memories:") {
-                    memories = Int(line.replacingOccurrences(of: "Memories: ", with: "").trimmingCharacters(in: .whitespaces)) ?? 0
-                    exists = true
-                } else if line.hasPrefix("Embeddings:") {
-                    let parts = line.replacingOccurrences(of: "Embeddings: ", with: "")
-                    if let slash = parts.firstIndex(of: "/") {
-                        embeddings = Int(parts[parts.startIndex..<slash]) ?? 0
-                    }
-                }
-            }
-
-            // Parse recent JSON for last signal
-            var lastGist: String? = nil
-            var lastDate: String? = nil
-            if let data = recent.data(using: .utf8),
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let signals = json["signals"] as? [[String: Any]],
-               let first = signals.first {
-                lastGist = first["gist"] as? String
-                if let date = first["created_at"] as? String {
-                    lastDate = String(date.prefix(16))
-                }
-            }
-
             DispatchQueue.main.async {
-                self.stationExists = exists
-                self.memoryCount = memories
-                self.embeddingCount = embeddings
-                self.lastSignalGist = lastGist
-                self.lastSignalDate = lastDate
+                self.stationExists = station.exists
+                self.memoryCount = station.memories
+                self.embeddingCount = station.embeddings
+                self.lastSignalGist = station.lastGist
+                self.lastSignalDate = station.lastDate
                 self.mcpInstalled = mcp
             }
         }
     }
 
-    // MARK: - CLI subprocess
+    // MARK: - Direct SQLite station read
 
-    private func runCli(_ args: [String]) -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: geniuzBinary)
-        process.arguments = args
+    private struct StationInfo {
+        var exists: Bool = false
+        var memories: Int = 0
+        var embeddings: Int = 0
+        var lastGist: String? = nil
+        var lastDate: String? = nil
+    }
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = FileHandle.nullDevice
+    private func readStation() -> StationInfo {
+        var info = StationInfo()
+        let path = stationPath
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return String(data: data, encoding: .utf8) ?? ""
-        } catch {
-            return ""
+        let fileExists = FileManager.default.fileExists(atPath: path)
+        NSLog("[geniuz-app] readStation path=%@ exists=%d", path, fileExists ? 1 : 0)
+
+        guard fileExists else { return info }
+        info.exists = true
+
+        var db: OpaquePointer?
+        // Open as immutable — skips WAL, no write access needed
+        let uri = "file:\(path)?mode=ro&immutable=1"
+        let rc = sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_URI, nil)
+        NSLog("[geniuz-app] sqlite3_open rc=%d path=%@", rc, uri)
+        guard rc == SQLITE_OK else { return info }
+        defer { sqlite3_close(db) }
+
+        // Memory count
+        var stmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM signals", -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                info.memories = Int(sqlite3_column_int(stmt, 0))
+            }
         }
+        sqlite3_finalize(stmt)
+
+        // Embedding count
+        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM signal_embeddings", -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                info.embeddings = Int(sqlite3_column_int(stmt, 0))
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        // Last signal — gist is inside payload JSON
+        if sqlite3_prepare_v2(db, "SELECT COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 100)), created_at FROM signals ORDER BY created_at DESC LIMIT 1", -1, &stmt, nil) == SQLITE_OK {
+            if sqlite3_step(stmt) == SQLITE_ROW {
+                if let cStr = sqlite3_column_text(stmt, 0) {
+                    info.lastGist = String(cString: cStr)
+                }
+                if let cStr = sqlite3_column_text(stmt, 1) {
+                    let full = String(cString: cStr)
+                    info.lastDate = String(full.prefix(16))
+                }
+            }
+        }
+        sqlite3_finalize(stmt)
+
+        NSLog("[geniuz-app] station: %d memories, %d embeddings, lastGist=%@", info.memories, info.embeddings, info.lastGist ?? "nil")
+        return info
     }
 
     // MARK: - MCP config
 
     func checkMcpInstalled() -> Bool {
-        guard let data = FileManager.default.contents(atPath: claudeConfigPath),
+        let path = claudeConfigPath
+        guard let data = FileManager.default.contents(atPath: path),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let servers = json["mcpServers"] as? [String: Any] else {
+            NSLog("[geniuz-app] MCP config not readable at %@", path)
             return false
         }
-        return servers.keys.contains { $0.lowercased() == "geniuz" }
+        let found = servers.keys.contains { $0.lowercased() == "geniuz" }
+        NSLog("[geniuz-app] MCP installed=%d", found ? 1 : 0)
+        return found
     }
 
     func installMcp() {
-        let binary = geniuzBinary
+        let binary = geniuzBinaryPath
 
         var config: [String: Any]
         if let data = FileManager.default.contents(atPath: claudeConfigPath),
