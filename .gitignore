@@ -1,0 +1,12 @@
+# Build artifacts
+cli/target/
+*.dmg
+
+# Xcode user data
+*.xcuserdata/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/
+
+# macOS
+.DS_Store
