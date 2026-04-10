@@ -115,6 +115,32 @@ pub enum Command {
         dry_run: bool,
     },
 
+    /// Watch for new signals in real time
+    #[command(
+        after_help = "Examples:\n  clawmark watch                              Poll every 5 minutes\n  clawmark watch --interval 60                Poll every 60 seconds\n  clawmark watch --since 9D778206             Only signals after this UUID\n  clawmark watch --exec \"echo {uuid} {gist}\"  Run command on each new signal\n  clawmark watch --once                       Check once and exit\n\nPlaceholders for --exec:\n  {uuid}       Signal UUID (short)\n  {gist}       Signal gist\n  {content}    Full signal content\n  {created_at} Timestamp\n  {parent}     Parent UUID (empty if none)\n  {json}       Full signal as JSON"
+    )]
+    Watch {
+        /// Poll interval in seconds (default: 300 = 5 minutes)
+        #[arg(short, long, default_value = "300")]
+        interval: u64,
+
+        /// Only show signals after this UUID
+        #[arg(short, long)]
+        since: Option<String>,
+
+        /// Run command for each new signal (supports {uuid}, {gist}, {content}, {created_at}, {parent}, {json} placeholders)
+        #[arg(short, long)]
+        exec: Option<String>,
+
+        /// Check once and exit (exit code 0 = new signals, 1 = none)
+        #[arg(long)]
+        once: bool,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Build embedding cache for semantic search
     #[command(
         after_help = "Embeds all signal content using ONNX (paraphrase-multilingual-MiniLM-L12-v2).\nFirst run downloads the model (~118MB). Subsequent runs only process new signals."

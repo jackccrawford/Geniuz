@@ -153,6 +153,39 @@ impl DatabaseManager {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
+    /// Get signals created after a given timestamp, ordered oldest first.
+    pub fn since(&self, timestamp: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT signal_uuid,
+                    COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
+                    created_at, parent_uuid, json_extract(payload, '$.content')
+             FROM signals WHERE created_at > ?1 ORDER BY created_at ASC LIMIT ?2"
+        ).map_err(|e| format!("Query failed: {}", e))?;
+
+        let rows = stmt.query_map(rusqlite::params![timestamp, limit as i32], |row| {
+            let uuid: String = row.get(0)?;
+            let parent: Option<String> = row.get(3)?;
+            let display_parent = parent.filter(|p| p != &uuid);
+            Ok(SignalEntry {
+                signal_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
+                parent_uuid: display_parent, content: row.get(4)?, score: None,
+            })
+        }).map_err(|e| format!("Query failed: {}", e))?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// Get the created_at timestamp of a signal by UUID prefix.
+    pub fn get_signal_timestamp(&self, uuid_prefix: &str) -> Result<Option<String>, String> {
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT created_at FROM signals WHERE signal_uuid LIKE ?1 LIMIT 1",
+            rusqlite::params![format!("{}%", uuid_prefix.to_uppercase())],
+            |row| row.get(0),
+        ).optional().map_err(|e| format!("Query failed: {}", e))
+    }
+
     pub fn keyword_search(&self, query: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
         let terms: Vec<&str> = query.split_whitespace().collect();
         if terms.is_empty() { return self.recent(limit); }

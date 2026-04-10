@@ -298,6 +298,104 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(lines.join("\n"))
         }
 
+        Command::Watch { interval, since, exec, once, json } => {
+            let db = get_db()?;
+
+            // Resolve starting point: --since UUID, or current time
+            let mut cursor = if let Some(ref uuid_prefix) = since {
+                db.get_signal_timestamp(uuid_prefix)?
+                    .ok_or_else(|| format!("Signal not found: {}", uuid_prefix))?
+            } else {
+                // Start from now — only show signals that arrive after watch starts
+                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
+            };
+
+            if !once {
+                eprintln!("[watch] Watching for new signals (every {}s). Ctrl+C to stop.", interval);
+                if since.is_some() {
+                    eprintln!("[watch] Starting after: {}", cursor);
+                }
+            }
+
+            loop {
+                let entries = db.since(&cursor, 100)?;
+
+                if !entries.is_empty() {
+                    // Advance cursor to the latest signal's timestamp
+                    cursor = entries.last().unwrap().created_at.clone();
+
+                    for e in &entries {
+                        if let Some(ref cmd_template) = exec {
+                            // Execute command with placeholders replaced
+                            let uuid_short = &e.signal_uuid[..8.min(e.signal_uuid.len())];
+                            let parent_short = e.parent_uuid.as_deref()
+                                .map(|p| &p[..8.min(p.len())])
+                                .unwrap_or("");
+                            let content = e.content.as_deref().unwrap_or("");
+                            let signal_json = serde_json::json!({
+                                "uuid": uuid_short,
+                                "gist": &e.gist,
+                                "content": content,
+                                "created_at": &e.created_at,
+                                "parent": parent_short,
+                            });
+
+                            let cmd = cmd_template
+                                .replace("{uuid}", uuid_short)
+                                .replace("{gist}", &e.gist)
+                                .replace("{content}", content)
+                                .replace("{created_at}", &e.created_at)
+                                .replace("{parent}", parent_short)
+                                .replace("{json}", &signal_json.to_string());
+
+                            match std::process::Command::new("sh")
+                                .arg("-c")
+                                .arg(&cmd)
+                                .status()
+                            {
+                                Ok(status) => {
+                                    if !status.success() {
+                                        eprintln!("[watch] exec exited with: {}", status);
+                                    }
+                                }
+                                Err(e) => eprintln!("[watch] exec failed: {}", e),
+                            }
+                        } else if json {
+                            let uuid_short = &e.signal_uuid[..8.min(e.signal_uuid.len())];
+                            let parent_short = e.parent_uuid.as_deref()
+                                .map(|p| &p[..8.min(p.len())]);
+                            let mut v = serde_json::json!({
+                                "uuid": uuid_short,
+                                "gist": &e.gist,
+                                "created_at": &e.created_at,
+                            });
+                            if let Some(p) = parent_short { v["parent"] = serde_json::json!(p); }
+                            if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+                            println!("{}", serde_json::to_string(&v).unwrap());
+                        } else {
+                            let uuid_short = &e.signal_uuid[..8.min(e.signal_uuid.len())];
+                            let ts = shorten_ts(&e.created_at);
+                            let mut suffix = String::new();
+                            if let Some(ref p) = e.parent_uuid {
+                                suffix.push_str(&format!(" <- {}", &p[..8.min(p.len())]));
+                            }
+                            println!("+ {} | {} | {}{}", uuid_short, ts, e.gist, suffix);
+                        }
+                    }
+                }
+
+                if once {
+                    if entries.is_empty() {
+                        return Ok("No new signals.".to_string());
+                    } else {
+                        return Ok(String::new());
+                    }
+                }
+
+                std::thread::sleep(std::time::Duration::from_secs(interval));
+            }
+        }
+
         Command::Backfill => {
             let db = get_db()?;
             db.set_embedding_model(clawmark::embedding::model_id())?;
