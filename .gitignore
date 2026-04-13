@@ -11,3 +11,4 @@ xcuserdata/
 
 # Build artifacts
 *.dmg
+desktop/build/

@@ -21,7 +21,14 @@ class GeniuzService: ObservableObject {
     }
 
     var stationPath: String {
-        return "\(realHome)/.geniuz/station.db"
+        let memoryPath = "\(realHome)/.geniuz/memory.db"
+        let legacyPath = "\(realHome)/.geniuz/station.db"
+        if FileManager.default.fileExists(atPath: memoryPath) {
+            return memoryPath
+        } else if FileManager.default.fileExists(atPath: legacyPath) {
+            return legacyPath
+        }
+        return memoryPath
     }
 
     var geniuzBinaryPath: String {
@@ -91,7 +98,7 @@ class GeniuzService: ObservableObject {
 
         // Memory count
         var stmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM signals", -1, &stmt, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM memories", -1, &stmt, nil) == SQLITE_OK {
             if sqlite3_step(stmt) == SQLITE_ROW {
                 info.memories = Int(sqlite3_column_int(stmt, 0))
             }
@@ -99,7 +106,7 @@ class GeniuzService: ObservableObject {
         sqlite3_finalize(stmt)
 
         // Embedding count
-        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM signal_embeddings", -1, &stmt, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM memory_embeddings", -1, &stmt, nil) == SQLITE_OK {
             if sqlite3_step(stmt) == SQLITE_ROW {
                 info.embeddings = Int(sqlite3_column_int(stmt, 0))
             }
@@ -107,7 +114,7 @@ class GeniuzService: ObservableObject {
         sqlite3_finalize(stmt)
 
         // Last signal — gist is inside payload JSON
-        if sqlite3_prepare_v2(db, "SELECT COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 100)), created_at FROM signals ORDER BY created_at DESC LIMIT 1", -1, &stmt, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, "SELECT COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 100)), created_at FROM memories ORDER BY created_at DESC LIMIT 1", -1, &stmt, nil) == SQLITE_OK {
             if sqlite3_step(stmt) == SQLITE_ROW {
                 if let cStr = sqlite3_column_text(stmt, 0) {
                     info.lastGist = String(cString: cStr)
@@ -153,7 +160,7 @@ class GeniuzService: ObservableObject {
         }
 
         var servers = config["mcpServers"] as? [String: Any] ?? [:]
-        servers["geniuz"] = [
+        servers["Geniuz"] = [
             "command": binary,
             "args": ["mcp", "serve"]
         ]

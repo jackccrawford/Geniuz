@@ -242,7 +242,7 @@ pub fn serve() {
                     "protocolVersion": "2024-11-05",
                     "capabilities": { "tools": {} },
                     "serverInfo": {
-                        "name": "geniuz",
+                        "name": "Geniuz",
                         "version": env!("CARGO_PKG_VERSION")
                     }
                 }))
@@ -325,7 +325,7 @@ pub fn install() -> Result<String, String> {
     let binary = geniuz_binary_path();
 
     // Add geniuz server
-    config["mcpServers"]["geniuz"] = serde_json::json!({
+    config["mcpServers"]["Geniuz"] = serde_json::json!({
         "command": binary,
         "args": ["mcp", "serve"]
     });
@@ -373,7 +373,7 @@ pub fn status() -> Result<String, String> {
         .map_err(|e| format!("Failed to parse config: {}", e))?;
 
     let installed = config.get("mcpServers")
-        .and_then(|s| s.get("geniuz"))
+        .and_then(|s| s.get("Geniuz"))
         .is_some();
 
     let mut lines = vec![
@@ -382,7 +382,7 @@ pub fn status() -> Result<String, String> {
     ];
 
     if installed {
-        if let Some(cmd) = config["mcpServers"]["geniuz"].get("command").and_then(|c| c.as_str()) {
+        if let Some(cmd) = config["mcpServers"]["Geniuz"].get("command").and_then(|c| c.as_str()) {
             lines.push(format!("Binary: {}", cmd));
         }
     }
