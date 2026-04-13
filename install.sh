@@ -161,10 +161,10 @@ if [ -n "$SYMLINK_DIR" ]; then
   echo "  Linked to ${SYMLINK_DIR}/geniuz"
 fi
 
-# Migrate legacy station if present
+# Migrate legacy folder if present
 if [ -d "$HOME/.clawmark" ] && [ ! -d "$GENIUZ_HOME/station.db" ]; then
   if [ -f "$HOME/.clawmark/station.db" ]; then
-    echo "  Found legacy station at ~/.clawmark/"
+    echo "  Found legacy folder at ~/.clawmark/"
     echo "  Geniuz will read it automatically — no migration needed."
   fi
 fi

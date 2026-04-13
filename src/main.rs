@@ -24,12 +24,12 @@ fn main() {
 
 fn default_station_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".geniuz").join("station.db")
+    PathBuf::from(home).join(".geniuz").join("memory.db")
 }
 
 fn legacy_station_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".clawmark").join("station.db")
+    PathBuf::from(home).join(".clawmark").join("memory.db")
 }
 
 fn default_claw_workspace() -> PathBuf {
@@ -47,7 +47,7 @@ pub fn get_db() -> Result<db::DatabaseManager, String> {
             if new_path.exists() {
                 new_path.to_string_lossy().to_string()
             } else if old_path.exists() {
-                eprintln!("[geniuz] Using legacy station at ~/.clawmark/station.db");
+                eprintln!("[geniuz] Using legacy station at ~/.clawmark/memory.db");
                 old_path.to_string_lossy().to_string()
             } else {
                 new_path.to_string_lossy().to_string()
@@ -266,7 +266,7 @@ fn run(cli: Cli) -> Result<String, String> {
 
             if full {
                 for entry in &mut entries {
-                    if let Ok(Some(content)) = db.get_full_content(&entry.signal_uuid) {
+                    if let Ok(Some(content)) = db.get_full_content(&entry.memory_uuid) {
                         entry.content = Some(content);
                     }
                 }
@@ -275,7 +275,7 @@ fn run(cli: Cli) -> Result<String, String> {
             if json {
                 let data: Vec<serde_json::Value> = entries.iter().map(|e| {
                     let mut v = serde_json::json!({
-                        "uuid": &e.signal_uuid[..8],
+                        "uuid": &e.memory_uuid[..8],
                         "gist": e.gist,
                         "created_at": e.created_at,
                     });
@@ -295,7 +295,7 @@ fn run(cli: Cli) -> Result<String, String> {
 
             let mut lines: Vec<String> = Vec::new();
             for e in &entries {
-                let uuid_short = &e.signal_uuid[..8];
+                let uuid_short = &e.memory_uuid[..8];
                 let ts = shorten_ts(&e.created_at);
                 let mut suffix = String::new();
                 if let Some(ref p) = e.parent_uuid {
@@ -321,7 +321,7 @@ fn run(cli: Cli) -> Result<String, String> {
 
             if full {
                 for entry in &mut entries {
-                    if let Ok(Some(content)) = db.get_full_content(&entry.signal_uuid) {
+                    if let Ok(Some(content)) = db.get_full_content(&entry.memory_uuid) {
                         entry.content = Some(content);
                     }
                 }
@@ -330,7 +330,7 @@ fn run(cli: Cli) -> Result<String, String> {
             if json {
                 let data: Vec<serde_json::Value> = entries.iter().map(|e| {
                     let mut v = serde_json::json!({
-                        "uuid": &e.signal_uuid[..8],
+                        "uuid": &e.memory_uuid[..8],
                         "gist": e.gist,
                         "created_at": e.created_at,
                     });
@@ -349,7 +349,7 @@ fn run(cli: Cli) -> Result<String, String> {
 
             let mut lines: Vec<String> = Vec::new();
             for e in &entries {
-                let uuid_short = &e.signal_uuid[..8];
+                let uuid_short = &e.memory_uuid[..8];
                 let ts = shorten_ts(&e.created_at);
                 let mut suffix = String::new();
                 if let Some(ref p) = e.parent_uuid {
@@ -391,7 +391,7 @@ fn run(cli: Cli) -> Result<String, String> {
 
                     for e in &entries {
                         if let Some(ref cmd_template) = exec {
-                            let uuid_short = &e.signal_uuid[..8.min(e.signal_uuid.len())];
+                            let uuid_short = &e.memory_uuid[..8.min(e.memory_uuid.len())];
                             let parent_short = e.parent_uuid.as_deref()
                                 .map(|p| &p[..8.min(p.len())])
                                 .unwrap_or("");
@@ -425,7 +425,7 @@ fn run(cli: Cli) -> Result<String, String> {
                                 Err(e) => eprintln!("[watch] exec failed: {}", e),
                             }
                         } else if json {
-                            let uuid_short = &e.signal_uuid[..8.min(e.signal_uuid.len())];
+                            let uuid_short = &e.memory_uuid[..8.min(e.memory_uuid.len())];
                             let parent_short = e.parent_uuid.as_deref()
                                 .map(|p| &p[..8.min(p.len())]);
                             let mut v = serde_json::json!({
@@ -437,7 +437,7 @@ fn run(cli: Cli) -> Result<String, String> {
                             if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
                             println!("{}", serde_json::to_string(&v).unwrap());
                         } else {
-                            let uuid_short = &e.signal_uuid[..8.min(e.signal_uuid.len())];
+                            let uuid_short = &e.memory_uuid[..8.min(e.memory_uuid.len())];
                             let ts = shorten_ts(&e.created_at);
                             let mut suffix = String::new();
                             if let Some(ref p) = e.parent_uuid {
@@ -499,7 +499,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 .unwrap_or_else(|_| default_station_path().to_string_lossy().to_string());
 
             let mut lines = vec![
-                format!("Station: {}", path),
+                format!("Folder: {}", path),
                 format!("Memories: {}", signals),
                 format!("Embeddings: {}/{} cached", embeddings, signals),
             ];

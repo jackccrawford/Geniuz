@@ -48,7 +48,7 @@ Geniuz is a compiled Rust binary backed by SQLite. No cloud. No API key. No acco
 - **Memories** store what you learned — a gist (how you find it later) and content (the full detail)
 - **Semantic search** finds memories by meaning, not keywords. Built-in BERT model, runs locally, 50+ languages
 - **Threading** links memories into chains — prospect to client, problem to solution, draft to final
-- **Shared stations** let multiple agents write to the same memory. What one learns, all find
+- **Shared folders** let multiple agents write to the same memory. What one learns, all find
 
 ```
 Agent → geniuz (Rust binary) → SQLite
@@ -135,11 +135,11 @@ E5F6A7B8 | 2026-03-08 09:15 | client: Maria — plan approved <- 7A3B29F1
 7A3B29F1 | 2026-03-05 14:23 | client: Maria — Q2 retention focus, $40K budget
 ```
 
-**Check your station:**
+**Check your folder:**
 
 ```
 $ geniuz status
-Station: ~/.geniuz/station.db
+Folder: ~/.geniuz/folder.db
 Memories: 847
 Embeddings: 847/847 cached
 Semantic search: ready
@@ -157,7 +157,7 @@ geniuz capture --dry-run ./notes/             # preview without importing
 geniuz backfill                               # embed everything for semantic search
 ```
 
-Three commands — `capture`, `backfill`, `recall` — turn any folder of markdown into a searchable memory station. Local RAG with zero infrastructure.
+Three commands — `capture`, `backfill`, `recall` — turn any folder of markdown into a searchable memory folder. Local RAG with zero infrastructure.
 
 ## Commands
 
@@ -182,8 +182,8 @@ geniuz recent --full                          # with content
 geniuz capture ./docs/                        # bulk-load files
 geniuz backfill                               # build embedding cache
 
-# Station
-geniuz status                                 # station stats
+# Folder
+geniuz status                                 # folder stats
 geniuz watch                                  # poll for new memories
 geniuz watch --exec "echo {uuid} {gist}"      # trigger on new memories
 
@@ -210,7 +210,7 @@ When you need to remember something:
 - **Private.** Your data never leaves your machine. No cloud. No account.
 - **Fast.** No network calls. Semantic search runs locally in the binary.
 - **Free.** No API keys. No token costs for memory. No subscription.
-- **Portable.** Your station is a SQLite file. Copy it, back it up, share it.
+- **Portable.** Your folder is a SQLite file. Copy it, back it up, share it.
 - **Framework-independent.** Switch from Cursor to Claude Code — your memory comes with you.
 
 ## For agents
@@ -221,7 +221,7 @@ Your next session starts cold. No memory of what you built, what broke, what you
 
 A memory that says "fixed auth bug" saves zero time. A memory that says what broke, why, and how you fixed it saves an hour. Write for the version of you that knows nothing.
 
-Memories compound. A single memory is a note. A station of memories is institutional knowledge.
+Memories compound. A single memory is a note. A folder of memories is institutional knowledge.
 
 ### When to remember
 
@@ -233,7 +233,7 @@ Memories compound. A single memory is a note. A station of memories is instituti
 
 - **Starting a new task.** You may have already solved part of it last week.
 - **When stuck.** The answer might be in a memory from three sessions ago.
-- **After compaction.** Your context was compressed. Your station wasn't.
+- **After compaction.** Your context was compressed. Your folder wasn't.
 
 ## Menu bar app
 

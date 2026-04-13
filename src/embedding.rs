@@ -239,14 +239,14 @@ pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 }
 
 pub struct CachedEmbedding {
-    pub signal_uuid: String,
+    pub memory_uuid: String,
     pub gist: String,
     pub created_at: String,
     pub embedding: Vec<f32>,
 }
 
 pub struct ScoredSignal {
-    pub signal_uuid: String,
+    pub memory_uuid: String,
     pub gist: String,
     pub created_at: String,
     pub score: f32,
@@ -259,7 +259,7 @@ pub fn semantic_search_cached(
     let query_embedding = backend.embed(query)?;
     let mut scored: Vec<ScoredSignal> = cached.into_iter().map(|c| {
         let score = cosine_similarity(&query_embedding, &c.embedding);
-        ScoredSignal { signal_uuid: c.signal_uuid, gist: c.gist, created_at: c.created_at, score }
+        ScoredSignal { memory_uuid: c.memory_uuid, gist: c.gist, created_at: c.created_at, score }
     }).collect();
     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(limit);

@@ -187,11 +187,11 @@ fn format_entries(entries: &[SignalEntry], full: bool, db: &DatabaseManager) -> 
         let ts = crate::shorten_ts(&e.created_at);
         let score_str = e.score.map(|s| format!(" ({:.2})", s)).unwrap_or_default();
         if full {
-            let content = db.get_full_content(&e.signal_uuid)
+            let content = db.get_full_content(&e.memory_uuid)
                 .ok().flatten().unwrap_or_default();
-            lines.push(format!("{} | {} | {}{}\n  {}", &e.signal_uuid[..8], ts, e.gist, score_str, content));
+            lines.push(format!("{} | {} | {}{}\n  {}", &e.memory_uuid[..8], ts, e.gist, score_str, content));
         } else {
-            lines.push(format!("{} | {} | {}{}", &e.signal_uuid[..8], ts, e.gist, score_str));
+            lines.push(format!("{} | {} | {}{}", &e.memory_uuid[..8], ts, e.gist, score_str));
         }
     }
     lines.join("\n")

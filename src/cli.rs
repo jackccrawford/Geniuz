@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
     version,
     about = "Your AI remembers now",
     long_about = "GENIUZ: Your AI remembers now.\n\nPersistent memory for AI agents. Three R's: remember, recall, recent.\nWorks with any agent framework — Claude Code, Cursor, Windsurf, Aider,\nor anything that can run a shell command.",
-    before_help = "Start here: 'geniuz recent' to see what's in your station.",
+    before_help = "Start here: 'geniuz recent' to see what's in your folder.",
     after_help = "Examples:\n  geniuz remember -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recent                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nStation: Defaults to ~/.geniuz/station.db\n  Override: GENIUZ_STATION=/path/to/station.db geniuz remember ...\n  Multiple agents can share a station for shared memory.\n\nUse \"geniuz [command] --help\" for more information."
 )]
 pub struct Cli {
@@ -103,7 +103,7 @@ pub enum Command {
         json: bool,
     },
 
-    /// Capture files or directories into your station
+    /// Capture files or directories into your folder
     #[command(
         arg_required_else_help = true,
         after_help = "Examples:\n  geniuz capture notes.md                              Single file\n  geniuz capture ./docs/                               All .md files in directory\n  geniuz capture *.md                                  Shell glob\n  geniuz capture --split notes.md                      Split by ## headers\n  geniuz capture --gist-prefix \"docs:\" a.md            Prefix all gists\n  geniuz capture --openclaw ~/.openclaw/workspace      Import OpenClaw memory\n  geniuz capture --dry-run ./notes/                    Preview without importing\n\nEach file becomes a memory. With --split, each ## section becomes\na threaded memory under the file's root."
@@ -164,7 +164,7 @@ pub enum Command {
     /// Show usage guide for agents
     Skill,
 
-    /// Show station stats
+    /// Show folder stats
     Status,
 
     /// MCP server for Claude Desktop — run, install, or check status

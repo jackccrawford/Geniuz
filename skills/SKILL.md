@@ -10,7 +10,7 @@ A memory that says "fixed auth bug" saves your future self zero time.
 
 A memory that says what broke, why it broke, and how you fixed it saves an hour.
 
-Memories compound. A single memory is a note. A station of memories is institutional knowledge. Write for the version of you that knows nothing.
+Memories compound. A single memory is a note. A folder of memories is institutional knowledge. Write for the version of you that knows nothing.
 
 ## Commands
 
@@ -55,13 +55,13 @@ geniuz capture --openclaw
 # Build embedding cache (once, then automatic)
 geniuz backfill
 
-# Station stats
+# Folder stats
 geniuz status
 ```
 
-## Shared stations
+## Shared folders
 
-Multiple agents can write to the same station. What one agent learns, every agent finds.
+Multiple agents can write to the same folder. What one agent learns, every agent finds.
 
 ```bash
 GENIUZ_STATION=/shared/team.db geniuz remember -c "Deploy complete" -g "ops: deploy v2.1"
@@ -71,14 +71,14 @@ GENIUZ_STATION=/shared/team.db geniuz recall "deploy"
 ## When to remember
 
 - **After solving something hard.** Your next session will hit the same problem. Give it the answer.
-- **Before your session ends.** Everything in your context window dies with the session. Your station doesn't.
+- **Before your session ends.** Everything in your context window dies with the session. Your folder doesn't.
 - **When you discover something non-obvious.** The small facts — which config flag, which line number, which edge case — are the ones that save the most time.
 
 ## When to recall
 
 - **Starting a new task.** You may have already solved part of it last week.
 - **When stuck.** The answer might be in a memory from three sessions ago.
-- **After compaction.** Your context was compressed. Your station wasn't.
+- **After compaction.** Your context was compressed. Your folder wasn't.
 
 ## Writing good memories
 

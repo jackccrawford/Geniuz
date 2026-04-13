@@ -21,13 +21,35 @@ impl DatabaseManager {
         conn.busy_timeout(std::time::Duration::from_secs(30))
             .map_err(|e| format!("Failed to set timeout: {}", e))?;
 
-        // Init schema if needed
-        let has_signals: bool = conn.query_row(
+        // Check for existing schema
+        let has_memories: bool = conn.query_row(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memories'",
+            [], |_| Ok(true),
+        ).unwrap_or(false);
+
+        let has_legacy: bool = conn.query_row(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name='signals'",
             [], |_| Ok(true),
         ).unwrap_or(false);
 
-        if !has_signals {
+        if has_legacy && !has_memories {
+            // Migrate old schema: signals → memories, signal_uuid → memory_uuid
+            conn.execute_batch("
+                ALTER TABLE signals RENAME TO memories;
+                ALTER TABLE memories RENAME COLUMN signal_uuid TO memory_uuid;
+                ALTER TABLE signal_embeddings RENAME TO memory_embeddings;
+                ALTER TABLE memory_embeddings RENAME COLUMN signal_uuid TO memory_uuid;
+                DROP VIEW IF EXISTS signal_chains;
+                DROP TRIGGER IF EXISTS prevent_signal_delete;
+                DROP TRIGGER IF EXISTS prevent_signal_update;
+            ").map_err(|e| format!("Failed to migrate schema: {}", e))?;
+            // Recreate views and triggers with new names
+            let schema = include_str!("../schema/schema.sql");
+            conn.execute_batch(schema)
+                .map_err(|e| format!("Failed to apply schema after migration: {}", e))?;
+            eprintln!("[geniuz] Migrated legacy schema (signals → memories)");
+        } else if !has_memories {
+            // Fresh database — create from scratch
             let schema = include_str!("../schema/schema.sql");
             conn.execute_batch(schema)
                 .map_err(|e| format!("Failed to init schema: {}", e))?;
@@ -106,19 +128,19 @@ impl DatabaseManager {
             .map_err(|e| format!("Failed to begin transaction: {}", e))?;
         if let Some(ts) = created_at {
             tx.execute(
-                "INSERT INTO signals (signal_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, ?3, ?4)",
                 rusqlite::params![&uuid, &payload_str, ts, &parent_uuid],
             ).map_err(|e| format!("Failed to insert: {}", e))?;
         } else {
             tx.execute(
-                "INSERT INTO signals (signal_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, datetime('now', 'utc'), ?3)",
+                "INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, datetime('now', 'utc'), ?3)",
                 rusqlite::params![&uuid, &payload_str, &parent_uuid],
             ).map_err(|e| format!("Failed to insert: {}", e))?;
         }
         if let Some(ref emb) = embedding {
             let blob = geniuz::embedding::embedding_to_blob(emb);
             tx.execute(
-                "INSERT OR REPLACE INTO signal_embeddings (signal_uuid, embedding) VALUES (?1, ?2)",
+                "INSERT OR REPLACE INTO memory_embeddings (memory_uuid, embedding) VALUES (?1, ?2)",
                 rusqlite::params![&uuid, blob],
             ).map_err(|e| format!("Failed to cache embedding: {}", e))?;
         }
@@ -134,10 +156,10 @@ impl DatabaseManager {
     pub fn recent(&self, limit: usize) -> Result<Vec<SignalEntry>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT signal_uuid,
+            "SELECT memory_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
                     created_at, parent_uuid
-             FROM signals ORDER BY created_at DESC LIMIT ?1"
+             FROM memories ORDER BY created_at DESC LIMIT ?1"
         ).map_err(|e| format!("Query failed: {}", e))?;
 
         let rows = stmt.query_map(rusqlite::params![limit as i32], |row| {
@@ -145,7 +167,7 @@ impl DatabaseManager {
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
             Ok(SignalEntry {
-                signal_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
+                memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
@@ -157,10 +179,10 @@ impl DatabaseManager {
     pub fn since(&self, timestamp: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT signal_uuid,
+            "SELECT memory_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
                     created_at, parent_uuid, json_extract(payload, '$.content')
-             FROM signals WHERE created_at > ?1 ORDER BY created_at ASC LIMIT ?2"
+             FROM memories WHERE created_at > ?1 ORDER BY created_at ASC LIMIT ?2"
         ).map_err(|e| format!("Query failed: {}", e))?;
 
         let rows = stmt.query_map(rusqlite::params![timestamp, limit as i32], |row| {
@@ -168,7 +190,7 @@ impl DatabaseManager {
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
             Ok(SignalEntry {
-                signal_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
+                memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: row.get(4)?, score: None,
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
@@ -180,7 +202,7 @@ impl DatabaseManager {
     pub fn get_signal_timestamp(&self, uuid_prefix: &str) -> Result<Option<String>, String> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT created_at FROM signals WHERE signal_uuid LIKE ?1 LIMIT 1",
+            "SELECT created_at FROM memories WHERE memory_uuid LIKE ?1 LIMIT 1",
             rusqlite::params![format!("{}%", uuid_prefix.to_uppercase())],
             |row| row.get(0),
         ).optional().map_err(|e| format!("Query failed: {}", e))
@@ -198,10 +220,10 @@ impl DatabaseManager {
         let limit_param = terms.len() + 1;
 
         let sql = format!(
-            "SELECT signal_uuid,
+            "SELECT memory_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
                     created_at, parent_uuid
-             FROM signals WHERE {} ORDER BY created_at DESC LIMIT ?{}",
+             FROM memories WHERE {} ORDER BY created_at DESC LIMIT ?{}",
             where_clause, limit_param
         );
 
@@ -219,7 +241,7 @@ impl DatabaseManager {
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
             Ok(SignalEntry {
-                signal_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
+                memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
@@ -236,7 +258,7 @@ impl DatabaseManager {
 
         let results = geniuz::embedding::semantic_search_cached(query, cached, limit)?;
         Ok(results.into_iter().map(|r| SignalEntry {
-            signal_uuid: r.signal_uuid, gist: r.gist, created_at: r.created_at,
+            memory_uuid: r.memory_uuid, gist: r.gist, created_at: r.created_at,
             parent_uuid: None, content: None, score: Some(r.score),
         }).collect())
     }
@@ -244,16 +266,16 @@ impl DatabaseManager {
     pub fn random(&self) -> Result<Option<SignalEntry>, String> {
         let conn = self.conn()?;
         let result = conn.query_row(
-            "SELECT signal_uuid,
+            "SELECT memory_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)),
                     created_at, parent_uuid
-             FROM signals ORDER BY RANDOM() LIMIT 1",
+             FROM memories ORDER BY RANDOM() LIMIT 1",
             [], |row| {
                 let uuid: String = row.get(0)?;
                 let parent: Option<String> = row.get(3)?;
                 let display_parent = parent.filter(|p| p != &uuid);
                 Ok(SignalEntry {
-                    signal_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
+                    memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                     parent_uuid: display_parent, content: None, score: None,
                 })
             },
@@ -264,14 +286,14 @@ impl DatabaseManager {
     pub fn get_full_content(&self, uuid: &str) -> Result<Option<String>, String> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT json_extract(payload, '$.content') FROM signals WHERE signal_uuid = ?1",
+            "SELECT json_extract(payload, '$.content') FROM memories WHERE memory_uuid = ?1",
             rusqlite::params![uuid], |row| row.get(0),
         ).optional().map_err(|e| format!("Query failed: {}", e))
     }
 
     pub fn count(&self) -> Result<usize, String> {
         let conn = self.conn()?;
-        let c: i64 = conn.query_row("SELECT COUNT(*) FROM signals", [], |r| r.get(0))
+        let c: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))
             .map_err(|e| format!("Count failed: {}", e))?;
         Ok(c as usize)
     }
@@ -280,7 +302,7 @@ impl DatabaseManager {
         if partial.len() == 36 { return Ok(Some(partial.to_uppercase())); }
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT signal_uuid FROM signals WHERE signal_uuid LIKE ?1 LIMIT 1",
+            "SELECT memory_uuid FROM memories WHERE memory_uuid LIKE ?1 LIMIT 1",
             rusqlite::params![format!("{}%", partial.to_uppercase())],
             |row| row.get(0),
         ).optional().map_err(|e| format!("UUID resolve failed: {}", e))
@@ -294,7 +316,7 @@ impl DatabaseManager {
         let conn = self.conn()?;
         let blob = geniuz::embedding::embedding_to_blob(embedding);
         conn.execute(
-            "INSERT OR REPLACE INTO signal_embeddings (signal_uuid, embedding) VALUES (?1, ?2)",
+            "INSERT OR REPLACE INTO memory_embeddings (memory_uuid, embedding) VALUES (?1, ?2)",
             rusqlite::params![uuid, blob],
         ).map_err(|e| format!("Cache write failed: {}", e))?;
         Ok(())
@@ -303,11 +325,11 @@ impl DatabaseManager {
     pub fn get_cached_embeddings(&self) -> Result<Vec<geniuz::embedding::CachedEmbedding>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT e.signal_uuid,
+            "SELECT e.memory_uuid,
                     COALESCE(json_extract(s.payload, '$.gist'), substr(json_extract(s.payload, '$.content'), 1, 120)),
                     s.created_at, e.embedding
-             FROM signal_embeddings e
-             JOIN signals s ON s.signal_uuid = e.signal_uuid"
+             FROM memory_embeddings e
+             JOIN memories s ON s.memory_uuid = e.memory_uuid"
         ).map_err(|e| format!("Query failed: {}", e))?;
 
         let rows = stmt.query_map([], |row| {
@@ -315,7 +337,7 @@ impl DatabaseManager {
             let uuid: String = row.get(0)?;
             match geniuz::embedding::blob_to_embedding(&blob) {
                 Ok(embedding) => Ok(Some(geniuz::embedding::CachedEmbedding {
-                    signal_uuid: uuid, gist: row.get(1)?,
+                    memory_uuid: uuid, gist: row.get(1)?,
                     created_at: row.get(2)?, embedding,
                 })),
                 Err(e) => {
@@ -333,11 +355,11 @@ impl DatabaseManager {
     pub fn get_uncached_signals(&self) -> Result<Vec<(String, String)>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT s.signal_uuid, json_extract(s.payload, '$.content')
-             FROM signals s
-             LEFT JOIN signal_embeddings e ON e.signal_uuid = s.signal_uuid
+            "SELECT s.memory_uuid, json_extract(s.payload, '$.content')
+             FROM memories s
+             LEFT JOIN memory_embeddings e ON e.memory_uuid = s.memory_uuid
              WHERE json_extract(s.payload, '$.content') IS NOT NULL
-               AND e.signal_uuid IS NULL"
+               AND e.memory_uuid IS NULL"
         ).map_err(|e| format!("Query failed: {}", e))?;
 
         let rows = stmt.query_map([], |row| {
@@ -349,7 +371,7 @@ impl DatabaseManager {
 
     pub fn embedding_count(&self) -> Result<usize, String> {
         let conn = self.conn()?;
-        let c: i64 = conn.query_row("SELECT COUNT(*) FROM signal_embeddings", [], |r| r.get(0))
+        let c: i64 = conn.query_row("SELECT COUNT(*) FROM memory_embeddings", [], |r| r.get(0))
             .map_err(|e| e.to_string())?;
         Ok(c as usize)
     }
@@ -365,7 +387,7 @@ impl DatabaseManager {
 }
 
 pub struct SignalEntry {
-    pub signal_uuid: String,
+    pub memory_uuid: String,
     pub gist: String,
     pub created_at: String,
     pub parent_uuid: Option<String>,
