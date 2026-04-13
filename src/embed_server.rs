@@ -1,24 +1,24 @@
-//! clawmark-embed — keeps the ONNX session warm for fast embedding
+//! geniuz-embed — keeps the ONNX session warm for fast embedding
 //!
-//! Unix domain socket server at /tmp/clawmark-embed.sock
+//! Unix domain socket server at /tmp/geniuz-embed.sock
 //! Protocol: send text (u32 LE length prefix + UTF-8 bytes), receive 1536 bytes (384 × f32 LE)
-//! Auto-exits after idle timeout (default 5 min, configurable via CLAWMARK_EMBED_IDLE)
+//! Auto-exits after idle timeout (default 5 min, configurable via GENIUZ_EMBED_IDLE)
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use clawmark::embedding;
+use geniuz::embedding;
 
-const DEFAULT_SOCKET: &str = "/tmp/clawmark-embed.sock";
+const DEFAULT_SOCKET: &str = "/tmp/geniuz-embed.sock";
 const DEFAULT_IDLE_SECS: u64 = 300;
 const EMBEDDING_BYTES: usize = 384 * 4;
 
 fn main() {
-    let socket_path = std::env::var("CLAWMARK_EMBED_SOCKET")
+    let socket_path = std::env::var("GENIUZ_EMBED_SOCKET")
         .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
-    let idle_secs = std::env::var("CLAWMARK_EMBED_IDLE")
+    let idle_secs = std::env::var("GENIUZ_EMBED_IDLE")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_IDLE_SECS);
@@ -26,7 +26,7 @@ fn main() {
     // Clean up stale socket
     if Path::new(&socket_path).exists() {
         if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
-            eprintln!("[clawmark-embed] Already running at {}", socket_path);
+            eprintln!("[geniuz-embed] Already running at {}", socket_path);
             std::process::exit(0);
         }
         let _ = std::fs::remove_file(&socket_path);
@@ -35,11 +35,11 @@ fn main() {
     // Load ONNX backend (one-time cost)
     let backend = match embedding::create_backend() {
         Ok(b) => {
-            eprintln!("[clawmark-embed] {} ready", b.name());
+            eprintln!("[geniuz-embed] {} ready", b.name());
             b
         }
         Err(e) => {
-            eprintln!("[clawmark-embed] Failed: {}", e);
+            eprintln!("[geniuz-embed] Failed: {}", e);
             std::process::exit(1);
         }
     };
@@ -47,13 +47,13 @@ fn main() {
     let listener = match UnixListener::bind(&socket_path) {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("[clawmark-embed] Bind failed: {}", e);
+            eprintln!("[geniuz-embed] Bind failed: {}", e);
             std::process::exit(1);
         }
     };
     listener.set_nonblocking(true).expect("set_nonblocking");
 
-    eprintln!("[clawmark-embed] {} (idle: {}s)", socket_path, idle_secs);
+    eprintln!("[geniuz-embed] {} (idle: {}s)", socket_path, idle_secs);
 
     let mut last_activity = Instant::now();
     let idle_timeout = Duration::from_secs(idle_secs);
@@ -93,21 +93,21 @@ fn main() {
                         served += 1;
                     }
                     Err(e) => {
-                        eprintln!("[clawmark-embed] Error: {}", e);
+                        eprintln!("[geniuz-embed] Error: {}", e);
                         let _ = stream.write_all(&[0u8; EMBEDDING_BYTES]);
                     }
                 }
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 if last_activity.elapsed() > idle_timeout {
-                    eprintln!("[clawmark-embed] Idle. {} served. Exiting.", served);
+                    eprintln!("[geniuz-embed] Idle. {} served. Exiting.", served);
                     break;
                 }
                 std::thread::sleep(Duration::from_millis(100));
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
             Err(e) => {
-                eprintln!("[clawmark-embed] Fatal accept error: {}", e);
+                eprintln!("[geniuz-embed] Fatal accept error: {}", e);
                 break;
             }
         }

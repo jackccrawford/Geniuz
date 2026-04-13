@@ -22,7 +22,7 @@ fn onnx_model_filename() -> &'static str {
 
 fn default_models_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".clawmark").join("models")
+    PathBuf::from(home).join(".geniuz").join("models")
 }
 
 pub trait EmbeddingBackend {
@@ -41,7 +41,7 @@ pub struct BuiltinBackend {
 
 impl BuiltinBackend {
     pub fn new() -> Result<Self, String> {
-        let models_dir = std::env::var("CLAWMARK_MODELS_PATH")
+        let models_dir = std::env::var("GENIUZ_MODELS_PATH")
             .map(PathBuf::from)
             .unwrap_or_else(|_| default_models_dir());
 
@@ -53,14 +53,14 @@ impl BuiltinBackend {
 
         if !model_path.exists() {
             let url = format!("{}/{}", HF_BASE_URL, onnx_model_filename());
-            eprintln!("[clawmark] Downloading model from {}...", url);
+            eprintln!("[geniuz] Downloading model from {}...", url);
             download_file(&url, &model_path)?;
-            eprintln!("[clawmark] Model saved to {}", model_path.display());
+            eprintln!("[geniuz] Model saved to {}", model_path.display());
         }
 
         if !tokenizer_path.exists() {
             let url = format!("{}/tokenizer.json", HF_BASE_URL);
-            eprintln!("[clawmark] Downloading tokenizer...");
+            eprintln!("[geniuz] Downloading tokenizer...");
             download_file(&url, &tokenizer_path)?;
         }
 
@@ -83,7 +83,7 @@ impl BuiltinBackend {
         tokenizer.with_truncation(Some(truncation))
             .map_err(|e| format!("Failed to set truncation: {}", e))?;
 
-        eprintln!("[clawmark] Semantic search ready ({})", onnx_model_filename());
+        eprintln!("[geniuz] Semantic search ready ({})", onnx_model_filename());
 
         Ok(Self { session: Mutex::new(session), tokenizer })
     }
@@ -181,9 +181,9 @@ struct OllamaResp { embedding: Vec<f32> }
 impl OllamaBackend {
     pub fn new() -> Self {
         Self {
-            url: std::env::var("CLAWMARK_EMBED_URL")
+            url: std::env::var("GENIUZ_EMBED_URL")
                 .unwrap_or_else(|_| "http://localhost:11434/api/embeddings".to_string()),
-            model: std::env::var("CLAWMARK_EMBED_MODEL")
+            model: std::env::var("GENIUZ_EMBED_MODEL")
                 .unwrap_or_else(|_| "paraphrase-multilingual:278m".to_string()),
         }
     }
@@ -210,7 +210,7 @@ pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
     match BuiltinBackend::new() {
         Ok(b) => Ok(Box::new(b)),
         Err(e) => {
-            eprintln!("[clawmark] ONNX failed ({}), falling back to ollama", e);
+            eprintln!("[geniuz] ONNX failed ({}), falling back to ollama", e);
             let backend = OllamaBackend::new();
             // Verify ollama is reachable before claiming ready
             let agent = ureq::Agent::config_builder()
@@ -267,7 +267,7 @@ pub fn semantic_search_cached(
 }
 
 /// Embed content — socket first, inline fallback.
-/// If clawmark-embed is running, uses the warm session (~3ms).
+/// If geniuz-embed is running, uses the warm session (~3ms).
 /// Otherwise loads ONNX inline (~500ms). Either way, it works.
 pub fn embed_content(text: &str) -> Result<Vec<f32>, String> {
     // Try socket (warm ONNX session, ~3ms)

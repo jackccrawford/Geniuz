@@ -1,18 +1,18 @@
-//! Client for clawmark-embed socket server
+//! Client for geniuz-embed socket server
 //!
 //! Try socket first. If unavailable, fall back to inline ONNX loading.
-//! If CLAWMARK_EMBED_SPAWN=1, auto-spawn the server on first use.
+//! If GENIUZ_EMBED_SPAWN=1, auto-spawn the server on first use.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 
-const DEFAULT_SOCKET: &str = "/tmp/clawmark-embed.sock";
+const DEFAULT_SOCKET: &str = "/tmp/geniuz-embed.sock";
 const EMBEDDING_BYTES: usize = 384 * 4;
 
 /// Embed text via the socket server. Returns None if server unavailable.
 pub fn embed_via_socket(text: &str) -> Option<Vec<f32>> {
-    let socket_path = std::env::var("CLAWMARK_EMBED_SOCKET")
+    let socket_path = std::env::var("GENIUZ_EMBED_SOCKET")
         .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
 
     if Path::new(&socket_path).exists() {
@@ -31,7 +31,7 @@ pub fn embed_via_socket(text: &str) -> Option<Vec<f32>> {
     }
 
     // No socket (or stale socket removed) — try auto-spawning
-    if std::env::var("CLAWMARK_EMBED_SPAWN").ok().as_deref() == Some("1") {
+    if std::env::var("GENIUZ_EMBED_SPAWN").ok().as_deref() == Some("1") {
         spawn_server(&socket_path);
     } else {
         return None;
@@ -58,13 +58,13 @@ fn embed_on_stream(mut stream: UnixStream, text: &str) -> Option<Vec<f32>> {
     crate::embedding::blob_to_embedding(&buf).ok()
 }
 
-/// Try to spawn clawmark-embed in background
+/// Try to spawn geniuz-embed in background
 fn spawn_server(socket_path: &str) {
     // Find the binary next to ourselves
     let self_path = std::env::current_exe().ok();
     let embed_path = self_path.as_ref()
         .and_then(|p| p.parent())
-        .map(|dir| dir.join("clawmark-embed"));
+        .map(|dir| dir.join("geniuz-embed"));
 
     let binary = match embed_path {
         Some(p) if p.exists() => p,
@@ -73,7 +73,7 @@ fn spawn_server(socket_path: &str) {
 
     // Spawn detached
     let _ = std::process::Command::new(binary)
-        .env("CLAWMARK_EMBED_SOCKET", socket_path)
+        .env("GENIUZ_EMBED_SOCKET", socket_path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped())

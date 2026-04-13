@@ -24,6 +24,11 @@ fn main() {
 
 fn default_station_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".geniuz").join("station.db")
+}
+
+fn legacy_station_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
     PathBuf::from(home).join(".clawmark").join("station.db")
 }
 
@@ -32,13 +37,26 @@ fn default_claw_workspace() -> PathBuf {
     PathBuf::from(home).join(".openclaw").join("workspace")
 }
 
-fn get_db() -> Result<db::DatabaseManager, String> {
-    let path = std::env::var("CLAWMARK_STATION")
-        .unwrap_or_else(|_| default_station_path().to_string_lossy().to_string());
+pub fn get_db() -> Result<db::DatabaseManager, String> {
+    // Check env vars: GENIUZ_STATION first, CLAWMARK_STATION as legacy fallback
+    let path = std::env::var("GENIUZ_STATION")
+        .or_else(|_| std::env::var("CLAWMARK_STATION"))
+        .unwrap_or_else(|_| {
+            let new_path = default_station_path();
+            let old_path = legacy_station_path();
+            if new_path.exists() {
+                new_path.to_string_lossy().to_string()
+            } else if old_path.exists() {
+                eprintln!("[geniuz] Using legacy station at ~/.clawmark/station.db");
+                old_path.to_string_lossy().to_string()
+            } else {
+                new_path.to_string_lossy().to_string()
+            }
+        });
     db::DatabaseManager::new(&path)
 }
 
-fn shorten_ts(ts: &str) -> &str {
+pub fn shorten_ts(ts: &str) -> &str {
     if ts.len() >= 16 { &ts[..16] } else { ts }
 }
 
@@ -69,18 +87,18 @@ fn run(cli: Cli) -> Result<String, String> {
                 let (created, errors) = adapter::migrate(&workspace, &db)?;
 
                 let mut lines = vec![
-                    format!("\n✅ Captured: {} signals from OpenClaw workspace", created),
+                    format!("\n✅ Captured: {} memories from OpenClaw workspace", created),
                 ];
                 if errors > 0 {
                     lines.push(format!("⚠️  {} errors (see above)", errors));
                 }
-                lines.push("Run 'clawmark backfill' to enable semantic search.".to_string());
+                lines.push("Run 'geniuz backfill' to enable semantic search.".to_string());
                 return Ok(lines.join("\n"));
             }
 
             // General mode: capture files and directories
             if paths.is_empty() {
-                return Err("No files specified. Use 'clawmark capture <files...>' or 'clawmark capture --openclaw'.".to_string());
+                return Err("No files specified. Use 'geniuz capture <files...>' or 'geniuz capture --openclaw'.".to_string());
             }
 
             let mut files: Vec<PathBuf> = Vec::new();
@@ -121,7 +139,7 @@ fn run(cli: Cli) -> Result<String, String> {
             }
 
             let db = get_db()?;
-            let backend = clawmark::embedding::create_backend()?;
+            let backend = geniuz::embedding::create_backend()?;
             let prefix = gist_prefix.as_deref().unwrap_or("");
             let mut created = 0usize;
             let mut errors = 0usize;
@@ -144,7 +162,6 @@ fn run(cli: Cli) -> Result<String, String> {
 
                 if split {
                     let sections = adapter::split_sections(content);
-                    // Create file-level root signal, then thread sections under it
                     let root_gist = format!("{}capture: {}", prefix, filename);
                     let root_uuid = match db.signal_with_backend(content, Some(&root_gist), None, None, Some(backend.as_ref())) {
                         Ok(uuid) => {
@@ -183,16 +200,16 @@ fn run(cli: Cli) -> Result<String, String> {
             }
 
             let mut lines = vec![
-                format!("\n✅ Captured: {} signals from {} file(s)", created, files.len()),
+                format!("\n✅ Captured: {} memories from {} file(s)", created, files.len()),
             ];
             if errors > 0 {
                 lines.push(format!("⚠️  {} errors (see above)", errors));
             }
-            lines.push("Run 'clawmark backfill' to enable semantic search.".to_string());
+            lines.push("Run 'geniuz backfill' to enable semantic search.".to_string());
             Ok(lines.join("\n"))
         }
 
-        Command::Signal { content, gist, parent, json } => {
+        Command::Remember { content, gist, parent, json } => {
             // Resolve content: @file or stdin
             let resolved = if content == "-" {
                 use std::io::Read;
@@ -212,17 +229,17 @@ fn run(cli: Cli) -> Result<String, String> {
 
             if json {
                 Ok(serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": true, "action": "signal", "uuid": short_uuid
+                    "ok": true, "action": "remember", "uuid": short_uuid
                 })).unwrap())
             } else {
-                Ok(format!("✅ Signal {} saved", short_uuid))
+                Ok(format!("✅ Remembered {}", short_uuid))
             }
         }
 
-        Command::Tune { query, recent, random, keyword, full, limit, json } => {
+        Command::Recall { query, random, keyword, full, limit, json } => {
             if query.as_deref() == Some("help") {
                 let mut cmd = Cli::build();
-                let sub = cmd.find_subcommand_mut("tune").unwrap();
+                let sub = cmd.find_subcommand_mut("recall").unwrap();
                 sub.print_help().ok();
                 println!();
                 return Ok(String::new());
@@ -235,7 +252,8 @@ fn run(cli: Cli) -> Result<String, String> {
                     Some(e) => vec![e],
                     None => vec![],
                 }
-            } else if recent || query.is_none() {
+            } else if query.is_none() {
+                // No query on recall → show recent as fallback
                 db.recent(limit)?
             } else {
                 let q = query.as_deref().unwrap();
@@ -246,7 +264,6 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
             };
 
-            // Enrich with full content if requested
             if full {
                 for entry in &mut entries {
                     if let Ok(Some(content)) = db.get_full_content(&entry.signal_uuid) {
@@ -268,12 +285,12 @@ fn run(cli: Cli) -> Result<String, String> {
                     v
                 }).collect();
                 return Ok(serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": true, "action": "tune", "count": data.len(), "signals": data
+                    "ok": true, "action": "recall", "count": data.len(), "memories": data
                 })).unwrap());
             }
 
             if entries.is_empty() {
-                return Ok("No signals found.".to_string());
+                return Ok("No memories found.".to_string());
             }
 
             let mut lines: Vec<String> = Vec::new();
@@ -298,20 +315,69 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(lines.join("\n"))
         }
 
+        Command::Recent { limit, full, json } => {
+            let db = get_db()?;
+            let mut entries = db.recent(limit)?;
+
+            if full {
+                for entry in &mut entries {
+                    if let Ok(Some(content)) = db.get_full_content(&entry.signal_uuid) {
+                        entry.content = Some(content);
+                    }
+                }
+            }
+
+            if json {
+                let data: Vec<serde_json::Value> = entries.iter().map(|e| {
+                    let mut v = serde_json::json!({
+                        "uuid": &e.signal_uuid[..8],
+                        "gist": e.gist,
+                        "created_at": e.created_at,
+                    });
+                    if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8]); }
+                    if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+                    v
+                }).collect();
+                return Ok(serde_json::to_string_pretty(&serde_json::json!({
+                    "ok": true, "action": "recent", "count": data.len(), "memories": data
+                })).unwrap());
+            }
+
+            if entries.is_empty() {
+                return Ok("No memories yet.".to_string());
+            }
+
+            let mut lines: Vec<String> = Vec::new();
+            for e in &entries {
+                let uuid_short = &e.signal_uuid[..8];
+                let ts = shorten_ts(&e.created_at);
+                let mut suffix = String::new();
+                if let Some(ref p) = e.parent_uuid {
+                    suffix.push_str(&format!(" <- {}", &p[..8.min(p.len())]));
+                }
+                lines.push(format!("{} | {} | {}{}", uuid_short, ts, e.gist, suffix));
+                if let Some(ref content) = e.content {
+                    for line in content.lines() {
+                        lines.push(format!("           {}", line));
+                    }
+                    lines.push(String::new());
+                }
+            }
+            Ok(lines.join("\n"))
+        }
+
         Command::Watch { interval, since, exec, once, json } => {
             let db = get_db()?;
 
-            // Resolve starting point: --since UUID, or current time
             let mut cursor = if let Some(ref uuid_prefix) = since {
                 db.get_signal_timestamp(uuid_prefix)?
-                    .ok_or_else(|| format!("Signal not found: {}", uuid_prefix))?
+                    .ok_or_else(|| format!("Memory not found: {}", uuid_prefix))?
             } else {
-                // Start from now — only show signals that arrive after watch starts
                 chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
             };
 
             if !once {
-                eprintln!("[watch] Watching for new signals (every {}s). Ctrl+C to stop.", interval);
+                eprintln!("[watch] Watching for new memories (every {}s). Ctrl+C to stop.", interval);
                 if since.is_some() {
                     eprintln!("[watch] Starting after: {}", cursor);
                 }
@@ -321,12 +387,10 @@ fn run(cli: Cli) -> Result<String, String> {
                 let entries = db.since(&cursor, 100)?;
 
                 if !entries.is_empty() {
-                    // Advance cursor to the latest signal's timestamp
                     cursor = entries.last().unwrap().created_at.clone();
 
                     for e in &entries {
                         if let Some(ref cmd_template) = exec {
-                            // Execute command with placeholders replaced
                             let uuid_short = &e.signal_uuid[..8.min(e.signal_uuid.len())];
                             let parent_short = e.parent_uuid.as_deref()
                                 .map(|p| &p[..8.min(p.len())])
@@ -386,7 +450,7 @@ fn run(cli: Cli) -> Result<String, String> {
 
                 if once {
                     if entries.is_empty() {
-                        return Ok("No new signals.".to_string());
+                        return Ok("No new memories.".to_string());
                     } else {
                         return Ok(String::new());
                     }
@@ -398,15 +462,15 @@ fn run(cli: Cli) -> Result<String, String> {
 
         Command::Backfill => {
             let db = get_db()?;
-            db.set_embedding_model(clawmark::embedding::model_id())?;
+            db.set_embedding_model(geniuz::embedding::model_id())?;
 
             let uncached = db.get_uncached_signals()?;
             if uncached.is_empty() {
-                return Ok("All signals already cached.".to_string());
+                return Ok("All memories cached.".to_string());
             }
 
-            println!("[backfill] {} signals to embed...", uncached.len());
-            let backend = clawmark::embedding::create_backend()?;
+            println!("[backfill] {} memories to embed...", uncached.len());
+            let backend = geniuz::embedding::create_backend()?;
 
             let mut cached = 0;
             let mut failed = 0;
@@ -430,16 +494,17 @@ fn run(cli: Cli) -> Result<String, String> {
             let db = get_db()?;
             let signals = db.count()?;
             let embeddings = db.embedding_count()?;
-            let path = std::env::var("CLAWMARK_STATION")
+            let path = std::env::var("GENIUZ_STATION")
+                .or_else(|_| std::env::var("CLAWMARK_STATION"))
                 .unwrap_or_else(|_| default_station_path().to_string_lossy().to_string());
 
             let mut lines = vec![
                 format!("Station: {}", path),
-                format!("Signals: {}", signals),
+                format!("Memories: {}", signals),
                 format!("Embeddings: {}/{} cached", embeddings, signals),
             ];
             if embeddings < signals {
-                lines.push("Run 'clawmark backfill' to cache remaining.".to_string());
+                lines.push("Run 'geniuz backfill' to cache remaining.".to_string());
             } else if signals > 0 {
                 lines.push("Semantic search: ready".to_string());
             }

@@ -61,7 +61,7 @@ impl DatabaseManager {
     pub fn signal_with_backend(
         &self, content: &str, gist: Option<&str>, parent: Option<&str>,
         created_at: Option<&str>,
-        backend: Option<&dyn clawmark::embedding::EmbeddingBackend>,
+        backend: Option<&dyn geniuz::embedding::EmbeddingBackend>,
     ) -> Result<String, String> {
         if content.trim().is_empty() {
             return Err("Content cannot be empty".to_string());
@@ -91,12 +91,12 @@ impl DatabaseManager {
         let embedding = if let Some(b) = backend {
             match b.embed(content) {
                 Ok(emb) => Some(emb),
-                Err(e) => { eprintln!("[clawmark] Embedding failed for {}: {}", &uuid[..8], e); None }
+                Err(e) => { eprintln!("[geniuz] Embedding failed for {}: {}", &uuid[..8], e); None }
             }
         } else {
-            match clawmark::embedding::embed_content(content) {
+            match geniuz::embedding::embed_content(content) {
                 Ok(emb) => Some(emb),
-                Err(e) => { eprintln!("[clawmark] Embedding failed for {}: {}", &uuid[..8], e); None }
+                Err(e) => { eprintln!("[geniuz] Embedding failed for {}: {}", &uuid[..8], e); None }
             }
         };
 
@@ -116,7 +116,7 @@ impl DatabaseManager {
             ).map_err(|e| format!("Failed to insert: {}", e))?;
         }
         if let Some(ref emb) = embedding {
-            let blob = clawmark::embedding::embedding_to_blob(emb);
+            let blob = geniuz::embedding::embedding_to_blob(emb);
             tx.execute(
                 "INSERT OR REPLACE INTO signal_embeddings (signal_uuid, embedding) VALUES (?1, ?2)",
                 rusqlite::params![&uuid, blob],
@@ -230,11 +230,11 @@ impl DatabaseManager {
     pub fn semantic_search(&self, query: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
         let cached = self.get_cached_embeddings()?;
         if cached.is_empty() {
-            eprintln!("[clawmark] No embedding cache. Run: clawmark backfill");
+            eprintln!("[geniuz] No embedding cache. Run: geniuz backfill");
             return self.keyword_search(query, limit);
         }
 
-        let results = clawmark::embedding::semantic_search_cached(query, cached, limit)?;
+        let results = geniuz::embedding::semantic_search_cached(query, cached, limit)?;
         Ok(results.into_iter().map(|r| SignalEntry {
             signal_uuid: r.signal_uuid, gist: r.gist, created_at: r.created_at,
             parent_uuid: None, content: None, score: Some(r.score),
@@ -292,7 +292,7 @@ impl DatabaseManager {
 
     pub fn cache_embedding(&self, uuid: &str, embedding: &[f32]) -> Result<(), String> {
         let conn = self.conn()?;
-        let blob = clawmark::embedding::embedding_to_blob(embedding);
+        let blob = geniuz::embedding::embedding_to_blob(embedding);
         conn.execute(
             "INSERT OR REPLACE INTO signal_embeddings (signal_uuid, embedding) VALUES (?1, ?2)",
             rusqlite::params![uuid, blob],
@@ -300,7 +300,7 @@ impl DatabaseManager {
         Ok(())
     }
 
-    pub fn get_cached_embeddings(&self) -> Result<Vec<clawmark::embedding::CachedEmbedding>, String> {
+    pub fn get_cached_embeddings(&self) -> Result<Vec<geniuz::embedding::CachedEmbedding>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT e.signal_uuid,
@@ -313,13 +313,13 @@ impl DatabaseManager {
         let rows = stmt.query_map([], |row| {
             let blob: Vec<u8> = row.get(3)?;
             let uuid: String = row.get(0)?;
-            match clawmark::embedding::blob_to_embedding(&blob) {
-                Ok(embedding) => Ok(Some(clawmark::embedding::CachedEmbedding {
+            match geniuz::embedding::blob_to_embedding(&blob) {
+                Ok(embedding) => Ok(Some(geniuz::embedding::CachedEmbedding {
                     signal_uuid: uuid, gist: row.get(1)?,
                     created_at: row.get(2)?, embedding,
                 })),
                 Err(e) => {
-                    eprintln!("[clawmark] Skipping corrupted embedding for {}: {}", &uuid[..8.min(uuid.len())], e);
+                    eprintln!("[geniuz] Skipping corrupted embedding for {}: {}", &uuid[..8.min(uuid.len())], e);
                     Ok(None)
                 }
             }

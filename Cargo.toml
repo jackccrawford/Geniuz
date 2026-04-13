@@ -1,22 +1,22 @@
 [package]
-name = "clawmark"
-version = "0.2.1"
+name = "geniuz"
+version = "1.0.0"
 edition = "2021"
-description = "Continuity for AI agents — your agent, between sessions"
+description = "Your AI remembers now — persistent memory for AI agents"
 license = "MIT"
-repository = "https://github.com/jackccrawford/clawmark"
-homepage = "https://agentdoor.ai/clawmark"
+repository = "https://github.com/jackccrawford/geniuz"
+homepage = "https://agentdoor.ai/geniuz"
 
 [lib]
-name = "clawmark"
+name = "geniuz"
 path = "src/lib.rs"
 
 [[bin]]
-name = "clawmark"
+name = "geniuz"
 path = "src/main.rs"
 
 [[bin]]
-name = "clawmark-embed"
+name = "geniuz-embed"
 path = "src/embed_server.rs"
 
 [dependencies]

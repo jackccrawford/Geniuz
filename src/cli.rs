@@ -2,12 +2,12 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "clawmark",
+    name = "geniuz",
     version,
-    about = "Continuity for AI agents",
-    long_about = "CLAWMARK: Continuity for AI agents.\n\nSemantic search across sessions. Works with any agent framework:\nOpenClaw, Claude Code, Aider, Cursor, LangChain, custom agents —\nanything that can run a shell command.\n\nMultiple agents can share a station for coordinated continuity.",
-    before_help = "Start here: 'clawmark tune --recent' to see what's in your station.",
-    after_help = "Examples:\n  clawmark signal -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  clawmark tune \"auth\"                       Semantic search\n  clawmark tune --recent                     Latest signals\n  clawmark capture ./notes/                  Bulk-load markdown files\n  clawmark capture --openclaw                Import OpenClaw memory\n  clawmark backfill                          Build embedding cache\n\nStation: Defaults to ~/.clawmark/station.db\n  Override: CLAWMARK_STATION=/path/to/shared.db clawmark signal ...\n  Multiple agents can write to the same station for shared memory.\n\nUse \"clawmark [command] --help\" for more information."
+    about = "Your AI remembers now",
+    long_about = "GENIUZ: Your AI remembers now.\n\nPersistent memory for AI agents. Three R's: remember, recall, recent.\nWorks with any agent framework — Claude Code, Cursor, Windsurf, Aider,\nor anything that can run a shell command.",
+    before_help = "Start here: 'geniuz recent' to see what's in your station.",
+    after_help = "Examples:\n  geniuz remember -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recent                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nStation: Defaults to ~/.geniuz/station.db\n  Override: GENIUZ_STATION=/path/to/station.db geniuz remember ...\n  Multiple agents can share a station for shared memory.\n\nUse \"geniuz [command] --help\" for more information."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -33,13 +33,13 @@ impl Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Transmit a signal to your station
+    /// Save a memory — what you learned, decided, or discovered
     #[command(
         arg_required_else_help = true,
-        after_help = "Examples:\n  clawmark signal -c \"Fixed the auth bug\"\n  clawmark signal -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  clawmark signal -c @notes.md -g \"session: review\"\n  echo \"content\" | clawmark signal -c - -g \"piped: from process\"\n\nTip: The gist is how future agents find this signal. Write for them."
+        after_help = "Examples:\n  geniuz remember -c \"Fixed the auth bug\"\n  geniuz remember -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz remember -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz remember -c - -g \"piped: from process\"\n\nTip: The gist is how future agents find this memory. Write for them."
     )]
-    Signal {
-        /// Content to transmit
+    Remember {
+        /// Content to save
         #[arg(short, long)]
         content: String,
 
@@ -47,7 +47,7 @@ pub enum Command {
         #[arg(short, long)]
         gist: Option<String>,
 
-        /// Thread to a parent signal (UUID prefix)
+        /// Thread to a parent memory (UUID prefix)
         #[arg(short, long)]
         parent: Option<String>,
 
@@ -56,20 +56,16 @@ pub enum Command {
         json: bool,
     },
 
-    /// Search your station — semantic by default
+    /// Search your memories — semantic by default
     #[command(
-        after_help = "Examples:\n  clawmark tune \"auth token\"                  Semantic search\n  clawmark tune --keyword \"auth\"               Keyword fallback\n  clawmark tune --recent                       Latest signals\n  clawmark tune --random                       Discover something\n  clawmark tune --full \"auth\"                   Include full content\n\nTip: Run 'clawmark backfill' first to enable semantic search."
+        after_help = "Examples:\n  geniuz recall \"auth token\"                  Semantic search\n  geniuz recall --keyword \"auth\"               Keyword fallback\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n\nTip: Run 'geniuz backfill' first to enable semantic search."
     )]
-    Tune {
+    Recall {
         /// Search query
         query: Option<String>,
 
-        /// Show recent signals
-        #[arg(long, conflicts_with_all = ["random"])]
-        recent: bool,
-
-        /// Discover a random signal
-        #[arg(long, conflicts_with_all = ["recent"])]
+        /// Discover a random memory
+        #[arg(long)]
         random: bool,
 
         /// Force keyword search (skip semantic)
@@ -89,10 +85,28 @@ pub enum Command {
         json: bool,
     },
 
+    /// Show recent memories
+    #[command(
+        after_help = "Examples:\n  geniuz recent                              Latest 20 memories\n  geniuz recent -l 5                         Latest 5\n  geniuz recent --full                       Include full content\n  geniuz recent --json                       JSON output"
+    )]
+    Recent {
+        /// Max results
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+
+        /// Include full content
+        #[arg(short, long)]
+        full: bool,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Capture files or directories into your station
     #[command(
         arg_required_else_help = true,
-        after_help = "Examples:\n  clawmark capture notes.md                              Single file\n  clawmark capture ./docs/                               All .md files in directory\n  clawmark capture *.md                                  Shell glob\n  clawmark capture --split notes.md                      Split by ## headers\n  clawmark capture --gist-prefix \"docs:\" a.md            Prefix all gists\n  clawmark capture --openclaw ~/.openclaw/workspace      Import OpenClaw memory\n  clawmark capture --dry-run ./notes/                    Preview without importing\n\nEach file becomes a signal. With --split, each ## section becomes\na threaded signal under the file's root signal.\n\nWith --openclaw, reads MEMORY.md and memory/YYYY-MM-DD.md files,\npreserving timestamps and threading daily sections."
+        after_help = "Examples:\n  geniuz capture notes.md                              Single file\n  geniuz capture ./docs/                               All .md files in directory\n  geniuz capture *.md                                  Shell glob\n  geniuz capture --split notes.md                      Split by ## headers\n  geniuz capture --gist-prefix \"docs:\" a.md            Prefix all gists\n  geniuz capture --openclaw ~/.openclaw/workspace      Import OpenClaw memory\n  geniuz capture --dry-run ./notes/                    Preview without importing\n\nEach file becomes a memory. With --split, each ## section becomes\na threaded memory under the file's root."
     )]
     Capture {
         /// Files or directories to capture (not used with --openclaw)
@@ -102,7 +116,7 @@ pub enum Command {
         #[arg(long, conflicts_with = "paths")]
         openclaw: Option<Option<String>>,
 
-        /// Split files by ## headers into threaded signals
+        /// Split files by ## headers into threaded memories
         #[arg(long)]
         split: bool,
 
@@ -115,24 +129,24 @@ pub enum Command {
         dry_run: bool,
     },
 
-    /// Watch for new signals in real time
+    /// Watch for new memories in real time
     #[command(
-        after_help = "Examples:\n  clawmark watch                              Poll every 5 minutes\n  clawmark watch --interval 60                Poll every 60 seconds\n  clawmark watch --since 9D778206             Only signals after this UUID\n  clawmark watch --exec \"echo {uuid} {gist}\"  Run command on each new signal\n  clawmark watch --once                       Check once and exit\n\nPlaceholders for --exec:\n  {uuid}       Signal UUID (short)\n  {gist}       Signal gist\n  {content}    Full signal content\n  {created_at} Timestamp\n  {parent}     Parent UUID (empty if none)\n  {json}       Full signal as JSON"
+        after_help = "Examples:\n  geniuz watch                              Poll every 5 minutes\n  geniuz watch --interval 60                Poll every 60 seconds\n  geniuz watch --since 9D778206             Only memories after this UUID\n  geniuz watch --exec \"echo {uuid} {gist}\"  Run command on each new memory\n  geniuz watch --once                       Check once and exit\n\nPlaceholders for --exec:\n  {uuid}       UUID (short)\n  {gist}       Gist\n  {content}    Full content\n  {created_at} Timestamp\n  {parent}     Parent UUID (empty if none)\n  {json}       Full memory as JSON"
     )]
     Watch {
         /// Poll interval in seconds (default: 300 = 5 minutes)
         #[arg(short, long, default_value = "300")]
         interval: u64,
 
-        /// Only show signals after this UUID
+        /// Only show memories after this UUID
         #[arg(short, long)]
         since: Option<String>,
 
-        /// Run command for each new signal (supports {uuid}, {gist}, {content}, {created_at}, {parent}, {json} placeholders)
+        /// Run command for each new memory (supports {uuid}, {gist}, {content}, {created_at}, {parent}, {json} placeholders)
         #[arg(short, long)]
         exec: Option<String>,
 
-        /// Check once and exit (exit code 0 = new signals, 1 = none)
+        /// Check once and exit (exit code 0 = new memories, 1 = none)
         #[arg(long)]
         once: bool,
 
@@ -143,7 +157,7 @@ pub enum Command {
 
     /// Build embedding cache for semantic search
     #[command(
-        after_help = "Embeds all signal content using ONNX (paraphrase-multilingual-MiniLM-L12-v2).\nFirst run downloads the model (~118MB). Subsequent runs only process new signals."
+        after_help = "Embeds all content using ONNX (paraphrase-multilingual-MiniLM-L12-v2).\nFirst run downloads the model (~118MB). Subsequent runs only process new memories."
     )]
     Backfill,
 
@@ -165,7 +179,7 @@ pub enum McpCommand {
 
     /// Install Geniuz into Claude Desktop config
     #[command(
-        after_help = "Adds clawmark as an MCP server in Claude Desktop's config file.\nAfter running this, restart Claude Desktop to activate Geniuz.\n\nYour Claude will have three new tools: remember, recall, recall_recent."
+        after_help = "Adds Geniuz as an MCP server in Claude Desktop's config file.\nAfter running this, restart Claude Desktop to activate.\n\nYour Claude will have three new tools: remember, recall, recent."
     )]
     Install,
 

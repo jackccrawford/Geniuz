@@ -1,7 +1,7 @@
-//! MCP server over stdio — exposes clawmark as remember/recall tools
+//! MCP server over stdio — exposes geniuz as remember/recall tools
 //!
 //! Claude Desktop connects via stdio transport. The agent gets three
-//! human-friendly tools that wrap clawmark's signal/tune operations.
+//! human-friendly tools that wrap geniuz's signal/tune operations.
 //!
 //! Tool descriptions guide the model toward proactive memory use —
 //! recalling on startup, remembering during conversation.
@@ -292,11 +292,11 @@ fn config_path() -> std::path::PathBuf {
     }
 }
 
-fn clawmark_binary_path() -> String {
+fn geniuz_binary_path() -> String {
     // Use the currently running binary's path
     std::env::current_exe()
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "clawmark".to_string())
+        .unwrap_or_else(|_| "geniuz".to_string())
 }
 
 pub fn install() -> Result<String, String> {
@@ -322,7 +322,7 @@ pub fn install() -> Result<String, String> {
         config["mcpServers"] = serde_json::json!({});
     }
 
-    let binary = clawmark_binary_path();
+    let binary = geniuz_binary_path();
 
     // Add geniuz server
     config["mcpServers"]["geniuz"] = serde_json::json!({
@@ -364,7 +364,7 @@ pub fn status() -> Result<String, String> {
     let config_file = config_path();
 
     if !config_file.exists() {
-        return Ok("Claude Desktop config not found. Run 'clawmark mcp install' first.".to_string());
+        return Ok("Claude Desktop config not found. Run 'geniuz mcp install' first.".to_string());
     }
 
     let content = std::fs::read_to_string(&config_file)
@@ -401,7 +401,7 @@ pub fn status() -> Result<String, String> {
 
     if !installed {
         lines.push(String::new());
-        lines.push("Run 'clawmark mcp install' to add Geniuz to Claude Desktop.".to_string());
+        lines.push("Run 'geniuz mcp install' to add Geniuz to Claude Desktop.".to_string());
     }
 
     Ok(lines.join("\n"))
