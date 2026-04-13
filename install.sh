@@ -1,10 +1,10 @@
 #!/bin/sh
 set -e
 
-REPO="jackccrawford/clawmark"
-CLAWMARK_HOME="${CLAWMARK_HOME:-$HOME/.clawmark}"
-INSTALL_DIR="${CLAWMARK_HOME}/bin"
-LIB_DIR="${CLAWMARK_HOME}/lib"
+REPO="jackccrawford/geniuz"
+GENIUZ_HOME="${GENIUZ_HOME:-$HOME/.geniuz}"
+INSTALL_DIR="${GENIUZ_HOME}/bin"
+LIB_DIR="${GENIUZ_HOME}/lib"
 
 # Detect platform
 OS="$(uname -s)"
@@ -31,25 +31,25 @@ if [ -z "$LATEST" ]; then
   exit 1
 fi
 
-URL="https://github.com/${REPO}/releases/download/${LATEST}/clawmark-${NAME}.tar.gz"
-SHA_URL="https://github.com/${REPO}/releases/download/${LATEST}/clawmark-${NAME}.tar.gz.sha256"
+URL="https://github.com/${REPO}/releases/download/${LATEST}/geniuz-${NAME}.tar.gz"
+SHA_URL="https://github.com/${REPO}/releases/download/${LATEST}/geniuz-${NAME}.tar.gz.sha256"
 
-echo "Installing clawmark ${LATEST} (${NAME})..."
+echo "Installing Geniuz ${LATEST} (${NAME})..."
 
 # Download to temp
 TMPDIR=$(mktemp -d)
 trap 'rm -rf "$TMPDIR"' EXIT
 
-curl -fsSL "$URL" -o "$TMPDIR/clawmark.tar.gz"
-curl -fsSL "$SHA_URL" -o "$TMPDIR/clawmark.sha256" 2>/dev/null || true
+curl -fsSL "$URL" -o "$TMPDIR/geniuz.tar.gz"
+curl -fsSL "$SHA_URL" -o "$TMPDIR/geniuz.sha256" 2>/dev/null || true
 
 # Verify checksum if available
-if [ -f "$TMPDIR/clawmark.sha256" ]; then
-  EXPECTED=$(cat "$TMPDIR/clawmark.sha256" | awk '{print $1}')
+if [ -f "$TMPDIR/geniuz.sha256" ]; then
+  EXPECTED=$(cat "$TMPDIR/geniuz.sha256" | awk '{print $1}')
   if command -v sha256sum > /dev/null 2>&1; then
-    ACTUAL=$(sha256sum "$TMPDIR/clawmark.tar.gz" | awk '{print $1}')
+    ACTUAL=$(sha256sum "$TMPDIR/geniuz.tar.gz" | awk '{print $1}')
   elif command -v shasum > /dev/null 2>&1; then
-    ACTUAL=$(shasum -a 256 "$TMPDIR/clawmark.tar.gz" | awk '{print $1}')
+    ACTUAL=$(shasum -a 256 "$TMPDIR/geniuz.tar.gz" | awk '{print $1}')
   else
     echo "  Warning: no sha256sum or shasum found, skipping verification" >&2
     ACTUAL="$EXPECTED"
@@ -67,14 +67,14 @@ fi
 # Extract
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$TMPDIR/extract"
-tar xzf "$TMPDIR/clawmark.tar.gz" -C "$TMPDIR/extract"
-cp "$TMPDIR/extract/clawmark" "$INSTALL_DIR/"
-chmod +x "${INSTALL_DIR}/clawmark"
+tar xzf "$TMPDIR/geniuz.tar.gz" -C "$TMPDIR/extract"
+cp "$TMPDIR/extract/geniuz" "$INSTALL_DIR/"
+chmod +x "${INSTALL_DIR}/geniuz"
 
-# Install clawmark-embed if present
-if [ -f "$TMPDIR/extract/clawmark-embed" ]; then
-  cp "$TMPDIR/extract/clawmark-embed" "$INSTALL_DIR/"
-  chmod +x "${INSTALL_DIR}/clawmark-embed"
+# Install geniuz-embed if present
+if [ -f "$TMPDIR/extract/geniuz-embed" ]; then
+  cp "$TMPDIR/extract/geniuz-embed" "$INSTALL_DIR/"
+  chmod +x "${INSTALL_DIR}/geniuz-embed"
 fi
 
 # Install bundled ONNX Runtime if present
@@ -94,26 +94,26 @@ if [ -n "$BUNDLED_LIB" ]; then
     ln -sf "$LIB_NAME" "$LIB_DIR/libonnxruntime.so"
     ln -sf "$LIB_NAME" "$LIB_DIR/libonnxruntime.so.1"
     # Wrapper script for LD_LIBRARY_PATH
-    mv "${INSTALL_DIR}/clawmark" "${INSTALL_DIR}/clawmark.bin"
-    cat > "${INSTALL_DIR}/clawmark" <<'WRAPPER'
+    mv "${INSTALL_DIR}/geniuz" "${INSTALL_DIR}/geniuz.bin"
+    cat > "${INSTALL_DIR}/geniuz" <<'WRAPPER'
 #!/bin/sh
 SELF="$0"; while [ -L "$SELF" ]; do SELF="$(readlink "$SELF")"; done
 DIR="$(cd "$(dirname "$SELF")" && pwd)"
 export LD_LIBRARY_PATH="${DIR}/../lib:${LD_LIBRARY_PATH}"
-exec "${DIR}/clawmark.bin" "$@"
+exec "${DIR}/geniuz.bin" "$@"
 WRAPPER
-    chmod +x "${INSTALL_DIR}/clawmark"
-    # Same for clawmark-embed if present
-    if [ -f "${INSTALL_DIR}/clawmark-embed" ]; then
-      mv "${INSTALL_DIR}/clawmark-embed" "${INSTALL_DIR}/clawmark-embed.bin"
-      cat > "${INSTALL_DIR}/clawmark-embed" <<'WRAPPER'
+    chmod +x "${INSTALL_DIR}/geniuz"
+    # Same for geniuz-embed if present
+    if [ -f "${INSTALL_DIR}/geniuz-embed" ]; then
+      mv "${INSTALL_DIR}/geniuz-embed" "${INSTALL_DIR}/geniuz-embed.bin"
+      cat > "${INSTALL_DIR}/geniuz-embed" <<'WRAPPER'
 #!/bin/sh
 SELF="$0"; while [ -L "$SELF" ]; do SELF="$(readlink "$SELF")"; done
 DIR="$(cd "$(dirname "$SELF")" && pwd)"
 export LD_LIBRARY_PATH="${DIR}/../lib:${LD_LIBRARY_PATH}"
-exec "${DIR}/clawmark-embed.bin" "$@"
+exec "${DIR}/geniuz-embed.bin" "$@"
 WRAPPER
-      chmod +x "${INSTALL_DIR}/clawmark-embed"
+      chmod +x "${INSTALL_DIR}/geniuz-embed"
     fi
   else
     # macOS: copy both versioned and unversioned dylib
@@ -121,25 +121,25 @@ WRAPPER
       [ -f "$f" ] && cp "$f" "$LIB_DIR/"
     done
     # Wrapper script for DYLD_LIBRARY_PATH
-    mv "${INSTALL_DIR}/clawmark" "${INSTALL_DIR}/clawmark.bin"
-    cat > "${INSTALL_DIR}/clawmark" <<'WRAPPER'
+    mv "${INSTALL_DIR}/geniuz" "${INSTALL_DIR}/geniuz.bin"
+    cat > "${INSTALL_DIR}/geniuz" <<'WRAPPER'
 #!/bin/sh
 SELF="$0"; while [ -L "$SELF" ]; do SELF="$(readlink "$SELF")"; done
 DIR="$(cd "$(dirname "$SELF")" && pwd)"
 export DYLD_LIBRARY_PATH="${DIR}/../lib:${DYLD_LIBRARY_PATH}"
-exec "${DIR}/clawmark.bin" "$@"
+exec "${DIR}/geniuz.bin" "$@"
 WRAPPER
-    chmod +x "${INSTALL_DIR}/clawmark"
-    if [ -f "${INSTALL_DIR}/clawmark-embed" ]; then
-      mv "${INSTALL_DIR}/clawmark-embed" "${INSTALL_DIR}/clawmark-embed.bin"
-      cat > "${INSTALL_DIR}/clawmark-embed" <<'WRAPPER'
+    chmod +x "${INSTALL_DIR}/geniuz"
+    if [ -f "${INSTALL_DIR}/geniuz-embed" ]; then
+      mv "${INSTALL_DIR}/geniuz-embed" "${INSTALL_DIR}/geniuz-embed.bin"
+      cat > "${INSTALL_DIR}/geniuz-embed" <<'WRAPPER'
 #!/bin/sh
 SELF="$0"; while [ -L "$SELF" ]; do SELF="$(readlink "$SELF")"; done
 DIR="$(cd "$(dirname "$SELF")" && pwd)"
 export DYLD_LIBRARY_PATH="${DIR}/../lib:${DYLD_LIBRARY_PATH}"
-exec "${DIR}/clawmark-embed.bin" "$@"
+exec "${DIR}/geniuz-embed.bin" "$@"
 WRAPPER
-      chmod +x "${INSTALL_DIR}/clawmark-embed"
+      chmod +x "${INSTALL_DIR}/geniuz-embed"
     fi
   fi
   echo "  Bundled ONNX Runtime installed."
@@ -154,27 +154,35 @@ elif [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
 fi
 
 if [ -n "$SYMLINK_DIR" ]; then
-  ln -sf "${INSTALL_DIR}/clawmark" "$SYMLINK_DIR/clawmark"
-  if [ -f "${INSTALL_DIR}/clawmark-embed" ]; then
-    ln -sf "${INSTALL_DIR}/clawmark-embed" "$SYMLINK_DIR/clawmark-embed"
+  ln -sf "${INSTALL_DIR}/geniuz" "$SYMLINK_DIR/geniuz"
+  if [ -f "${INSTALL_DIR}/geniuz-embed" ]; then
+    ln -sf "${INSTALL_DIR}/geniuz-embed" "$SYMLINK_DIR/geniuz-embed"
   fi
-  echo "  Linked to ${SYMLINK_DIR}/clawmark"
+  echo "  Linked to ${SYMLINK_DIR}/geniuz"
+fi
+
+# Migrate legacy station if present
+if [ -d "$HOME/.clawmark" ] && [ ! -d "$GENIUZ_HOME/station.db" ]; then
+  if [ -f "$HOME/.clawmark/station.db" ]; then
+    echo "  Found legacy station at ~/.clawmark/"
+    echo "  Geniuz will read it automatically — no migration needed."
+  fi
 fi
 
 # Verify
-if "${INSTALL_DIR}/clawmark" --version > /dev/null 2>&1; then
-  VERSION=$("${INSTALL_DIR}/clawmark" --version)
+if "${INSTALL_DIR}/geniuz" --version > /dev/null 2>&1; then
+  VERSION=$("${INSTALL_DIR}/geniuz" --version)
   echo ""
   echo "  Installed: ${VERSION}"
-  echo "  Location:  ${CLAWMARK_HOME}/"
+  echo "  Location:  ${GENIUZ_HOME}/"
   echo ""
 
-  # Check if clawmark is on PATH now
-  if command -v clawmark > /dev/null 2>&1; then
-    echo "  Ready to use: clawmark"
+  # Check if geniuz is on PATH now
+  if command -v geniuz > /dev/null 2>&1; then
+    echo "  Ready to use: geniuz"
   elif [ -n "$SYMLINK_DIR" ]; then
     case ":$PATH:" in
-      *":${SYMLINK_DIR}:"*) echo "  Ready to use: clawmark" ;;
+      *":${SYMLINK_DIR}:"*) echo "  Ready to use: geniuz" ;;
       *) echo "  Add to PATH: export PATH=\"${SYMLINK_DIR}:\$PATH\"" ;;
     esac
   else
@@ -182,7 +190,7 @@ if "${INSTALL_DIR}/clawmark" --version > /dev/null 2>&1; then
   fi
 
   echo ""
-  echo "  Next: clawmark signal -c \"Hello from clawmark\" -g \"first signal\""
+  echo "  Next: geniuz remember -c \"Hello from Geniuz\" -g \"first memory\""
 else
   echo "Installation failed" >&2
   exit 1
