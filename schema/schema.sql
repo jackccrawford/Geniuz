@@ -33,6 +33,19 @@ WITH RECURSIVE chain(signal_uuid, parent_uuid, gist, created_at, level, root_uui
 )
 SELECT * FROM chain;
 
+-- Signals are immutable — the log is the truth
+CREATE TRIGGER IF NOT EXISTS prevent_signal_delete
+BEFORE DELETE ON signals
+BEGIN
+    SELECT RAISE(ABORT, 'Signals are immutable — delete is not permitted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_signal_update
+BEFORE UPDATE ON signals
+BEGIN
+    SELECT RAISE(ABORT, 'Signals are immutable — update is not permitted');
+END;
+
 CREATE TABLE IF NOT EXISTS signal_embeddings (
     signal_uuid TEXT PRIMARY KEY,
     embedding   BLOB NOT NULL

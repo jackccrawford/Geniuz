@@ -1,1 +1,13 @@
 target/
+
+# Xcode
+*.xcuserdata/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/
+
+# macOS
+.DS_Store
+
+# Build artifacts
+*.dmg
