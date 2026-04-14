@@ -281,16 +281,61 @@ pub fn serve() {
 // Install / Status
 // =============================================================================
 
-fn config_path() -> std::path::PathBuf {
-    // dirs::config_dir() returns the right base on every platform:
-    //   macOS:   ~/Library/Application Support
-    //   Windows: %APPDATA%        (C:\Users\<u>\AppData\Roaming)
-    //   Linux:   ~/.config        (XDG_CONFIG_HOME or default)
-    // All three are where Claude Desktop reads its config from.
-    dirs::config_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("Claude")
-        .join("claude_desktop_config.json")
+/// All Claude Desktop config paths on this platform.
+///
+/// Most platforms have one path. Windows can have two because Claude Desktop
+/// ships in two distribution flavors:
+///   1. `.exe` download → reads from `%APPDATA%\Claude\` (standard, what
+///      `dirs::config_dir()` returns).
+///   2. Microsoft Store / MSIX package → reads from a sandboxed location
+///      `%LOCALAPPDATA%\Packages\Claude_<hash>\LocalCache\Roaming\Claude\`.
+///      The package directory only exists when the Store version is installed,
+///      so we detect at runtime by scanning for any `Claude_*` package folder.
+///
+/// We always include the standard path (so first-time installs land somewhere
+/// useful even if Claude isn't installed yet) and additionally include any
+/// Store package path that exists right now. Writing to both is harmless —
+/// each Claude variant only reads from its own path.
+fn config_paths() -> Vec<std::path::PathBuf> {
+    let mut paths = Vec::new();
+
+    // Standard cross-platform location:
+    //   macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json
+    //   Windows: %APPDATA%\Claude\claude_desktop_config.json (.exe Claude)
+    //   Linux:   ~/.config/Claude/claude_desktop_config.json
+    if let Some(base) = dirs::config_dir() {
+        paths.push(base.join("Claude").join("claude_desktop_config.json"));
+    }
+
+    // Windows-only: detect Microsoft Store packaged Claude Desktop.
+    #[cfg(target_os = "windows")]
+    if let Some(local) = dirs::data_local_dir() {
+        let packages = local.join("Packages");
+        if packages.exists() {
+            if let Ok(entries) = std::fs::read_dir(&packages) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name();
+                    if name.to_string_lossy().starts_with("Claude_") {
+                        paths.push(
+                            entry.path()
+                                .join("LocalCache")
+                                .join("Roaming")
+                                .join("Claude")
+                                .join("claude_desktop_config.json"),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    if paths.is_empty() {
+        // Last-resort fallback so install() always has *somewhere* to write
+        paths.push(std::path::PathBuf::from(".")
+            .join("Claude")
+            .join("claude_desktop_config.json"));
+    }
+    paths
 }
 
 fn geniuz_binary_path() -> String {
@@ -301,91 +346,142 @@ fn geniuz_binary_path() -> String {
 }
 
 pub fn install() -> Result<String, String> {
-    let config_file = config_path();
+    let binary = geniuz_binary_path();
+    let paths = config_paths();
+    let mut written = Vec::new();
+    let mut errors = Vec::new();
 
-    // Read existing config or create new
-    let mut config: serde_json::Value = if config_file.exists() {
-        let content = std::fs::read_to_string(&config_file)
-            .map_err(|e| format!("Failed to read {}: {}", config_file.display(), e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("Failed to parse config: {}", e))?
-    } else {
-        // Create parent directories
-        if let Some(parent) = config_file.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create config directory: {}", e))?;
+    for config_file in &paths {
+        match install_to_path(config_file, &binary) {
+            Ok(()) => written.push(config_file.clone()),
+            Err(e) => errors.push(format!("{}: {}", config_file.display(), e)),
         }
-        serde_json::json!({})
-    };
-
-    // Ensure mcpServers exists
-    if config.get("mcpServers").is_none() {
-        config["mcpServers"] = serde_json::json!({});
     }
 
-    let binary = geniuz_binary_path();
-
-    // Add geniuz server
-    config["mcpServers"]["Geniuz"] = serde_json::json!({
-        "command": binary,
-        "args": ["mcp", "serve"]
-    });
-
-    // Write back
-    let formatted = serde_json::to_string_pretty(&config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    std::fs::write(&config_file, &formatted)
-        .map_err(|e| format!("Failed to write {}: {}", config_file.display(), e))?;
+    if written.is_empty() {
+        return Err(format!(
+            "Failed to install MCP config — no writable location:\n  {}",
+            errors.join("\n  ")
+        ));
+    }
 
     let mut lines = vec![
         "✅ Geniuz installed in Claude Desktop.".to_string(),
         String::new(),
-        format!("  Config: {}", config_file.display()),
-        format!("  Binary: {}", binary),
-        String::new(),
-        "  Restart Claude Desktop to activate.".to_string(),
-        "  Your Claude will have: remember, recall, recall_recent".to_string(),
     ];
+    if written.len() == 1 {
+        lines.push(format!("  Config: {}", written[0].display()));
+    } else {
+        lines.push("  Config written to:".to_string());
+        for p in &written {
+            lines.push(format!("    {}", p.display()));
+        }
+    }
+    lines.push(format!("  Binary: {}", binary));
+    lines.push(String::new());
+    lines.push("  Restart Claude Desktop to activate.".to_string());
+    lines.push("  Your Claude will have: remember, recall, recall_recent".to_string());
 
-    // Check if station exists
+    if !errors.is_empty() {
+        lines.push(String::new());
+        lines.push("  Note: some locations were not writable (this is usually fine):".to_string());
+        for e in &errors {
+            lines.push(format!("    {}", e));
+        }
+    }
+
     let station = crate::default_db_path();
     if station.exists() {
-        let db = crate::get_db()?;
-        let count = db.count().unwrap_or(0);
-        if count > 0 {
-            lines.push(String::new());
-            lines.push(format!("  Station has {} existing memories — Claude will find them.", count));
+        if let Ok(db) = crate::get_db() {
+            let count = db.count().unwrap_or(0);
+            if count > 0 {
+                lines.push(String::new());
+                lines.push(format!("  Station has {} existing memories — Claude will find them.", count));
+            }
         }
     }
 
     Ok(lines.join("\n"))
 }
 
-pub fn status() -> Result<String, String> {
-    let config_file = config_path();
+/// Read-modify-write a single Claude Desktop config file: load existing JSON
+/// (or start fresh if absent), upsert the Geniuz MCP entry, write back.
+fn install_to_path(config_file: &std::path::Path, binary: &str) -> Result<(), String> {
+    let mut config: serde_json::Value = if config_file.exists() {
+        let content = std::fs::read_to_string(config_file)
+            .map_err(|e| format!("read failed: {}", e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("parse failed: {}", e))?
+    } else {
+        if let Some(parent) = config_file.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("mkdir failed: {}", e))?;
+        }
+        serde_json::json!({})
+    };
 
-    if !config_file.exists() {
-        return Ok("Claude Desktop config not found. Run 'geniuz mcp install' first.".to_string());
+    if config.get("mcpServers").is_none() {
+        config["mcpServers"] = serde_json::json!({});
+    }
+    config["mcpServers"]["Geniuz"] = serde_json::json!({
+        "command": binary,
+        "args": ["mcp", "serve"]
+    });
+
+    let formatted = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("serialize failed: {}", e))?;
+    std::fs::write(config_file, &formatted)
+        .map_err(|e| format!("write failed: {}", e))?;
+    Ok(())
+}
+
+pub fn status() -> Result<String, String> {
+    let paths = config_paths();
+    let mut lines = Vec::new();
+    let mut any_installed = false;
+    let mut any_present = false;
+
+    for config_file in &paths {
+        if !config_file.exists() {
+            lines.push(format!("Config: {} (not present)", config_file.display()));
+            continue;
+        }
+        any_present = true;
+
+        let content = match std::fs::read_to_string(config_file) {
+            Ok(c) => c,
+            Err(e) => {
+                lines.push(format!("Config: {} (read error: {})", config_file.display(), e));
+                continue;
+            }
+        };
+        let config: serde_json::Value = match serde_json::from_str(&content) {
+            Ok(v) => v,
+            Err(e) => {
+                lines.push(format!("Config: {} (parse error: {})", config_file.display(), e));
+                continue;
+            }
+        };
+
+        let installed = config.get("mcpServers")
+            .and_then(|s| s.get("Geniuz"))
+            .is_some();
+        if installed { any_installed = true; }
+
+        lines.push(format!("Config: {}", config_file.display()));
+        lines.push(format!("  Geniuz: {}", if installed { "installed" } else { "not installed" }));
+        if installed {
+            if let Some(cmd) = config["mcpServers"]["Geniuz"].get("command").and_then(|c| c.as_str()) {
+                lines.push(format!("  Binary: {}", cmd));
+            }
+        }
     }
 
-    let content = std::fs::read_to_string(&config_file)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
-    let config: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
-
-    let installed = config.get("mcpServers")
-        .and_then(|s| s.get("Geniuz"))
-        .is_some();
-
-    let mut lines = vec![
-        format!("Config: {}", config_file.display()),
-        format!("Geniuz: {}", if installed { "installed" } else { "not installed" }),
-    ];
-
-    if installed {
-        if let Some(cmd) = config["mcpServers"]["Geniuz"].get("command").and_then(|c| c.as_str()) {
-            lines.push(format!("Binary: {}", cmd));
-        }
+    if !any_present {
+        return Ok(format!(
+            "Claude Desktop config not found at any known location:\n  {}\n\nRun 'geniuz mcp install' first.",
+            paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n  ")
+        ));
     }
 
     // Station info
@@ -400,7 +496,7 @@ pub fn status() -> Result<String, String> {
         lines.push("Station: not created yet (will be created on first remember)".to_string());
     }
 
-    if !installed {
+    if !any_installed {
         lines.push(String::new());
         lines.push("Run 'geniuz mcp install' to add Geniuz to Claude Desktop.".to_string());
     }

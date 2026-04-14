@@ -2,7 +2,7 @@
 ; Per-user install (no admin), matches the philosophy of "your AI on your machine"
 
 #define MyAppName "Geniuz"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Managed Ventures LLC"
 #define MyAppURL "https://geniuz.life"
 #define MyAppExeName "geniuz.exe"
@@ -47,7 +47,13 @@ Root: HKCU; Subkey: "Environment"; ValueType: expandsz; ValueName: "Path"; \
   Check: NeedsAddPath('{app}')
 
 [Run]
-; Wire Claude Desktop MCP config (runs in user context — writes to %APPDATA%)
+; Wire Claude Desktop MCP config. The CLI (v1.0.2+) now writes to all known
+; Claude Desktop config locations:
+;   - %APPDATA%\Claude\         (the .exe variant)
+;   - %LOCALAPPDATA%\Packages\Claude_*\LocalCache\Roaming\Claude\
+;     (the Microsoft Store / MSIX packaged variant)
+; This is much more robust than v1.0.1, which only wrote the standard path
+; and silently missed Store-version Claude users.
 Filename: "{app}\{#MyAppExeName}"; Parameters: "mcp install"; \
   StatusMsg: "Configuring Claude Desktop integration..."; \
   Flags: runhidden
