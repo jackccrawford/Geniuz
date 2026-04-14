@@ -282,14 +282,15 @@ pub fn serve() {
 // =============================================================================
 
 fn config_path() -> std::path::PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    if cfg!(target_os = "macos") {
-        std::path::PathBuf::from(home)
-            .join("Library/Application Support/Claude/claude_desktop_config.json")
-    } else {
-        std::path::PathBuf::from(home)
-            .join(".config/Claude/claude_desktop_config.json")
-    }
+    // dirs::config_dir() returns the right base on every platform:
+    //   macOS:   ~/Library/Application Support
+    //   Windows: %APPDATA%        (C:\Users\<u>\AppData\Roaming)
+    //   Linux:   ~/.config        (XDG_CONFIG_HOME or default)
+    // All three are where Claude Desktop reads its config from.
+    dirs::config_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("Claude")
+        .join("claude_desktop_config.json")
 }
 
 fn geniuz_binary_path() -> String {

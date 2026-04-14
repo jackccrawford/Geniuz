@@ -1,35 +1,44 @@
 //! geniuz-embed — keeps the ONNX session warm for fast embedding
 //!
-//! Unix domain socket server at /tmp/geniuz-embed.sock
+//! Cross-platform IPC server via interprocess crate:
+//!   Unix/macOS: Unix domain socket
+//!   Windows:    Named pipe
 //! Protocol: send text (u32 LE length prefix + UTF-8 bytes), receive 1536 bytes (384 × f32 LE)
 //! Auto-exits after idle timeout (default 5 min, configurable via GENIUZ_EMBED_IDLE)
 
 use std::io::{Read, Write};
-use std::os::unix::net::UnixListener;
-use std::path::Path;
 use std::time::{Duration, Instant};
+
+use interprocess::local_socket::{
+    prelude::*, GenericNamespaced, ListenerOptions, ToNsName,
+};
 
 use geniuz::embedding;
 
-const DEFAULT_SOCKET: &str = "/tmp/geniuz-embed.sock";
+const DEFAULT_NAME: &str = "geniuz-embed.sock";
 const DEFAULT_IDLE_SECS: u64 = 300;
 const EMBEDDING_BYTES: usize = 384 * 4;
 
 fn main() {
-    let socket_path = std::env::var("GENIUZ_EMBED_SOCKET")
-        .unwrap_or_else(|_| DEFAULT_SOCKET.to_string());
+    let name = std::env::var("GENIUZ_EMBED_SOCKET")
+        .unwrap_or_else(|_| DEFAULT_NAME.to_string());
     let idle_secs = std::env::var("GENIUZ_EMBED_IDLE")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_IDLE_SECS);
 
-    // Clean up stale socket
-    if Path::new(&socket_path).exists() {
-        if std::os::unix::net::UnixStream::connect(&socket_path).is_ok() {
-            eprintln!("[geniuz-embed] Already running at {}", socket_path);
-            std::process::exit(0);
+    let ns_name = match name.as_str().to_ns_name::<GenericNamespaced>() {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("[geniuz-embed] Bad socket name {}: {}", name, e);
+            std::process::exit(1);
         }
-        let _ = std::fs::remove_file(&socket_path);
+    };
+
+    // Check if already running (try connecting)
+    if interprocess::local_socket::Stream::connect(ns_name.clone()).is_ok() {
+        eprintln!("[geniuz-embed] Already running at {}", name);
+        std::process::exit(0);
     }
 
     // Load ONNX backend (one-time cost)
@@ -44,16 +53,20 @@ fn main() {
         }
     };
 
-    let listener = match UnixListener::bind(&socket_path) {
+    let listener = match ListenerOptions::new()
+        .name(ns_name)
+        .create_sync()
+    {
         Ok(l) => l,
         Err(e) => {
             eprintln!("[geniuz-embed] Bind failed: {}", e);
             std::process::exit(1);
         }
     };
-    listener.set_nonblocking(true).expect("set_nonblocking");
+    listener.set_nonblocking(interprocess::local_socket::ListenerNonblockingMode::Both)
+        .expect("set_nonblocking");
 
-    eprintln!("[geniuz-embed] {} (idle: {}s)", socket_path, idle_secs);
+    eprintln!("[geniuz-embed] {} (idle: {}s)", name, idle_secs);
 
     let mut last_activity = Instant::now();
     let idle_timeout = Duration::from_secs(idle_secs);
@@ -61,11 +74,8 @@ fn main() {
 
     loop {
         match listener.accept() {
-            Ok((mut stream, _)) => {
+            Ok(mut stream) => {
                 last_activity = Instant::now();
-
-                // Set read timeout so a stalled client can't hang the server
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
 
                 // Read u32 LE length prefix
                 let mut len_buf = [0u8; 4];
@@ -112,6 +122,4 @@ fn main() {
             }
         }
     }
-
-    let _ = std::fs::remove_file(&socket_path);
 }
