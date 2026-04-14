@@ -33,3 +33,4 @@ dirs = "5"
 ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "api-17", "download-binaries", "copy-dylibs", "tls-native"] }
 tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 ureq = { version = "3", features = ["json"] }
+interprocess = "2"
