@@ -58,13 +58,39 @@ The model downloads once (~118MB) on first search. Every memory after that is em
 
 ## Install
 
+Three paths — pick the one that matches your setup.
+
+### Mac — one click
+
+Download **[Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg)**, double-click, run the installer. Signed and notarized by Managed Ventures LLC — no Gatekeeper warnings.
+
+Installs the CLI to `/usr/local/bin/geniuz`, the menu bar app to `/Applications/Geniuz.app`, and wires Claude Desktop automatically. Requires macOS Sonoma (14) or later, Apple Silicon.
+
+### Windows — one click
+
+Download **[Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe)**, double-click, accept the SmartScreen warning *(Authenticode cert procurement in progress)*, follow the wizard. Per-user install, no admin needed.
+
+Installs CLI to `%LOCALAPPDATA%\Programs\Geniuz\`, adds to PATH, wires Claude Desktop (both the `.exe` and Microsoft Store variants). Requires Windows 10 or 11. Pick your memory location in the wizard — default is `%USERPROFILE%\.geniuz\`.
+
+### Linux — one command
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jackccrawford/geniuz/main/install.sh | bash
 ```
 
-Detects your platform automatically. Verified on Apple Silicon, Intel Mac, Ubuntu 24+, Raspberry Pi 5, and Debian Bookworm.
+Detects architecture (x86_64 or arm64), downloads the matching binary, installs to `~/.geniuz/bin/`, symlinks to `~/.local/bin/geniuz` (on PATH by default on most distros). Bundles ONNX Runtime as a sibling `.so` so no system dependencies needed.
 
-**Then choose your path:**
+Claude Desktop isn't available on Linux, but `geniuz mcp serve` works as a stdio MCP server for any Linux-compatible MCP client (Claude Code, Cursor, Windsurf, Aider, custom agents). Run `geniuz mcp install` if you want — it silently writes the config, harmless either way.
+
+### From source
+
+```bash
+git clone https://github.com/jackccrawford/geniuz && cd geniuz
+cargo build --release
+cp target/release/geniuz ~/.local/bin/
+```
+
+### Then choose your path
 
 | You use... | Next step |
 |------------|-----------|
@@ -72,17 +98,27 @@ Detects your platform automatically. Verified on Apple Silicon, Intel Mac, Ubunt
 | Claude Code / Cursor / Windsurf | Add two lines to your agent's instructions (see below) |
 | Custom agents | Call `geniuz remember` and `geniuz recall` from any shell |
 
-**Mac — one click:**
+## Repo layout
 
-Download [Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg) for the full experience — menu bar app, MCP auto-config, signed and notarized.
+This repo contains the full Geniuz source — CLI, Mac app, Windows installer — all under one roof.
 
-**From source:**
+| Path | What's there |
+|------|--------------|
+| `src/` | Rust CLI + embedding + MCP server source |
+| `schema/` | SQLite schema for the memory database |
+| `skills/` | `SKILL.md` — the embedded skill guide `geniuz skill` prints |
+| `install.sh` | Linux/Mac CLI installer (the `curl \| bash` target) |
+| `desktop/` | Mac SwiftUI menu bar app — Xcode project that produces `Geniuz.app` and the DMG |
+| `installer/windows/` | Inno Setup script + branded assets that produce `Geniuz-Setup.exe` |
+| `images/` | Brand assets — logo, icons, social preview |
+| `Cargo.toml` | Rust crate manifest — pinned dependencies, version |
+| `.cargo/config.toml` | Cross-compile linker config for Linux x86_64 target |
 
-```bash
-git clone https://github.com/jackccrawford/geniuz && cd geniuz
-cargo build --release
-cp target/release/geniuz ~/.local/bin/
-```
+Built artifacts are attached to each [GitHub release](https://github.com/jackccrawford/geniuz/releases):
+
+- `Geniuz.dmg` — Mac (arm64, Sonoma 14+)
+- `Geniuz-Setup.exe` — Windows (x86_64, Win 10/11)
+- `geniuz-linux-amd64.tar.gz` — Linux (x86_64)
 
 ## Works with everything
 
