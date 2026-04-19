@@ -173,16 +173,21 @@ fn download_file(url: &str, dest: &Path) -> Result<(), String> {
 
 pub struct OllamaBackend { url: String, model: String }
 
+// Ollama's current embedding API is POST /api/embed with {model, input} and
+// the response is {embeddings: [[...]]} — always a batched array, even for
+// single input. The legacy /api/embeddings returned {embedding: [...]} for
+// a {model, prompt} request. Newer Ollama versions (0.3+) may return 500
+// on the legacy endpoint for some models, so we use the current API.
 #[derive(Serialize)]
-struct OllamaReq<'a> { model: &'a str, prompt: &'a str }
+struct OllamaReq<'a> { model: &'a str, input: &'a str }
 #[derive(Deserialize)]
-struct OllamaResp { embedding: Vec<f32> }
+struct OllamaResp { embeddings: Vec<Vec<f32>> }
 
 impl OllamaBackend {
     pub fn new() -> Self {
         Self {
             url: std::env::var("GENIUZ_EMBED_URL")
-                .unwrap_or_else(|_| "http://localhost:11434/api/embeddings".to_string()),
+                .unwrap_or_else(|_| "http://localhost:11434/api/embed".to_string()),
             model: std::env::var("GENIUZ_EMBED_MODEL")
                 .unwrap_or_else(|_| "paraphrase-multilingual:278m".to_string()),
         }
@@ -192,12 +197,14 @@ impl OllamaBackend {
 impl EmbeddingBackend for OllamaBackend {
     fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
         let mut response = ureq::post(&self.url)
-            .send_json(&OllamaReq { model: &self.model, prompt: text.trim() })
+            .send_json(&OllamaReq { model: &self.model, input: text.trim() })
             .map_err(|e| format!("Ollama request failed: {}", e))?;
         let resp: OllamaResp = response.body_mut().read_json()
             .map_err(|e| format!("Failed to parse Ollama response: {}", e))?;
-        if resp.embedding.is_empty() { return Err("Empty embedding".to_string()); }
-        Ok(resp.embedding)
+        let embedding = resp.embeddings.into_iter().next()
+            .ok_or_else(|| "Ollama returned no embeddings".to_string())?;
+        if embedding.is_empty() { return Err("Ollama returned empty embedding".to_string()); }
+        Ok(embedding)
     }
     fn name(&self) -> &str { "ollama" }
 }
@@ -217,7 +224,12 @@ pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
                 .timeout_global(Some(std::time::Duration::from_secs(2)))
                 .build()
                 .new_agent();
-            let tags_url = backend.url.replace("/api/embeddings", "/api/tags");
+            // Reachability probe targets /api/tags regardless of which embed
+            // endpoint the user configured — handles both /api/embed (current)
+            // and /api/embeddings (legacy) URL shapes.
+            let tags_url = backend.url
+                .replace("/api/embed", "/api/tags")
+                .replace("/api/tagsdings", "/api/tags"); // fix over-replace on legacy URL
             match agent.get(&tags_url).call() {
                 Ok(_) => Ok(Box::new(backend)),
                 Err(_) => Err("Neither built-in ONNX nor Ollama available for embeddings".to_string()),

@@ -109,17 +109,31 @@ impl DatabaseManager {
             uuid.clone()
         };
 
-        // Embed content first — memory writes require a successful embedding.
-        // The invariant: no memory exists without its embedding.
+        // Embed content first, but tolerate embedding failure. The invariant:
+        // every memory is *searchable* — by semantic search when a backend is
+        // healthy, or by keyword search always. A write never fails just
+        // because ONNX and Ollama are both down.
+        //
+        // Chain: ONNX → Ollama → keyword-only (soft fail).
+        // When both embedding backends are unavailable, we log to stderr and
+        // proceed with memory-without-embedding. The memory lands in the
+        // memories table; no embedding row is created for it. Keyword search
+        // (geniuz recall --keyword) still finds it. Semantic search does not
+        // until someone runs `geniuz backfill` with a working backend.
         let embedding = if let Some(b) = backend {
-            b.embed(content)
-                .map_err(|e| format!("Embedding failed: {}. Run 'geniuz status' to check the embedding model.", e))?
+            b.embed(content).ok()
         } else {
-            crate::embedding::embed_content(content)
-                .map_err(|e| format!("Embedding failed: {}. Run 'geniuz status' to check the embedding model.", e))?
+            crate::embedding::embed_content(content).ok()
         };
 
-        // Insert memory + embedding atomically in one transaction
+        if embedding.is_none() {
+            eprintln!(
+                "[geniuz] Embedding unavailable — memory {} saved with keyword search only. Run 'geniuz backfill' later to add semantic search.",
+                &uuid[..8]
+            );
+        }
+
+        // Insert memory + (optional) embedding atomically in one transaction
         let conn = self.conn()?;
         let tx = conn.unchecked_transaction()
             .map_err(|e| format!("Failed to begin transaction: {}", e))?;
@@ -134,11 +148,13 @@ impl DatabaseManager {
                 rusqlite::params![&uuid, &payload_str, &parent_uuid],
             ).map_err(|e| format!("Failed to insert: {}", e))?;
         }
-        let blob = crate::embedding::embedding_to_blob(&embedding);
-        tx.execute(
-            "INSERT INTO memory_embeddings (memory_uuid, embedding) VALUES (?1, ?2)",
-            rusqlite::params![&uuid, blob],
-        ).map_err(|e| format!("Failed to cache embedding: {}", e))?;
+        if let Some(emb) = &embedding {
+            let blob = crate::embedding::embedding_to_blob(emb);
+            tx.execute(
+                "INSERT INTO memory_embeddings (memory_uuid, embedding) VALUES (?1, ?2)",
+                rusqlite::params![&uuid, blob],
+            ).map_err(|e| format!("Failed to cache embedding: {}", e))?;
+        }
         tx.commit().map_err(|e| format!("Failed to commit: {}", e))?;
 
         Ok(uuid[..8].to_string())
