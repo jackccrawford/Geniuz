@@ -75,8 +75,26 @@ pub fn get_db() -> Result<db::DatabaseManager, String> {
     db::DatabaseManager::new(&path)
 }
 
-pub fn shorten_ts(ts: &str) -> &str {
-    if ts.len() >= 16 { &ts[..16] } else { ts }
+/// Convert a UTC timestamp string from SQLite into a human-readable
+/// local-time string. SQLite stores everything as UTC ("2026-04-18 22:34:01"),
+/// but customers live in their own timezone — showing raw UTC to a Pacific
+/// user makes a 6 PM memory look like it was saved at 2 AM next day.
+///
+/// Input: SQLite timestamp string like "2026-04-18 22:34:01" (UTC, space-separated).
+/// Output: "YYYY-MM-DD HH:MM" in the host machine's local timezone.
+/// If parsing fails (malformed timestamp), falls back to the original truncation.
+pub fn shorten_ts(ts: &str) -> String {
+    use chrono::{DateTime, NaiveDateTime, Utc, Local};
+
+    // SQLite's datetime('now', 'utc') produces "2026-04-18 22:34:01".
+    // NaiveDateTime::parse_from_str treats it as unzoned, so we attach UTC
+    // explicitly before converting to Local.
+    if let Ok(naive) = NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S") {
+        let utc: DateTime<Utc> = DateTime::from_naive_utc_and_offset(naive, Utc);
+        return utc.with_timezone(&Local).format("%Y-%m-%d %H:%M").to_string();
+    }
+    // Fallback: no timezone conversion possible; keep the old truncation behavior.
+    if ts.len() >= 16 { ts[..16].to_string() } else { ts.to_string() }
 }
 
 fn run(cli: Cli) -> Result<String, String> {
