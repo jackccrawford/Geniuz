@@ -30,6 +30,15 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 AppComments={#MyAppDescription}
+; Version resource embedded in Setup.exe itself — drives Windows Explorer's
+; right-click → Properties → Details and Programs & Features' version column.
+; Separate from AppVersion which only affects the wizard's displayed strings.
+VersionInfoVersion={#MyAppVersion}
+VersionInfoProductVersion={#MyAppVersion}
+VersionInfoProductName={#MyAppName}
+VersionInfoCompany={#MyAppPublisher}
+VersionInfoDescription={#MyAppName} {#MyAppVersion} Setup
+VersionInfoCopyright=Copyright (C) 2026 {#MyAppPublisher}
 DefaultDirName={localappdata}\Programs\Geniuz
 DefaultGroupName=Geniuz
 DisableProgramGroupPage=yes
