@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 
 use geniuz::db::{DatabaseManager, SignalEntry};
+use geniuz::embedding::{self, EmbeddingBackend};
 
 // =============================================================================
 // MCP Protocol Types
@@ -130,7 +131,11 @@ fn tool_definitions() -> Value {
 // Tool Execution
 // =============================================================================
 
-fn execute_remember(db: &DatabaseManager, params: &Value) -> (String, bool) {
+fn execute_remember(
+    db: &DatabaseManager,
+    backend: Option<&dyn EmbeddingBackend>,
+    params: &Value,
+) -> (String, bool) {
     let content = match params.get("content").and_then(|c| c.as_str()) {
         Some(c) => c,
         None => return ("Error: content is required".to_string(), true),
@@ -138,7 +143,7 @@ fn execute_remember(db: &DatabaseManager, params: &Value) -> (String, bool) {
     let gist = params.get("gist").and_then(|g| g.as_str());
     let thread = params.get("thread").and_then(|t| t.as_str());
 
-    match db.signal_with_backend(content, gist, thread, None, None) {
+    match db.signal_with_backend(content, gist, thread, None, backend) {
         Ok(uuid) => (format!("Remembered ({})", uuid), false),
         Err(e) => (format!("Error: {}", e), true),
     }
@@ -210,6 +215,19 @@ pub fn serve() {
         }
     };
 
+    // Build the embedding backend once at startup and reuse it for every
+    // remember call. Constructing a fresh ort::Session per call inside a
+    // long-lived MCP subprocess produces wrong-dimension output on Windows;
+    // reuse matches the CLI pattern in main.rs and also eliminates per-call
+    // model-load overhead. Soft-fail to keyword-only if backend init fails.
+    let backend = match embedding::create_backend() {
+        Ok(b) => Some(b),
+        Err(e) => {
+            eprintln!("[geniuz] Embedding backend unavailable ({}); MCP remember will soft-fail to keyword-only.", e);
+            None
+        }
+    };
+
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
@@ -259,7 +277,7 @@ pub fn serve() {
                     .cloned().unwrap_or(json!({}));
 
                 let (text, is_error) = match tool_name {
-                    "remember" => execute_remember(&db, &arguments),
+                    "remember" => execute_remember(&db, backend.as_deref(), &arguments),
                     "recall" => execute_recall(&db, &arguments),
                     "recall_recent" => execute_recall_recent(&db, &arguments),
                     _ => (format!("Unknown tool: {}", tool_name), true),
