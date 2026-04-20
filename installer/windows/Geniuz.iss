@@ -51,6 +51,11 @@ SolidCompression=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Windows 11 only. Win10 build 22000 is Win11 RTM — anything lower is Win10
+; or earlier. Hard-blocks at install-start so the user gets a clear
+; "requires Windows 11" message before any files touch disk. Win10 support
+; is archived as a commercial-customer recipe at installer/windows/saved-for-later/README.md.
+MinVersion=10.0.22000
 UninstallDisplayName={#MyAppName}
 UninstallDisplayIcon={app}\Geniuz.ico
 SetupIconFile=Geniuz.ico
@@ -68,11 +73,6 @@ Source: "geniuz.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "geniuz-embed.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "geniuz-tray.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Geniuz.ico"; DestDir: "{app}"; Flags: ignoreversion
-; Bundled ONNX Runtime 1.22 (CPU-only) — shipped alongside the CLI so Windows
-; never pulls an incompatible DirectML/onnxruntime.dll from System32. Same
-; pattern we use for Pi 5 arm64 Linux (ORT 1.22 + dynamic-link).
-Source: "onnxruntime.dll"; DestDir: "{app}"; Flags: ignoreversion
-Source: "onnxruntime_providers_shared.dll"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
 ; Create the user-chosen data directory in user context (no sandbox issue).
