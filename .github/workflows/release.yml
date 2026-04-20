@@ -19,9 +19,6 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04
             name: linux-arm64
-          - target: aarch64-apple-darwin
-            os: macos-14
-            name: darwin-arm64
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -67,24 +64,24 @@ jobs:
           # Bundle ORT shared library for Linux (dynamic linking)
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp /usr/local/lib/libonnxruntime.so.1.22.0 .
-            tar czf ../../../clawmark-${{ matrix.name }}.tar.gz clawmark libonnxruntime.so.1.22.0
+            tar czf ../../../geniuz-${{ matrix.name }}.tar.gz geniuz libonnxruntime.so.1.22.0
           else
-            tar czf ../../../clawmark-${{ matrix.name }}.tar.gz clawmark
+            tar czf ../../../geniuz-${{ matrix.name }}.tar.gz geniuz
           fi
           cd ../../..
           if command -v sha256sum > /dev/null 2>&1; then
-            sha256sum clawmark-${{ matrix.name }}.tar.gz > clawmark-${{ matrix.name }}.tar.gz.sha256
+            sha256sum geniuz-${{ matrix.name }}.tar.gz > geniuz-${{ matrix.name }}.tar.gz.sha256
           else
-            shasum -a 256 clawmark-${{ matrix.name }}.tar.gz > clawmark-${{ matrix.name }}.tar.gz.sha256
+            shasum -a 256 geniuz-${{ matrix.name }}.tar.gz > geniuz-${{ matrix.name }}.tar.gz.sha256
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: clawmark-${{ matrix.name }}
+          name: geniuz-${{ matrix.name }}
           path: |
-            clawmark-${{ matrix.name }}.tar.gz
-            clawmark-${{ matrix.name }}.tar.gz.sha256
+            geniuz-${{ matrix.name }}.tar.gz
+            geniuz-${{ matrix.name }}.tar.gz.sha256
 
   release:
     needs: build
@@ -98,6 +95,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            clawmark-*.tar.gz
-            clawmark-*.tar.gz.sha256
+            geniuz-*.tar.gz
+            geniuz-*.tar.gz.sha256
           generate_release_notes: true
