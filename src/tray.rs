@@ -328,7 +328,7 @@ impl ApplicationHandler for TrayApp {
 // =============================================================================
 
 fn load_tray_icon() -> tray_icon::Icon {
-    let png = include_bytes!("../images/tray-icon-white.png");
+    let png = include_bytes!("../images/tray-icon-teal.png");
     let img = image::load_from_memory(png)
         .expect("tray icon png decode")
         .to_rgba8();
