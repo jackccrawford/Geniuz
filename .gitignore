@@ -16,3 +16,4 @@ desktop/build/
 # Built installers (uploaded to GitHub releases)
 Geniuz-Setup.exe
 installer/windows/output/
+TODO.md
