@@ -49,7 +49,7 @@
 
   --sidebar-w: 220px;
 
-  --bg-window:    transparent;
+  --bg-window:    rgba(246, 244, 239, 0.90);
   --bg-surface:   rgba(255, 255, 255, 0.04);
   --bg-elevated:  rgba(255, 255, 255, 0.08);
   --bg-active:    rgba(255, 255, 255, 0.12);
@@ -84,6 +84,9 @@
    white when GTK is in dark mode. */
 @media (prefers-color-scheme: dark) {
   :root:not(.os-linux) {
+    /* Dark slate window base (brand #1B2A30) at near-opacity so a hint of OS
+       vibrancy stays, matching the menubar popover level. */
+    --bg-window:    rgba(27, 42, 48, 0.90);
     --bg-surface:   rgba(255, 255, 255, 0.04);
     --bg-elevated:  rgba(255, 255, 255, 0.08);
     --bg-active:    rgba(255, 255, 255, 0.14);
@@ -269,13 +272,9 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   gap: var(--s-2);
 }
-.sidebar-footer__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--status-ok);
-  display: inline-block;
-}
+/* (sidebar-footer__dot removed — the green status dot competed with the
+   wordmark's clay dot and the tagline it accompanied was a hosted brand
+   promise; the footer now carries the always-on storage line.) */
 
 /* ============================================================================
    Main pane
@@ -328,9 +327,11 @@ a { color: inherit; text-decoration: none; }
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--s-5);
-  padding: var(--s-3) 0 var(--s-4) 0;
+  /* Fixed in the header region now (not inside the scroll body), so it carries
+     its own horizontal padding to align with the header title and the list. */
+  padding: var(--s-2) var(--s-6) var(--s-4) var(--s-6);
   border-bottom: 1px solid var(--hairline-1);
-  margin-bottom: var(--s-3);
+  margin-bottom: 0;
 }
 .stats-strip__cell {
   display: flex;
@@ -847,7 +848,9 @@ a { color: inherit; text-decoration: none; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 0 var(--s-2) 0;
+  /* Horizontal padding to align with the header + stats now that it lives in
+     the fixed band rather than inside the padded scroll body. */
+  padding: 0 var(--s-6) var(--s-2) var(--s-6);
   border-bottom: 1px solid var(--hairline-1);
   margin-bottom: var(--s-2);
 }

@@ -34,8 +34,6 @@ export async function mount(container) {
     return;
   }
 
-  const [storageNum, storageUnit] = fmt.bytes(stats.storage_bytes);
-
   const root = document.createElement('main');
   root.className = 'main';
 
@@ -50,12 +48,9 @@ export async function mount(container) {
   `;
   root.appendChild(header);
 
-  // Body
-  const body = document.createElement('div');
-  body.className = 'main-body';
-  root.appendChild(body);
-
-  // Stats strip — mirrors the menubar popover (3 cells)
+  // Stats strip — fixed in the header region (mirrors the menubar popover) so
+  // it stays put while the day-grouped list scrolls beneath it, instead of
+  // scrolling away with the list.
   const strip = document.createElement('div');
   strip.className = 'stats-strip';
   strip.innerHTML = `
@@ -72,7 +67,12 @@ export async function mount(container) {
       <div class="stats-strip__label">Threads</div>
     </div>
   `;
-  body.appendChild(strip);
+  root.appendChild(strip);
+
+  // Body — scrolls beneath the fixed header + stats.
+  const body = document.createElement('div');
+  body.className = 'main-body';
+  root.appendChild(body);
 
   // Memory list — grouped by day-section
   if (!recent || recent.length === 0) {
@@ -105,7 +105,9 @@ export async function mount(container) {
     setState({ sortDirection: direction === 'desc' ? 'asc' : 'desc' });
   });
   controls.appendChild(sortBtn);
-  body.appendChild(controls);
+  // Fixed in the header band (inserted before the scroll body) so the sort
+  // toggle stays put instead of sliding up under the stats when scrolling.
+  root.insertBefore(controls, body);
 
   // Memory "number": newest = total count, counts down stably regardless of
   // sort direction. The number is assigned by position in newest-first order,
@@ -151,13 +153,6 @@ export async function mount(container) {
     section.appendChild(list);
     body.appendChild(section);
   }
-
-  // Footer disk size as a quiet line (knowledge-worker apps don't shout
-  // about their database size; they mention it).
-  const footer = document.createElement('div');
-  footer.style.cssText = 'margin-top:24px;padding:12px 0;color:var(--ink-3);font-size:var(--fs-micro);';
-  footer.textContent = `${storageNum} ${storageUnit} on this Mac`;
-  body.appendChild(footer);
 
   container.innerHTML = '';
   container.appendChild(root);

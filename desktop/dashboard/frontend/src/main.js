@@ -50,7 +50,10 @@ async function bootstrap() {
   appShell.innerHTML = '';
   const aside = sidebar({
     version,
-    stats: { totalMemories: stats.total_memories ?? null },
+    stats: {
+      totalMemories: stats.total_memories ?? null,
+      storageBytes: stats.storage_bytes ?? null,
+    },
   });
   appShell.appendChild(aside);
 

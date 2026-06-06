@@ -3,6 +3,7 @@
 // on the icon. Brand at top, footer signature at bottom.
 
 import { navigate, subscribe, getState } from '../store.js';
+import * as fmt from '../format.js';
 
 const NAV_ITEMS = [
   {
@@ -78,12 +79,13 @@ export function sidebar({ version, stats }) {
     aside.appendChild(sec);
   }
 
+  // Footer: always-on storage line. Replaced the "local · private · yours"
+  // tagline (a hosted brand promise, out of place in the open-source app) and
+  // its green status dot (which competed with the wordmark's clay dot).
   const footer = document.createElement('div');
   footer.className = 'sidebar-footer';
-  footer.innerHTML = `
-    <span class="sidebar-footer__dot"></span>
-    <span>local · private · yours</span>
-  `;
+  const [storageNum, storageUnit] = fmt.bytes(stats?.storageBytes);
+  footer.textContent = storageUnit ? `${storageNum} ${storageUnit} on disk` : '';
   aside.appendChild(footer);
 
   const applyActive = (currentSurface) => {
