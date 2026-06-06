@@ -98,7 +98,7 @@ impl App {
             memories,
             list_state,
             input: String::new(),
-            status: format!("station: limen · {} memories", total),
+            status: format!("{} memories", total),
             hint: "/recent  /search <q>  /find <q>  /remember  /detail  /random  /reorder  /status  /help  /quit".into(),
             mode: Mode::List,
             detail: None,
@@ -214,13 +214,13 @@ impl App {
             "list" | "back" => {
                 self.mode = Mode::List;
                 self.detail = None;
-                self.status = format!("station: limen · {} memories", self.total);
+                self.status = format!("{} memories", self.total);
             }
             "status" => {
                 let count = self.db.count().map_err(|e| anyhow::anyhow!(e))?;
                 self.total = count;
                 self.status = format!(
-                    "station: limen · {} memories · db: {}",
+                    "{} memories · db: {}",
                     count,
                     geniuz::data_dir().join("memory.db").display()
                 );
