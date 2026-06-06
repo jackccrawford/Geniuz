@@ -17,7 +17,7 @@
 #define MyAppPublisher "Managed Ventures LLC"
 #define MyAppURL "https://geniuz.life"
 #define MyAppExeName "geniuz.exe"
-#define MyAppTrayExeName "geniuz-tray.exe"
+#define MyAppTrayExeName "geniuz-dashboard.exe"
 #define MyAppDescription "Your AI remembers now."
 
 [Setup]
@@ -71,7 +71,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Files]
 Source: "geniuz.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "geniuz-embed.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "geniuz-tray.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "geniuz-dashboard.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Geniuz.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Dirs]
