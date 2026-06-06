@@ -1,9 +1,25 @@
 import SwiftUI
 import AppKit
+import CoreText
 
 @main
 struct GeniuzApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+
+    init() {
+        Self.registerCustomFonts()
+    }
+
+    /// Register the bundled brand fonts so SwiftUI's Font.custom can find them.
+    /// Newsreader carries the wordmark; Hanken Grotesk carries supporting text.
+    /// Both ship as variable fonts in Geniuz/Fonts/.
+    private static func registerCustomFonts() {
+        let filenames = ["Newsreader-VariableFont", "HankenGrotesk-VariableFont"]
+        for name in filenames {
+            guard let url = Bundle.main.url(forResource: name, withExtension: "ttf") else { continue }
+            CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
+        }
+    }
 
     // Menu-bar-only app: no Scenes. The status item is created in
     // AppDelegate.applicationDidFinishLaunching. Returning an empty

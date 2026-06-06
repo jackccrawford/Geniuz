@@ -109,7 +109,7 @@ export async function mount(container) {
   if (memory.content && memory.content.trim()) {
     content.textContent = memory.content;
   } else {
-    content.innerHTML = `<span style="color:var(--ink-3);font-style:italic;">(no body — gist-only memory)</span>`;
+    content.innerHTML = `<span style="color:var(--ink-3);font-style:italic;">(gist-only memory, no body)</span>`;
   }
   body.appendChild(content);
 

@@ -29,13 +29,13 @@ export async function mount(container) {
   form.className = 'remember-form';
   form.innerHTML = `
     <label class="remember-field">
-      <span class="remember-field__label">Gist <span class="remember-field__hint">— short shelf-label, e.g. "fix: auth token order"</span></span>
+      <span class="remember-field__label">Gist <span class="remember-field__hint">· short shelf-label, e.g. "fix: auth token order"</span></span>
       <input
         type="text"
         class="remember-field__input"
         name="gist"
         autocomplete="off"
-        placeholder="(optional — auto-derived from content if blank)"
+        placeholder="(optional, auto-derived from content if blank)"
       />
     </label>
     <label class="remember-field">

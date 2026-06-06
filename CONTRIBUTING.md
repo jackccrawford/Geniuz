@@ -1,6 +1,6 @@
 # Contributing to Geniuz
 
-Thanks for your interest in contributing to Geniuz — the memory and configuration substrate for agent-native work.
+Thanks for your interest in contributing to Geniuz, the memory and configuration substrate for agent-native work.
 
 ## How to contribute
 
@@ -15,7 +15,7 @@ Open an issue at https://github.com/jackccrawford/Geniuz/issues. Include:
 
 ### Suggesting changes
 
-Open an issue describing the change before opening a PR. Geniuz is a small substrate by design — feature additions are evaluated against whether they keep the substrate small or make it bigger. Most ideas are better as external tooling that uses Geniuz than as features inside it.
+Open an issue describing the change before opening a PR. Geniuz is a small substrate by design. Feature additions are evaluated against whether they keep the substrate small or make it bigger. Most ideas are better as external tooling that uses Geniuz than as features inside it.
 
 ### Submitting code
 
@@ -46,4 +46,4 @@ Contributions are accepted under the MIT license (see LICENSE). By submitting a 
 
 ## Geniuz Team
 
-If you're interested in the paid tier (perpetual agents, team chassis, customer-environment deployment) — Geniuz Team is built and operated by [mVara](https://github.com/mvara-ai). Contact through the link in the main README for pilot and enterprise inquiries.
+If you're interested in the paid tier (perpetual agents, team chassis, customer-environment deployment), Geniuz Team is built and operated by [mVara](https://github.com/mvara-ai). Contact through the link in the main README for pilot and enterprise inquiries.

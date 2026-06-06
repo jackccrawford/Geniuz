@@ -105,7 +105,7 @@ export async function mount(container) {
   exportCard.innerHTML = `
     <h2 class="data-card__title">Export</h2>
     <div class="data-card__body">
-      <p>Export a copy of <span class="data-card__path">memory.db</span> — plain SQLite,
+      <p>Export a copy of <span class="data-card__path">memory.db</span>. Plain SQLite,
       portable, yours. Open it with any SQLite tool, back it up, or move it to another machine.</p>
     </div>
     <div class="data-card__actions">

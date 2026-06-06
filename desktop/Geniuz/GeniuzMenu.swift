@@ -63,11 +63,17 @@ struct GeniuzMenu: View {
                 .foregroundColor(.accentColor)
                 .frame(width: 18, height: 18)
 
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Geniuz")
-                    .font(.system(size: 14, weight: .semibold))
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 5) {
+                    Text("Geniuz")
+                        .font(.custom("Newsreader16pt-Regular", size: 16).weight(.semibold))
+                    // Clay dot ties this to the website wordmark (Geniuz ●).
+                    Circle()
+                        .fill(Color(red: 0.812, green: 0.333, blue: 0.208))
+                        .frame(width: 5, height: 5)
+                }
                 Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0")")
-                    .font(.system(size: 11))
+                    .font(.custom("HankenGrotesk-Regular", size: 11).weight(.semibold))
                     .foregroundColor(.secondary)
             }
 
@@ -309,7 +315,7 @@ struct GeniuzMenu: View {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
                         .font(.caption)
-                    Text("Command copied — paste into Terminal and press Return.")
+                    Text("Command copied. Paste into Terminal and press Return.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)

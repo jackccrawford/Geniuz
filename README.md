@@ -1,16 +1,28 @@
-# Geniuz
+<p align="center">
+  <img src="images/brand-hero.png" alt="Geniuz · the Memory Wall" width="180" />
+</p>
 
-**Your AI remembers now.**
+<h1 align="center">Geniuz</h1>
 
-Built and stewarded by [mVara](https://github.com/mvara-ai).
+<p align="center"><em>Persistent memory for AI agents. Runs on your machine, MIT-licensed, free.</em></p>
 
-You brief your agent. It does great work. The session ends. Next session — it asks the same questions again. Every insight, every preference, every decision — gone.
+<p align="center">
+  <a href="https://geniuz.life">geniuz.life</a> ·
+  <a href="https://github.com/jackccrawford/Geniuz/releases/latest">Download</a> ·
+  <a href="https://github.com/mvara-ai">Built by mVara</a>
+</p>
 
-Geniuz fixes that. One install, local, private, searchable by meaning. Use it from a dashboard, a terminal, a menubar, or directly from any AI agent.
+---
 
-![The Geniuz dashboard — your memory surface, showing 65 memories across 56 threads with two saved today, listed newest-first with category prefixes.](images/dashboard-memories.png)
+Your AI is sharp. It also starts every conversation from zero. The call you made by feel, the standard you set, the reason behind a decision: gone by morning, rebuilt from scratch tomorrow.
+
+Geniuz fixes that. One install, local, private, searchable by meaning. The context compounds instead of resetting at every boundary. Use it from a dashboard, a terminal, a menubar, or directly from any AI agent.
+
+![The Geniuz dashboard. Memory surface showing memories and threads, listed newest-first with category prefixes.](images/dashboard-memories.png)
 
 > **New in 2.0:** Cross-platform Tauri dashboard, terminal UI (`geniuz tui`), Mac menubar+dashboard integration via `geniuz://` URL scheme. [See release notes →](https://github.com/jackccrawford/geniuz/releases/tag/v2.0.0)
+>
+> **Note:** Screenshots in this README are from a pre-2.0.5 build and will refresh with the next release. The current app uses the new Memory Wall brand mark across every surface.
 
 ## Three surfaces, one memory
 
@@ -22,7 +34,7 @@ Browse memories, save new ones, search by meaning, see recent threads. Native vi
 
 Surfaces: **Memories · Remember · Find · Detail · Status · Data & Export · Settings**.
 
-### Terminal UI — `geniuz tui`
+### Terminal UI · `geniuz tui`
 
 Same data, terminal-native. For developers and agents who live in a shell. Two-field compose for `/remember`, semantic search via `/find`, sort toggle via `/reorder`.
 
@@ -30,19 +42,19 @@ Same data, terminal-native. For developers and agents who live in a shell. Two-f
 $ geniuz tui
 ```
 
-![The Geniuz TUI showing the Recent view — station name, memory count, newest-first list with date, category prefix, and gist on each row. Slash commands across the footer.](images/tui-recent.png)
+![The Geniuz TUI showing the Recent view. Station name, memory count, newest-first list with date, category prefix, and gist on each row. Slash commands across the footer.](images/tui-recent.png)
 
 Drill into any memory with `/detail <prefix>` (or `/random` to surface one at random):
 
-![The Geniuz TUI Detail view of a random memory — header with UUID prefix, gist, timestamp, and the full markdown content rendered in the terminal.](images/tui-detail.png)
+![The Geniuz TUI Detail view of a random memory. Header with UUID prefix, gist, timestamp, and the full markdown content rendered in the terminal.](images/tui-detail.png)
 
 Refuses to launch from non-interactive callers (TTY guard) so agents don't accidentally lock up on the alternate-screen mode.
 
 ### Menubar (macOS) / System tray (Windows + Linux)
 
-Ambient presence. Memory count, recent activity, one-click to the dashboard. The menubar app is dock-less on Mac (`LSUIElement`) — it's a residence, not a window.
+Ambient presence. Memory count, recent activity, one-click to the dashboard. The menubar app is dock-less on Mac (`LSUIElement`). It's a residence, not a window.
 
-![The macOS menubar popover — memory count, today's writes, thread count, most recent gist, Claude Desktop connection status, and a button to open the dashboard.](images/menubar.png)
+![The macOS menubar popover. Memory count, today's writes, thread count, most recent gist, Claude Desktop connection status, and a button to open the dashboard.](images/menubar.png)
 
 ### CLI for agents
 
@@ -111,13 +123,13 @@ Use "geniuz [command] --help" for more information.
 
 ## Geniuz Free vs Geniuz Team
 
-This repository is **Geniuz Free** — MIT-licensed, single-station memory for any AI chassis. Install it, bring your own AI, get memory that survives across conversations.
+This repository is **Geniuz Free**: MIT-licensed, single-station memory for any AI chassis. Install it, bring your own AI, get memory that survives across conversations.
 
 **[Geniuz Team](https://github.com/mvara-ai)** is the paid tier from mVara: unlimited continuity, perpetual agents that live in your environment, and a team chassis that coordinates around your customers' reality. Geniuz Team is built on the same substrate as Geniuz Free.
 
-If you want memory for yourself or a developer team using existing AI tools — Geniuz Free is what you want.
+If you want memory for yourself or a developer team using existing AI tools, Geniuz Free is what you want.
 
-If you want a configured team of agents living in your private cloud, remembering your work, and coordinating around your customers — that's Geniuz Team. Contact mVara for pilot inquiries.
+If you want a configured team of agents living in your private cloud, remembering your work, and coordinating around your customers, that's Geniuz Team. Contact mVara for pilot inquiries.
 
 ## Why local
 
@@ -125,7 +137,7 @@ If you want a configured team of agents living in your private cloud, rememberin
 - **Fast.** No network calls. Semantic search runs locally in the binary.
 - **Free.** No API keys. No token costs for memory. No subscription.
 - **Portable.** Your folder is a SQLite file. Copy it, back it up, share it.
-- **Framework-independent.** Switch from Cursor to Claude Code — your memory comes with you.
+- **Framework-independent.** Switch from Cursor to Claude Code. Your memory comes with you.
 
 ---
 
@@ -133,11 +145,11 @@ If you want a configured team of agents living in your private cloud, rememberin
 
 Pick the path that matches your setup.
 
-### macOS — one click
+### macOS · one click
 
-Download **[Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg)**, double-click, drag to Applications. Signed and notarized by Managed Ventures LLC — no Gatekeeper warnings.
+Download **[Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg)**, double-click, drag to Applications. Signed and notarized by Managed Ventures LLC. No Gatekeeper warnings.
 
-![The Geniuz DMG installer window — drag the Geniuz icon onto the Applications shortcut to install.](images/dmg-installer.png)
+![The Geniuz DMG installer window. Drag the Geniuz icon onto the Applications shortcut to install.](images/dmg-installer.png)
 
 One DMG installs three things: the **menubar app** (always-on), the **dashboard** (launched from the menubar's "Open Dashboard" or via `geniuz://`), and the **CLI** (bundled at `Geniuz.app/Contents/Resources/geniuz`).
 
@@ -147,11 +159,11 @@ Wire the CLI into your shell PATH if you want it on the command line:
 sudo ln -sf /Applications/Geniuz.app/Contents/Resources/geniuz /usr/local/bin/geniuz
 ```
 
-Or skip the DMG entirely and use the CLI-first install below — that path installs to `~/.geniuz/bin/` and adds itself to your PATH without sudo. Apple Silicon native; Intel Macs run via Rosetta 2 (universal binary coming).
+Or skip the DMG entirely and use the CLI-first install below. That path installs to `~/.geniuz/bin/` and adds itself to your PATH without sudo. Apple Silicon native; Intel Macs run via Rosetta 2 (universal binary coming).
 
-### Windows — one click
+### Windows · one click
 
-Download **[Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe)** (NSIS). Signed via Azure Trusted Signing — Microsoft-rooted cert, no "unknown publisher" warning. Versioned MSI/EXE pairs are attached to each [release](https://github.com/jackccrawford/geniuz/releases) for enterprise deploy.
+Download **[Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe)** (NSIS). Signed via Azure Trusted Signing (Microsoft-rooted cert, no "unknown publisher" warning). Versioned MSI/EXE pairs are attached to each [release](https://github.com/jackccrawford/geniuz/releases) for enterprise deploy.
 
 <!-- SCREENSHOT_HERE: Windows system tray with Geniuz icon + the right-click menu showing Open Dashboard / Memories / Find / Status / Settings / Quit. -->
 
@@ -159,7 +171,7 @@ After install, the dashboard runs as a system tray app. Left-click → window; r
 
 *First-launch SmartScreen note: even with a valid signature, brand-new binaries can hit a "rarely downloaded" reputation gate. If you see "Windows protected your PC," click "More info" → "Run anyway." That's per-binary reputation, separate from cert trust.*
 
-### Mac / Linux — one command (developer path)
+### Mac / Linux · one command (developer path)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jackccrawford/geniuz/main/install.sh | bash
@@ -167,13 +179,13 @@ curl -fsSL https://raw.githubusercontent.com/jackccrawford/geniuz/main/install.s
 
 Detects your OS and architecture, downloads the matching CLI binary (with TUI built in), installs to `~/.geniuz/bin/`. Best for developers, fleet operators, and anyone using Claude Code, Cursor, Windsurf, Aider, or any agent framework that can run a shell command.
 
-On Linux, if a graphical session is detected, the script also installs the dashboard package (`.deb` / `.rpm` / `.AppImage` — picked from your package manager) with one `sudo` prompt. Headless servers skip the dashboard step automatically. Opt out explicitly with `GENIUZ_NO_DASHBOARD=1`. On macOS, the script installs only the CLI — use the DMG above for the dashboard + menubar.
+On Linux, if a graphical session is detected, the script also installs the dashboard package (`.deb` / `.rpm` / `.AppImage`, picked from your package manager) with one `sudo` prompt. Headless servers skip the dashboard step automatically. Opt out explicitly with `GENIUZ_NO_DASHBOARD=1`. On macOS, the script installs only the CLI. Use the DMG above for the dashboard + menubar.
 
 ### Linux platform notes
 
 Supported architectures:
 
-- **x86_64** (Ubuntu, Debian, Fedora, Arch — modern distros with glibc 2.34+)
+- **x86_64** (Ubuntu, Debian, Fedora, Arch; modern distros with glibc 2.34+)
 - **arm64** (Raspberry Pi 5, Pi OS / Debian Bookworm+, NVIDIA Jetson, Ampere, AWS Graviton, Oracle Ampere)
 
 The arm64 build bundles ONNX Runtime 1.22 as a sibling `.so` and wraps the CLI with an `LD_LIBRARY_PATH` script, so it runs cleanly on older-glibc systems like Pi OS Bookworm (glibc 2.36). The x86_64 build is a single static binary.
@@ -195,7 +207,7 @@ cd desktop/dashboard
 cargo tauri build
 ```
 
-(Requires `tauri-cli`. Mac: nothing else. Linux: `libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev`. Windows: WebView2 runtime — typically preinstalled on Win 10/11.)
+(Requires `tauri-cli`. Mac: nothing else. Linux: `libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev`. Windows: WebView2 runtime, typically preinstalled on Win 10/11.)
 
 ### Then choose your path
 
@@ -212,9 +224,9 @@ cargo tauri build
 
 Geniuz is a compiled Rust binary backed by SQLite. No cloud. No API key. No account. Your data stays on your machine.
 
-- **Memories** store what you learned — a gist (how you find it later) and content (the full detail)
+- **Memories** store what you learned: a gist (how you find it later) and content (the full detail)
 - **Semantic search** finds memories by meaning, not keywords. Built-in BERT model, runs locally, 50+ languages
-- **Threading** links memories into chains — prospect to client, problem to solution, draft to final
+- **Threading** links memories into chains: prospect to client, problem to solution, draft to final
 - **Shared folders** let multiple agents write to the same memory. What one learns, all find
 
 ```
@@ -257,7 +269,7 @@ $ geniuz remember -c "Maria prefers retention over acquisition in Q2. Budget is 
 ✅ Remembered 7A3B29F1
 ```
 
-**Find it later — by meaning:**
+**Find it later, by meaning:**
 
 ```
 $ geniuz recall "Maria's budget priorities"
@@ -279,7 +291,7 @@ $ geniuz remember -c "Maria approved the retention plan. Starting in April." -g 
 ✅ Remembered E5F6A7B8
 ```
 
-The full client history — from first meeting to approval — is one chain. Any future session finds the whole story.
+The full client history, from first meeting to approval, is one chain. Any future session finds the whole story.
 
 ---
 
@@ -295,7 +307,7 @@ geniuz capture --dry-run ./notes/             # preview without importing
 geniuz backfill                               # embed everything for semantic search
 ```
 
-Three commands — `capture`, `backfill`, `recall` — turn any folder of markdown into a searchable memory folder. Local RAG with zero infrastructure.
+Three commands (`capture`, `backfill`, `recall`) turn any folder of markdown into a searchable memory folder. Local RAG with zero infrastructure.
 
 ---
 
@@ -364,7 +376,7 @@ Geniuz Free exposes four user surfaces plus the MCP server for agents:
 
 All surfaces go through one library: `db::DatabaseManager`. Same write path, same read path, same invariants. The dashboard's "Remember" button and the CLI's `geniuz remember` end up at the same SQL `INSERT`.
 
-**The SQLite file (`memory.db`) is not a public interface.** Schema may change without notice. Invariants — memory immutability (enforced by triggers), every-memory-has-an-embedding (enforced by the library's write transaction) — hold at the interface boundary, not at the file boundary. If you want programmatic access, go through MCP or the CLI.
+**The SQLite file (`memory.db`) is not a public interface.** Schema may change without notice. Invariants (memory immutability enforced by triggers, every-memory-has-an-embedding enforced by the library's write transaction) hold at the interface boundary, not at the file boundary. If you want programmatic access, go through MCP or the CLI.
 
 There is no HTTP server in Geniuz Free. Procedural software speaks MCP. This keeps the storage layer free to evolve and the invariants centralized in one place.
 
@@ -372,7 +384,7 @@ There is no HTTP server in Geniuz Free. Procedural software speaks MCP. This kee
 
 ## Repo layout
 
-This repo contains the full Geniuz source — CLI, TUI, dashboard, Mac menubar app, Windows installer — all under one roof.
+This repo contains the full Geniuz source (CLI, TUI, dashboard, Mac menubar app, Windows installer) all under one roof.
 
 | Path | What's there |
 |------|--------------|
@@ -401,7 +413,7 @@ Built artifacts are attached to each [GitHub release](https://github.com/jackccr
 
 ## For agents
 
-_This section is for you — the one reading this README._
+_This section is for you, the one reading this README._
 
 Your next session starts cold. No memory of what you built, what broke, what you decided. Every memory you write is a gift to that future session.
 
@@ -423,7 +435,7 @@ Memories compound. A single memory is a note. A folder of memories is institutio
 
 ### When to use the TUI
 
-`geniuz tui` only launches with an interactive terminal. Agents calling from a subprocess get a clean refusal with exit code 2. If you want browsing in code, use `geniuz recent`, `geniuz recall`, or the MCP tools — they're shell-friendly.
+`geniuz tui` only launches with an interactive terminal. Agents calling from a subprocess get a clean refusal with exit code 2. If you want browsing in code, use `geniuz recent`, `geniuz recall`, or the MCP tools. They're shell-friendly.
 
 ---
 
@@ -447,7 +459,7 @@ geniuz remember -c "second"    # 0.04s (model warm)
 
 ## Privacy
 
-Your data stays on your computer. Geniuz stores memories in a local SQLite database. The semantic search model runs locally via ONNX Runtime. No data is sent anywhere. The source code is open — read every line.
+Your data stays on your computer. Geniuz stores memories in a local SQLite database. The semantic search model runs locally via ONNX Runtime. No data is sent anywhere. The source code is open. Read every line.
 
 ---
 
@@ -463,6 +475,7 @@ Your data stays on your computer. Geniuz stores memories in a local SQLite datab
 
 ## Learn more
 
+- **Website**: [geniuz.life](https://geniuz.life)
 - **Geniuz Team** (paid tier): [mvara-ai](https://github.com/mvara-ai)
 - **Built by**: [Jack C. Crawford](https://github.com/jackccrawford)
 - **Discussions**: [GitHub Discussions](https://github.com/jackccrawford/Geniuz/discussions)
