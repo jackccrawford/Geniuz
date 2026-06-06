@@ -165,7 +165,7 @@ Or skip the DMG entirely and use the CLI-first install below. That path installs
 
 Download **[Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe)** (NSIS). Signed via Azure Trusted Signing (Microsoft-rooted cert, no "unknown publisher" warning). Versioned MSI/EXE pairs are attached to each [release](https://github.com/jackccrawford/geniuz/releases) for enterprise deploy.
 
-<!-- SCREENSHOT_HERE: Windows system tray with Geniuz icon + the right-click menu showing Open Dashboard / Memories / Find / Status / Settings / Quit. -->
+![Geniuz on Windows 11. Claude Desktop with the Geniuz MCP server alongside the Station Dashboard, showing a memory written from Claude appearing live in the dashboard.](images/windows-dashboard.jpg)
 
 After install, the dashboard runs as a system tray app. Left-click → window; right-click → menu.
 
