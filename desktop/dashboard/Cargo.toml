@@ -1,6 +1,6 @@
 [package]
 name = "geniuz-dashboard"
-version = "2.0.5"
+version = "3.0.0"
 edition = "2021"
 description = "Geniuz dashboard — native Tauri app for Windows + Mac"
 license = "MIT"
