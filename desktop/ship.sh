@@ -132,8 +132,8 @@ tell application "Finder"
         set arrangement of theViewOptions to not arranged
         set icon size of theViewOptions to 128
         set background picture of theViewOptions to file ".background:background.png"
-        set position of item "Geniuz.app" of container window to {248, 194}
-        set position of item "Applications" of container window to {440, 194}
+        set position of item "Geniuz.app" of container window to {216, 194}
+        set position of item "Applications" of container window to {480, 194}
         close
         open
         update without registering applications
