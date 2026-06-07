@@ -12,6 +12,10 @@
   <a href="https://github.com/mvara-ai">Built by mVara</a>
 </p>
 
+<p align="center">
+  <img src="images/mac-installer.png" alt="The Geniuz macOS installer: drag Geniuz to Applications and start remembering." width="640" />
+</p>
+
 ---
 
 Your AI is sharp. It also starts every conversation from zero. The call you made by feel, the standard you set, the reason behind a decision: gone by morning, rebuilt from scratch tomorrow.
