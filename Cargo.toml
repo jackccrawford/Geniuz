@@ -6,6 +6,18 @@ description = "Your AI remembers now — persistent memory for AI agents"
 license = "MIT"
 repository = "https://github.com/jackccrawford/geniuz"
 homepage = "https://agentdoor.ai/geniuz"
+readme = "README.md"
+keywords = ["mcp", "memory", "ai-agents", "semantic-search", "claude"]
+categories = ["command-line-utilities", "database"]
+# Keep the published crate lean: ship source only, not release binaries,
+# the Tauri desktop app, installers, or screenshots.
+exclude = [
+    "release-artifacts/",
+    "desktop/",
+    "installer/",
+    "images/",
+    "*.AppImage", "*.deb", "*.rpm", "*.dmg", "*.exe",
+]
 
 [lib]
 name = "geniuz"
