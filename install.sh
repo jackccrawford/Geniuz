@@ -208,8 +208,9 @@ if [ "$os" = "linux" ]; then
     DASH_TMP=$(mktemp -d)
     DASH_FILE="${DASH_TMP}/$(basename "$PKG_URL")"
     if ! curl -fsSL "$PKG_URL" -o "$DASH_FILE"; then
-      echo "  Dashboard:     download failed (${PKG_URL})"
-      DASHBOARD_SKIPPED_REASON="download failed"
+      echo "  Dashboard:     not published for ${LATEST} yet — CLI + TUI installed and ready."
+      echo "                 Desktop dashboard: https://geniuz.life  ·  https://github.com/${REPO}/releases"
+      DASHBOARD_SKIPPED_REASON="dashboard package not attached to ${LATEST}"
       rm -rf "$DASH_TMP"
     else
       echo ""
