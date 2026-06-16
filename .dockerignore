@@ -1,0 +1,15 @@
+# Keep the Docker build context lean — the image rebuilds from source, so none
+# of these belong in it.
+target/
+release-artifacts/
+desktop/
+installer/
+images/
+models/
+data/
+.git/
+*.AppImage
+*.deb
+*.rpm
+*.dmg
+*.exe
