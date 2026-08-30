@@ -275,7 +275,7 @@ impl App {
             return Ok(());
         }
         let gist_opt = if gist.is_empty() { None } else { Some(gist.as_str()) };
-        let new_uuid = self
+        let result = self
             .db
             .signal(&content, gist_opt, None, None)
             .map_err(|e| anyhow::anyhow!(e))?;
@@ -284,7 +284,11 @@ impl App {
         self.list_state
             .select(if self.memories.is_empty() { None } else { Some(0) });
         self.compose_cancel_state();
-        self.status = format!("remembered · {} · {} memories", new_uuid, self.total);
+        self.status = if result.embedded {
+            format!("remembered · {} · {} memories", result.uuid, self.total)
+        } else {
+            format!("remembered · {} · {} memories (keyword-only, no embedding)", result.uuid, self.total)
+        };
         Ok(())
     }
 

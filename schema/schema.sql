@@ -46,6 +46,21 @@ BEGIN
     SELECT RAISE(ABORT, 'Memories are immutable — update is not permitted');
 END;
 
+-- INSERT OR REPLACE resolves a PRIMARY KEY conflict by deleting the
+-- conflicting row without firing DELETE triggers (unless
+-- PRAGMA recursive_triggers is on), so prevent_memory_delete alone does not
+-- stop it. This closes that gap independent of the pragma: any writer that
+-- REPLACEs an existing memory_uuid gets a loud abort instead of silently
+-- overwriting history. Side effect: INSERT OR IGNORE on an existing UUID
+-- becomes a loud error too, since RAISE(ABORT) overrides OR IGNORE — nothing
+-- in this project relies on that no-op today.
+CREATE TRIGGER IF NOT EXISTS prevent_memory_replace
+BEFORE INSERT ON memories
+WHEN EXISTS(SELECT 1 FROM memories WHERE memory_uuid = NEW.memory_uuid)
+BEGIN
+    SELECT RAISE(ABORT, 'Memories are immutable, replacing an existing memory is not permitted');
+END;
+
 CREATE TABLE IF NOT EXISTS memory_embeddings (
     memory_uuid TEXT PRIMARY KEY,
     embedding   BLOB NOT NULL

@@ -293,9 +293,9 @@ fn run(cli: Cli) -> Result<String, String> {
                     let sections = adapter::split_sections(content);
                     let root_gist = format!("{}capture: {}", prefix, filename);
                     let root_uuid = match db.signal_with_backend(content, Some(&root_gist), None, None, Some(backend.as_ref())) {
-                        Ok(uuid) => {
+                        Ok(result) => {
                             created += 1;
-                            uuid
+                            result.uuid
                         }
                         Err(e) => {
                             eprintln!("[capture] Failed: {}", e);
@@ -367,14 +367,19 @@ fn run(cli: Cli) -> Result<String, String> {
             };
 
             let db = get_db()?;
-            let short_uuid = db.signal(&resolved, gist.as_deref(), parent.as_deref(), None)?;
+            let result = db.signal(&resolved, gist.as_deref(), parent.as_deref(), None)?;
 
             if json {
                 Ok(serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": true, "action": "remember", "uuid": short_uuid
+                    "ok": true, "action": "remember", "uuid": result.uuid, "embedded": result.embedded
                 })).unwrap())
+            } else if result.embedded {
+                Ok(format!("✅ Remembered {}", result.uuid))
             } else {
-                Ok(format!("✅ Remembered {}", short_uuid))
+                Ok(format!(
+                    "✅ Remembered {} (keyword search only — embedding unavailable, run 'geniuz backfill' later)",
+                    result.uuid
+                ))
             }
         }
 
