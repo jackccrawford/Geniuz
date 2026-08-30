@@ -14,6 +14,22 @@ fn escape_like(term: &str) -> String {
     term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
 }
 
+/// How many unembedded keyword hits to seat on a page of semantic results:
+/// every free slot, or half the page when none are free, capped by how many
+/// actually matched.
+///
+/// Pulled out as a pure function on purpose. `semantic_search` builds a real
+/// ONNX/Ollama backend internally, so it cannot be unit-tested, and the first
+/// version of this fix was wrong in exactly the arithmetic — it only looked
+/// for unembedded memories when semantic left slots free, which on a
+/// populated station is never. A test on the helper it calls passed anyway,
+/// because the helper was never the part that was broken. Keeping the
+/// decision testable is the point.
+fn unembedded_share(limit: usize, semantic_hits: usize, unembedded_hits: usize) -> usize {
+    let free = limit.saturating_sub(semantic_hits);
+    free.max(limit / 2).min(unembedded_hits)
+}
+
 impl DatabaseManager {
     pub fn new(db_path: &str) -> Result<Self, String> {
         if let Some(parent) = Path::new(db_path).parent() {
@@ -344,12 +360,26 @@ impl DatabaseManager {
 
         // A partial embedding failure (ONNX/Ollama down for one write) must not
         // make that memory invisible: it's absent from the cache, not from the
-        // corpus. Fill remaining slots with keyword matches restricted to
-        // memories that have no cached embedding at all.
-        if results.len() < limit {
-            let remaining = limit - results.len();
-            if let Ok(unembedded_hits) = self.keyword_search_unembedded(query, remaining) {
-                results.extend(unembedded_hits);
+        // corpus.
+        //
+        // Look every time, not only when semantic left slots free. Ranking is
+        // unthresholded, so semantic returns exactly min(cached_count, limit) —
+        // meaning on any station holding more embedded memories than `limit`,
+        // a "fill the leftovers" gate never fires at all. That populated
+        // station is precisely the case this exists to protect.
+        //
+        // Unembedded memories are invisible to the ranker rather than ranked
+        // low, so there is no honest way to score them against cosine hits.
+        // They get a bounded share of the page instead of competing for it:
+        // whatever slots are free, and at least half the page when none are,
+        // capped by how many actually matched. Semantic still leads. At
+        // limit 1 the share is zero and the single best cosine hit wins,
+        // which is the right answer when the caller asked for exactly one.
+        if let Ok(unembedded) = self.keyword_search_unembedded(query, limit) {
+            let take = unembedded_share(limit, results.len(), unembedded.len());
+            if take > 0 {
+                results.truncate(limit.saturating_sub(take));
+                results.extend(unembedded.into_iter().take(take));
             }
         }
 
@@ -436,10 +466,35 @@ impl DatabaseManager {
         Ok(c as usize)
     }
 
+    /// Memories with no cached embedding. Non-zero means semantic search is
+    /// answering from a partial index, so a caller presenting results as
+    /// complete would be overstating them. Surfaced by `recall` in the CLI
+    /// and MCP rather than left to stderr, which MCP callers never see.
+    pub fn unembedded_count(&self) -> Result<usize, String> {
+        let conn = self.conn()?;
+        let c: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM memories m
+             LEFT JOIN memory_embeddings e ON e.memory_uuid = m.memory_uuid
+             WHERE e.memory_uuid IS NULL",
+            [],
+            |r| r.get(0),
+        ).map_err(|e| format!("Unembedded count failed: {}", e))?;
+        Ok(c as usize)
+    }
+
     /// Count of distinct conversation threads. A thread is everything sharing
     /// the same root via parent_uuid, resolved recursively through
     /// `memory_chains.root_uuid` — not just the immediate parent, which
     /// over-counts threads with depth 2 or more.
+    ///
+    /// Known limit: `memory_chains` anchors on memories that are their own
+    /// root and recurses by joining a parent already in the chain, so a
+    /// memory whose parent_uuid names a UUID absent from this database is in
+    /// neither branch and is counted in no thread. Nothing in this project
+    /// creates such an orphan — `resolve_uuid` refuses an unknown prefix —
+    /// but the four-column contract deliberately lets a parent live outside
+    /// the local store, so a foreign writer may produce one. `count()` still
+    /// includes them. Same applies to descendants past the view's depth cap.
     pub fn thread_count(&self) -> Result<usize, String> {
         let conn = self.conn()?;
         let c: i64 = conn.query_row(
@@ -831,6 +886,36 @@ mod tests {
         let hits = db.keyword_search_unembedded("authentication", 10).unwrap();
         assert_eq!(hits.len(), 1, "only the unembedded memory should surface here");
         assert!(hits[0].gist.contains("unembedded"));
+    }
+
+    #[test]
+    fn unembedded_share_seats_hits_on_a_full_page_of_semantic_results() {
+        // The regression this guards: a populated station where semantic
+        // ranking fills every slot. A "only if slots are free" rule yields 0
+        // here, which leaves the unembedded memories exactly as invisible as
+        // they were before the fix.
+        assert_eq!(unembedded_share(10, 10, 3), 3, "full page still seats matches");
+        assert_eq!(unembedded_share(10, 10, 8), 5, "seated share is capped at half the page");
+        assert_eq!(unembedded_share(10, 10, 0), 0, "nothing to seat when nothing matched");
+    }
+
+    #[test]
+    fn unembedded_share_uses_free_slots_before_reserving() {
+        // Small or sparse station: semantic came back short, so unembedded
+        // hits take the leftovers rather than displacing anything.
+        assert_eq!(unembedded_share(10, 4, 3), 3, "free slots absorb all matches");
+        assert_eq!(unembedded_share(10, 0, 10), 10, "an empty page can fill entirely");
+        assert_eq!(unembedded_share(1, 1, 5), 0, "one requested result stays the best cosine hit");
+    }
+
+    #[test]
+    fn unembedded_count_tracks_memories_the_backend_could_not_embed() {
+        let (db, _dir) = fresh_db();
+        assert_eq!(db.unembedded_count().unwrap(), 0, "fresh station has nothing pending");
+        db.signal_with_backend("embeds fine", None, None, None, Some(&MockBackend)).unwrap();
+        assert_eq!(db.unembedded_count().unwrap(), 0, "a successful embed leaves nothing pending");
+        db.signal_with_backend("backend was down", None, None, None, Some(&FailingBackend)).unwrap();
+        assert_eq!(db.unembedded_count().unwrap(), 1, "a failed embed is reportable, not silent");
     }
 
     #[test]

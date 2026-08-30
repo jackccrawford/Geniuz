@@ -456,9 +456,15 @@ fn run(cli: Cli) -> Result<String, String> {
                     if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
                     v
                 }).collect();
-                return Ok(serde_json::to_string_pretty(&serde_json::json!({
+                let mut out = serde_json::json!({
                     "ok": true, "action": "recall", "count": data.len(), "memories": data
-                })).unwrap());
+                });
+                // Report a partial index rather than presenting these results
+                // as the whole corpus.
+                if let Ok(n) = db.unembedded_count() {
+                    if n > 0 { out["unembedded"] = serde_json::json!(n); }
+                }
+                return Ok(serde_json::to_string_pretty(&out).unwrap());
             }
 
             if entries.is_empty() {
@@ -482,6 +488,17 @@ fn run(cli: Cli) -> Result<String, String> {
                         lines.push(format!("           {}", line));
                     }
                     lines.push(String::new());
+                }
+            }
+            // Unembedded memories are keyword-findable but invisible to
+            // ranking. Say so, so the gap reads as absent rather than as
+            // nothing-was-there.
+            if let Ok(n) = db.unembedded_count() {
+                if n > 0 {
+                    lines.push(format!(
+                        "\n({} {} not embedded — ranked results are partial. Run 'geniuz backfill'.)",
+                        n, if n == 1 { "memory" } else { "memories" }
+                    ));
                 }
             }
             Ok(lines.join("\n"))

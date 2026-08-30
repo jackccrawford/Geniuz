@@ -177,7 +177,19 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
         return ("No memories found for that query.".to_string(), false);
     }
 
-    (format_entries(&results, full, db), false)
+    // An MCP caller never sees stderr, so a partial index has to be said in
+    // the response or it isn't said at all — the whole point of the audit
+    // finding: unembedded memories were invisible rather than absent.
+    let mut out = format_entries(&results, full, db);
+    if let Ok(n) = db.unembedded_count() {
+        if n > 0 {
+            out.push_str(&format!(
+                "\n\n({} {} not embedded — ranked results are partial. Run 'geniuz backfill'.)",
+                n, if n == 1 { "memory" } else { "memories" }
+            ));
+        }
+    }
+    (out, false)
 }
 
 fn execute_recall_recent(db: &DatabaseManager, params: &Value) -> (String, bool) {
