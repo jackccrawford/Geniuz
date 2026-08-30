@@ -145,9 +145,14 @@ fn execute_remember(
 
     match db.signal_with_backend(content, gist, thread, None, backend) {
         Ok(result) if result.embedded => (format!("Remembered ({})", result.uuid), false),
+        // State, not instruction. This server exposes three tools and none of
+        // them runs the CLI, so telling the caller to run `backfill` is a
+        // command it may be unable to follow — while some hosts have a shell
+        // and could. Report what is true and let the caller decide whether to
+        // run it or relay it; the server cannot see the caller's capabilities.
         Ok(result) => (
             format!(
-                "Remembered ({}) — saved without semantic embedding, keyword search only. Run 'geniuz backfill' later.",
+                "Remembered ({}) — saved without a semantic embedding; keyword-searchable until 'geniuz backfill' runs.",
                 result.uuid
             ),
             false,
@@ -184,7 +189,7 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
     if let Ok(n) = db.unembedded_count() {
         if n > 0 {
             out.push_str(&format!(
-                "\n\n({} {} not embedded — ranked results are partial. Run 'geniuz backfill'.)",
+                "\n\n({} {} not embedded — ranked results are partial until 'geniuz backfill' runs.)",
                 n, if n == 1 { "memory" } else { "memories" }
             ));
         }
