@@ -144,7 +144,14 @@ fn execute_remember(
     let thread = params.get("thread").and_then(|t| t.as_str());
 
     match db.signal_with_backend(content, gist, thread, None, backend) {
-        Ok(uuid) => (format!("Remembered ({})", uuid), false),
+        Ok(result) if result.embedded => (format!("Remembered ({})", result.uuid), false),
+        Ok(result) => (
+            format!(
+                "Remembered ({}) — saved without semantic embedding, keyword search only. Run 'geniuz backfill' later.",
+                result.uuid
+            ),
+            false,
+        ),
         Err(e) => (format!("Error: {}", e), true),
     }
 }

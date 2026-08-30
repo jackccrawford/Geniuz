@@ -140,10 +140,10 @@ pub fn migrate(
                         let ts = format!("{}T{:02}:00:00", daily.date, (i * 2).min(23));
                         let parent = root_uuid.as_deref();
                         match db.signal(&section.content, Some(&gist), parent, Some(&ts)) {
-                            Ok(short_uuid) => {
+                            Ok(result) => {
                                 if root_uuid.is_none() {
                                     // First section becomes the thread root — resolve full UUID
-                                    root_uuid = Some(short_uuid);
+                                    root_uuid = Some(result.uuid);
                                 }
                                 created += 1;
                             }

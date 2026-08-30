@@ -7,6 +7,13 @@ pub struct DatabaseManager {
     pub db_path: String,
 }
 
+/// Escape SQLite LIKE metacharacters (`%`, `_`, and the escape char itself)
+/// so a search term matches literally instead of as a wildcard pattern.
+/// Callers pair this with `ESCAPE '\'` in the SQL.
+fn escape_like(term: &str) -> String {
+    term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
 impl DatabaseManager {
     pub fn new(db_path: &str) -> Result<Self, String> {
         if let Some(parent) = Path::new(db_path).parent() {
@@ -53,6 +60,25 @@ impl DatabaseManager {
             let schema = include_str!("../schema/schema.sql");
             conn.execute_batch(schema)
                 .map_err(|e| format!("Failed to init schema: {}", e))?;
+        } else {
+            // Existing database that already had `memories` on open, so the
+            // branches above skipped it. schema.sql is fully idempotent (every
+            // statement is `IF NOT EXISTS` / `INSERT OR IGNORE`), so
+            // re-applying it here is a complete, safe migration mechanism for
+            // additive schema changes (new triggers, indexes, views) — it
+            // reaches installs an installer script never runs: macOS drag
+            // installs, databases restored from backup or copied machines,
+            // other users on a shared machine.
+            //
+            // Best effort and non-fatal: a migration that can refuse to open
+            // a database is worse than the gap it closes. Known failure
+            // modes are read-only media and a concurrent writer holding the
+            // lock; either way the database still opens and works, and the
+            // next successful open applies what's missing.
+            let schema = include_str!("../schema/schema.sql");
+            if let Err(e) = conn.execute_batch(schema) {
+                eprintln!("[geniuz] Schema re-apply skipped (non-fatal): {}", e);
+            }
         }
 
         Ok(Self { db_path: db_path.to_string() })
@@ -75,7 +101,7 @@ impl DatabaseManager {
     pub fn signal(
         &self, content: &str, gist: Option<&str>, parent: Option<&str>,
         created_at: Option<&str>,
-    ) -> Result<String, String> {
+    ) -> Result<SignalResult, String> {
         self.signal_with_backend(content, gist, parent, created_at, None)
     }
 
@@ -84,7 +110,7 @@ impl DatabaseManager {
         &self, content: &str, gist: Option<&str>, parent: Option<&str>,
         created_at: Option<&str>,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,
-    ) -> Result<String, String> {
+    ) -> Result<SignalResult, String> {
         if content.trim().is_empty() {
             return Err("Content cannot be empty".to_string());
         }
@@ -92,8 +118,15 @@ impl DatabaseManager {
         let uuid = uuid::Uuid::new_v4().to_string().to_uppercase();
         let auto_gist = gist.map(|g| g.to_string()).unwrap_or_else(|| {
             let trimmed = content.trim();
-            if trimmed.len() <= 200 { trimmed.to_string() }
-            else { format!("{}...", &trimmed[..197]) }
+            // Truncate by char, not byte — `len()`/byte-slicing splits multibyte
+            // characters mid-codepoint and panics (e.g. multilingual content,
+            // which this project's embedding model explicitly targets).
+            if trimmed.chars().count() <= 200 {
+                trimmed.to_string()
+            } else {
+                let truncated: String = trimmed.chars().take(197).collect();
+                format!("{}...", truncated)
+            }
         });
 
         let payload = serde_json::json!({
@@ -157,7 +190,7 @@ impl DatabaseManager {
         }
         tx.commit().map_err(|e| format!("Failed to commit: {}", e))?;
 
-        Ok(uuid[..8].to_string())
+        Ok(SignalResult { uuid: uuid[..8].to_string(), embedded: embedding.is_some() })
     }
 
     // =========================================================================
@@ -260,7 +293,7 @@ impl DatabaseManager {
 
         // Build parameterized LIKE conditions: ?1, ?2, ... for terms, ?N+1 for limit
         let conditions: Vec<String> = (0..terms.len())
-            .map(|i| format!("payload LIKE ?{}", i + 1))
+            .map(|i| format!("payload LIKE ?{} ESCAPE '\\'", i + 1))
             .collect();
         let where_clause = conditions.join(" OR ");
         let limit_param = terms.len() + 1;
@@ -276,9 +309,10 @@ impl DatabaseManager {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(&sql).map_err(|e| format!("Query failed: {}", e))?;
 
-        // Bind search terms as %term% patterns, then limit
+        // Bind search terms as %term% patterns (metacharacters escaped so a
+        // literal '%' or '_' in the query doesn't act as a wildcard), then limit
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = terms.iter()
-            .map(|t| Box::new(format!("%{}%", t)) as Box<dyn rusqlite::types::ToSql>)
+            .map(|t| Box::new(format!("%{}%", escape_like(t))) as Box<dyn rusqlite::types::ToSql>)
             .collect();
         params.push(Box::new(limit as i32));
 
@@ -302,11 +336,69 @@ impl DatabaseManager {
             return self.keyword_search(query, limit);
         }
 
-        let results = crate::embedding::semantic_search_cached(query, cached, limit)?;
-        Ok(results.into_iter().map(|r| SignalEntry {
-            memory_uuid: r.memory_uuid, gist: r.gist, created_at: r.created_at,
-            parent_uuid: None, content: None, score: Some(r.score),
-        }).collect())
+        let mut results: Vec<SignalEntry> = crate::embedding::semantic_search_cached(query, cached, limit)?
+            .into_iter().map(|r| SignalEntry {
+                memory_uuid: r.memory_uuid, gist: r.gist, created_at: r.created_at,
+                parent_uuid: None, content: None, score: Some(r.score),
+            }).collect();
+
+        // A partial embedding failure (ONNX/Ollama down for one write) must not
+        // make that memory invisible: it's absent from the cache, not from the
+        // corpus. Fill remaining slots with keyword matches restricted to
+        // memories that have no cached embedding at all.
+        if results.len() < limit {
+            let remaining = limit - results.len();
+            if let Ok(unembedded_hits) = self.keyword_search_unembedded(query, remaining) {
+                results.extend(unembedded_hits);
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Keyword search restricted to memories with no cached embedding — used
+    /// by `semantic_search` to surface memories a backend outage left
+    /// unembedded, so they degrade to keyword-findable rather than vanishing.
+    fn keyword_search_unembedded(&self, query: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
+        let terms: Vec<&str> = query.split_whitespace().collect();
+        if terms.is_empty() { return Ok(Vec::new()); }
+
+        let conditions: Vec<String> = (0..terms.len())
+            .map(|i| format!("payload LIKE ?{} ESCAPE '\\'", i + 1))
+            .collect();
+        let where_clause = conditions.join(" OR ");
+        let limit_param = terms.len() + 1;
+
+        let sql = format!(
+            "SELECT m.memory_uuid,
+                    COALESCE(json_extract(m.payload, '$.gist'), substr(json_extract(m.payload, '$.content'), 1, 200)) as gist,
+                    m.created_at, m.parent_uuid
+             FROM memories m
+             LEFT JOIN memory_embeddings e ON e.memory_uuid = m.memory_uuid
+             WHERE e.memory_uuid IS NULL AND ({})
+             ORDER BY m.created_at DESC LIMIT ?{}",
+            where_clause, limit_param
+        );
+
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(&sql).map_err(|e| format!("Query failed: {}", e))?;
+
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = terms.iter()
+            .map(|t| Box::new(format!("%{}%", escape_like(t))) as Box<dyn rusqlite::types::ToSql>)
+            .collect();
+        params.push(Box::new(limit as i32));
+
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            let uuid: String = row.get(0)?;
+            let parent: Option<String> = row.get(3)?;
+            let display_parent = parent.filter(|p| p != &uuid);
+            Ok(SignalEntry {
+                memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
+                parent_uuid: display_parent, content: None, score: None,
+            })
+        }).map_err(|e| format!("Query failed: {}", e))?;
+
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
     pub fn random(&self) -> Result<Option<SignalEntry>, String> {
@@ -344,12 +436,14 @@ impl DatabaseManager {
         Ok(c as usize)
     }
 
-    /// Count of distinct conversation roots (memories with no parent + orphan
-    /// groups). Each memory belongs to exactly one root via parent_uuid threading.
+    /// Count of distinct conversation threads. A thread is everything sharing
+    /// the same root via parent_uuid, resolved recursively through
+    /// `memory_chains.root_uuid` — not just the immediate parent, which
+    /// over-counts threads with depth 2 or more.
     pub fn thread_count(&self) -> Result<usize, String> {
         let conn = self.conn()?;
         let c: i64 = conn.query_row(
-            "SELECT COUNT(DISTINCT COALESCE(parent_uuid, memory_uuid)) FROM memories",
+            "SELECT COUNT(DISTINCT root_uuid) FROM memory_chains",
             [],
             |r| r.get(0),
         ).map_err(|e| format!("Thread count failed: {}", e))?;
@@ -443,14 +537,39 @@ impl DatabaseManager {
         Ok(opt)
     }
 
+    /// Resolve a short UUID prefix to its full UUID. Errors on ambiguity
+    /// instead of silently picking whichever row SQLite returns first — a
+    /// wrong pick here threads a write onto the wrong lineage, which cannot
+    /// be undone in an append-only log.
     fn resolve_uuid(&self, partial: &str) -> Result<Option<String>, String> {
         if partial.len() == 36 { return Ok(Some(partial.to_uppercase())); }
         let conn = self.conn()?;
-        conn.query_row(
-            "SELECT memory_uuid FROM memories WHERE memory_uuid LIKE ?1 LIMIT 1",
-            rusqlite::params![format!("{}%", partial.to_uppercase())],
-            |row| row.get(0),
-        ).optional().map_err(|e| format!("UUID resolve failed: {}", e))
+        let pattern = format!("{}%", partial.to_uppercase());
+        let mut stmt = conn.prepare(
+            "SELECT memory_uuid FROM memories WHERE memory_uuid LIKE ?1 LIMIT 5"
+        ).map_err(|e| format!("UUID resolve failed: {}", e))?;
+        let matches: Vec<String> = stmt.query_map(rusqlite::params![&pattern], |row| row.get(0))
+            .map_err(|e| format!("UUID resolve failed: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("UUID resolve failed: {}", e))?;
+
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(Some(matches.into_iter().next().unwrap())),
+            _ => {
+                let total: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM memories WHERE memory_uuid LIKE ?1",
+                    rusqlite::params![&pattern],
+                    |r| r.get(0),
+                ).map_err(|e| format!("UUID resolve failed: {}", e))?;
+                let shown: Vec<String> = matches.iter().map(|u| u[..8].to_string()).collect();
+                Err(format!(
+                    "Ambiguous UUID prefix '{}' matches {} memories ({}{}) — use more characters",
+                    partial, total, shown.join(", "),
+                    if total as usize > shown.len() { ", ..." } else { "" }
+                ))
+            }
+        }
     }
 
     // =========================================================================
@@ -531,6 +650,16 @@ impl DatabaseManager {
     }
 }
 
+/// Result of a successful write. `embedded` is false when both embedding
+/// backends were unavailable — the memory is still saved and keyword
+/// searchable, but callers (CLI, MCP) can now tell the difference instead
+/// of getting a uniform "success" regardless of embedding state.
+#[derive(Debug)]
+pub struct SignalResult {
+    pub uuid: String,
+    pub embedded: bool,
+}
+
 pub struct SignalEntry {
     pub memory_uuid: String,
     pub gist: String,
@@ -573,6 +702,18 @@ mod tests {
         }
     }
 
+    /// Always fails — simulates both embedding backends being down, so a
+    /// write proceeds unembedded (keyword-searchable only).
+    struct FailingBackend;
+    impl crate::embedding::EmbeddingBackend for FailingBackend {
+        fn embed(&self, _text: &str) -> Result<Vec<f32>, String> {
+            Err("embedding backend unavailable".to_string())
+        }
+        fn name(&self) -> &str {
+            "failing-backend-for-tests"
+        }
+    }
+
     /// Build a fresh DatabaseManager in a per-test tempdir. Returns the
     /// tempdir guard so the caller keeps it alive for the test's lifetime.
     fn fresh_db() -> (DatabaseManager, tempfile::TempDir) {
@@ -587,6 +728,7 @@ mod tests {
     fn insert(db: &DatabaseManager, content: &str, gist: Option<&str>, parent: Option<&str>) -> String {
         db.signal_with_backend(content, gist, parent, None, Some(&MockBackend))
             .expect("signal_with_backend")
+            .uuid
     }
 
     #[test]
@@ -649,6 +791,89 @@ mod tests {
         let entry = entries.iter().find(|e| e.memory_uuid.starts_with(&short)).expect("inserted entry");
         assert_eq!(entry.gist.len(), 200, "auto-gist is exactly 200 chars (197 + '...')");
         assert!(entry.gist.ends_with("..."), "auto-gist ends with ellipsis");
+    }
+
+    #[test]
+    fn signal_truncates_multibyte_content_without_panicking() {
+        let (db, _dir) = fresh_db();
+        // 250 multibyte chars (750 bytes) — byte-slicing at index 197 would land
+        // mid-codepoint and panic. Char-based truncation must not.
+        let long = "あ".repeat(250);
+        let short = insert(&db, &long, None, None);
+        let entries = db.recent(10).unwrap();
+        let entry = entries.iter().find(|e| e.memory_uuid.starts_with(&short)).expect("inserted entry");
+        assert_eq!(entry.gist.chars().count(), 200, "auto-gist is exactly 200 chars (197 + '...')");
+        assert!(entry.gist.ends_with("..."), "auto-gist ends with ellipsis");
+    }
+
+    #[test]
+    fn signal_reports_embedded_status_from_backend_outcome() {
+        let (db, _dir) = fresh_db();
+        let ok = db.signal_with_backend("embeds fine", None, None, None, Some(&MockBackend))
+            .unwrap();
+        assert!(ok.embedded, "successful embed reports embedded = true");
+
+        let failed = db.signal_with_backend("embedding unavailable", None, None, None, Some(&FailingBackend))
+            .unwrap();
+        assert!(!failed.embedded, "failed embed still saves the memory but reports embedded = false");
+        // The memory itself is still written, just without a cached embedding.
+        assert_eq!(db.count().unwrap(), 2);
+        assert_eq!(db.embedding_count().unwrap(), 1);
+    }
+
+    #[test]
+    fn keyword_search_unembedded_only_returns_memories_without_cached_embedding() {
+        let (db, _dir) = fresh_db();
+        db.signal_with_backend("authentication flow embedded", None, None, None, Some(&MockBackend))
+            .unwrap();
+        db.signal_with_backend("authentication flow unembedded", None, None, None, Some(&FailingBackend))
+            .unwrap();
+        let hits = db.keyword_search_unembedded("authentication", 10).unwrap();
+        assert_eq!(hits.len(), 1, "only the unembedded memory should surface here");
+        assert!(hits[0].gist.contains("unembedded"));
+    }
+
+    #[test]
+    fn keyword_search_escapes_like_wildcard_underscore() {
+        let (db, _dir) = fresh_db();
+        insert(&db, "config_file setting", None, None);
+        insert(&db, "config-file setting", None, None);
+        let results = db.keyword_search("config_file", 10).unwrap();
+        assert_eq!(
+            results.len(), 1,
+            "'_' in the query should match literally, not act as a single-char wildcard"
+        );
+    }
+
+    #[test]
+    fn keyword_search_escapes_like_wildcard_percent() {
+        let (db, _dir) = fresh_db();
+        insert(&db, "discount is 50% off", None, None);
+        insert(&db, "discount is fifty off", None, None);
+        let results = db.keyword_search("50%", 10).unwrap();
+        assert_eq!(results.len(), 1, "literal '%' should not widen the match");
+    }
+
+    #[test]
+    fn resolve_uuid_errors_on_ambiguous_prefix() {
+        let (db, _dir) = fresh_db();
+        // Real UUIDs collide on an 8-char prefix with tiny but nonzero
+        // probability; simulate it deterministically via raw insert.
+        let conn = db.conn().unwrap();
+        conn.execute(
+            "INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, datetime('now'), ?1)",
+            rusqlite::params!["AAAAAAAA-0000-0000-0000-000000000001", r#"{"content":"one","gist":"one"}"#],
+        ).unwrap();
+        conn.execute(
+            "INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, datetime('now'), ?1)",
+            rusqlite::params!["AAAAAAAA-0000-0000-0000-000000000002", r#"{"content":"two","gist":"two"}"#],
+        ).unwrap();
+
+        // Threading a new memory onto the ambiguous prefix must error, not
+        // silently pick one candidate and corrupt the lineage.
+        let err = db.signal_with_backend("child", None, Some("AAAAAAAA"), None, Some(&MockBackend))
+            .expect_err("ambiguous prefix should error, not silently resolve");
+        assert!(err.contains("Ambiguous"), "error mentions ambiguity: {}", err);
     }
 
     #[test]
@@ -815,6 +1040,62 @@ mod tests {
         // Two roots → two threads, regardless of descendants.
         assert_eq!(db.thread_count().unwrap(), 2);
         // Total count is 3 (two roots + one child).
+        assert_eq!(db.count().unwrap(), 3);
+    }
+
+    #[test]
+    fn insert_or_replace_on_existing_memory_uuid_is_blocked() {
+        let (db, _dir) = fresh_db();
+        let short = insert(&db, "original content", Some("original"), None);
+        let entry = db.get_by_uuid_prefix(&short).unwrap().expect("entry");
+
+        let conn = db.conn().unwrap();
+        let err = conn.execute(
+            "INSERT OR REPLACE INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, datetime('now'), ?1)",
+            rusqlite::params![&entry.memory_uuid, r#"{"content":"replaced","gist":"replaced"}"#],
+        ).expect_err("REPLACE on an existing memory_uuid must be blocked");
+        assert!(
+            err.to_string().contains("immutable"),
+            "error mentions immutability: {}", err
+        );
+
+        // Original content survived untouched.
+        let full = db.get_full_content(&entry.memory_uuid).unwrap().expect("content");
+        assert_eq!(full, "original content");
+    }
+
+    #[test]
+    fn schema_reapplies_on_reopen_of_existing_database() {
+        let dir = tempdir().expect("tempdir");
+        let db_path = dir.path().join("memory.db");
+        {
+            let db = DatabaseManager::new(db_path.to_str().unwrap()).expect("first open");
+            insert(&db, "persisted across reopen", Some("persisted"), None);
+        }
+        // Reopening hits the "existing database" branch, which now
+        // re-applies schema.sql (idempotent) instead of skipping it.
+        let db = DatabaseManager::new(db_path.to_str().unwrap()).expect("second open");
+        assert_eq!(db.count().unwrap(), 1);
+        // The REPLACE guard trigger is present even though this database
+        // wasn't freshly created on this open.
+        let entry = db.recent(1).unwrap().into_iter().next().expect("entry");
+        let conn = db.conn().unwrap();
+        let err = conn.execute(
+            "INSERT OR REPLACE INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, datetime('now'), ?1)",
+            rusqlite::params![&entry.memory_uuid, r#"{"content":"replaced","gist":"replaced"}"#],
+        ).expect_err("REPLACE guard should be active after reopen");
+        assert!(err.to_string().contains("immutable"));
+    }
+
+    #[test]
+    fn thread_count_resolves_depth_two_chains_to_one_root() {
+        let (db, _dir) = fresh_db();
+        // A -> B -> C: a naive "immediate parent" count sees 2 distinct
+        // parents (A and B); the real answer is 1 thread (root A).
+        let a = insert(&db, "A", Some("A"), None);
+        let b = insert(&db, "B", Some("B"), Some(&a));
+        let _c = insert(&db, "C", Some("C"), Some(&b));
+        assert_eq!(db.thread_count().unwrap(), 1);
         assert_eq!(db.count().unwrap(), 3);
     }
 
