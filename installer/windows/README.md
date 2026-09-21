@@ -1,95 +1,115 @@
 # Windows installer
 
-Inno Setup script for building `Geniuz-Setup.exe` — per-user Windows installer.
+Inno Setup script (`Geniuz.iss`) for building `Geniuz-Setup.exe`, a per-user
+Windows installer. Everything below is read from `Geniuz.iss`, the signing
+scripts beside it, and the signature on the last built installer. Where this
+file and the script disagree, the script is right; fix this file.
+
+## What the installer does (from `Geniuz.iss`)
+
+- **Per-user only.** `PrivilegesRequired=lowest`; no admin elevation, no
+  all-users option. Installs to `%LOCALAPPDATA%\Programs\Geniuz\`.
+- **Windows 11 or later, x64.** `MinVersion=10.0.22000` hard-blocks at
+  install start with a clear message. A Windows 10 recipe is archived under
+  `saved-for-later/`.
+- **Ships three binaries:** `geniuz.exe`, `geniuz-embed.exe`, and
+  `geniuz-dashboard.exe` (the tray app). Plus `Geniuz.ico`.
+- **Memory location page.** A wizard page asks where memories live; default
+  `%USERPROFILE%\.geniuz`. The folder is created in user context. In a silent
+  install the default is used.
+- **Registry, all `HKCU`:** the install dir is appended to the user `Path`
+  (only if absent); `GENIUZ_HOME` is set to the chosen memory folder; the
+  dashboard is autostarted at login via
+  `Software\Microsoft\Windows\CurrentVersion\Run` (value removed on uninstall).
+  Nothing is written under `HKLM`; there is no machine-level policy key.
+- **Post-install steps, hidden:** `icacls` grants ALL APPLICATION PACKAGES
+  modify rights on the memory folder (so sandboxed Claude Desktop can open the
+  database); `geniuz mcp install --env GENIUZ_HOME=<folder>` writes the Claude
+  Desktop MCP config with the path embedded (sandboxed Claude does not inherit
+  the user's environment). Then the dashboard is launched; that step is
+  skipped in a silent install.
+- **Uninstall** removes the `Path` entry and `GENIUZ_HOME`, and leaves the
+  memory folder and database in place by design.
+
+Known defect, present in the script as of this commit: the uninstall step
+runs `taskkill /F /IM geniuz-tray.exe`, but the binary shipped and autostarted
+is `geniuz-dashboard.exe`. On uninstall the running dashboard is not stopped
+and its executable cannot be deleted. Fix the name in `CurUninstallStepChanged`.
+
+Version: `MyAppVersion` is defined at the top of `Geniuz.iss` and is set by
+hand; keep it in step with the crate version when cutting a release.
+
+## Silent / managed install
+
+Standard Inno Setup switches work unchanged:
+
+```powershell
+Geniuz-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+```
+
+Because the install is per-user, a management tool must run it in the
+logged-on user's context, not as SYSTEM. The memory folder takes its default,
+the MCP config is written, the autostart entry is set, and the dashboard is
+not launched until the next login.
 
 ## Build
 
-Requires Inno Setup 6+ (`ISCC.exe`). Easiest install on Windows:
+Requires Inno Setup 6+ (`ISCC.exe`) on a Windows machine:
 
 ```powershell
 choco install innosetup -y
 ```
 
-Then from this directory, with `geniuz.exe`, `geniuz-embed.exe`, and
-`geniuz-tray.exe` from `target/x86_64-pc-windows-msvc/release/` copied
-alongside `Geniuz.iss` — **after** they've been signed (see Sign step 1):
+Copy the three signed binaries from `target/x86_64-pc-windows-msvc/release/`
+alongside `Geniuz.iss`, then:
 
 ```powershell
-cd path\to\staging-dir
 & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' Geniuz.iss
 ```
 
-Output: `output\Geniuz-Setup.exe` (~13 MB, LZMA2 compressed).
+Output: `output\Geniuz-Setup.exe` (the 6 June 2026 build is about 23 MB).
 
 ## Sign
 
-Dual-signing: the three inner binaries are signed **before** Inno Setup
-bundles them, and the outer `Geniuz-Setup.exe` is signed **after** ISCC
-produces it. Both passes happen on Mac with the YubiKey FIPS plugged in
-(EV cert in PIV slot 9A). The inner-binary pass closes the gap where
-Windows would otherwise trigger fresh warnings the first time a user
-launches `geniuz.exe` or the tray app after installation.
+Dual-signing: the three inner binaries are signed before ISCC bundles them,
+and the outer `Geniuz-Setup.exe` is signed after. The inner pass is what
+stops Windows raising a fresh warning the first time a user launches
+`geniuz.exe` or the dashboard after install.
 
-**Step 1 — sign inner binaries (on Mac, before transferring to Windows):**
+Two signing paths exist in this directory:
 
-```bash
-./sign-binaries.sh /path/to/staging-dir
-```
+- **`sign-installer-trustedsigning.sh` (current).** Azure Trusted Signing
+  through `jsign`, account `MVLLC`, profile `geniuz-free-prod`, endpoint
+  `wus2.codesigning.azure.net`, RFC 3161 timestamp from Microsoft. Needs
+  `brew install jsign azure-cli` and `az login`; a fresh access token is
+  fetched per run and nothing is cached. The installer in `output/` is signed
+  this way: its signature chains to "Microsoft ID Verified Code Signing PCA
+  2021" for subject "Managed Ventures LLC", timestamped 6 June 2026 (checked
+  with `osslsigncode verify`).
+- **`sign-installer.sh` (retained).** The EV certificate on the YubiKey FIPS
+  (PIV slot 9A) through `osslsigncode`, timestamp from `ts.ssl.com`, prompts
+  for the PIN once per file. Kept as the fallback when Azure is unavailable.
 
-The staging dir holds the unsigned cross-compiled `.exe` files from
-`target/x86_64-pc-windows-msvc/release/`. The helper signs all three in
-place via `sign-installer.sh`. Prompts once per binary for the YubiKey
-User PIN (three total).
+`sign-binaries.sh` signs the three inner binaries in place and still calls
+`sign-installer.sh` (the hardware-key path). To sign the inner binaries with
+Trusted Signing, call `sign-installer-trustedsigning.sh` on each, or point
+`SIGN_CMD` in `sign-binaries.sh` at it.
 
-**Step 2 — bundle on Windows:** see the `ISCC.exe` command above. ISCC
-packs the now-signed inner binaries into `output\Geniuz-Setup.exe`.
-
-**Step 3 — sign the outer installer (back on Mac):**
-
-```bash
-./sign-installer.sh output/Geniuz-Setup.exe
-```
-
-Signs in place. Prompts once for the YubiKey User PIN. Embeds an RFC 3161
-timestamp from `ts.ssl.com` so signatures remain valid past cert expiration.
-Result: the installer AND every inner binary are signed. Windows shows
-"Verified publisher: Managed Ventures LLC" on the installer; inner binaries
-don't trigger fresh warnings on first launch. See `sign-installer.sh` for
-env-var overrides (cert path, hash alg, description fields) and dependencies.
-
-## Trusted Signing (future)
-
-`sign-installer-trustedsigning.sh` is the parallel signing script that uses
-Azure Trusted Signing instead of the YubiKey — no hardware token required;
-signs over a cloud HSM via API. Currently idle, waiting on Microsoft Identity
-Validation to complete. When IV finishes and a certificate profile is created,
-the daily-build flow can switch tools (same three-step dual-sign shape, same
-input/output) without changing the Inno Setup pipeline.
-
-## What it does
-
-- Per-user install (no admin required)
-- Installs to `%LOCALAPPDATA%\Programs\Geniuz\`
-- Adds install dir to user PATH (idempotent)
-- Runs `geniuz mcp install` postinstall — wires Claude Desktop config at
-  `%APPDATA%\Claude\claude_desktop_config.json`
-- Generates uninstaller (`unins000.exe`) that reverses everything but
-  preserves `~/.geniuz/memory.db` (user data is sacred)
+Verify any signed file from the Mac with `osslsigncode verify -in <file>`.
+The Mac copy of that tool may lack Microsoft's timestamp root and report the
+timestamp chain as unverified; the signer identity is still shown. On Windows
+use `signtool verify /pa /v <file>`.
 
 ## Why per-user, not Program Files
 
 Per-user means no admin elevation, no UAC prompt, faster install. Geniuz is a
-personal-memory tool — installing it under one Windows account doesn't make
-sense to share with another. Mac install pattern is the same (`~/Applications`
-or `/Applications` is a user choice, MCP config is per-user).
+personal-memory tool: installing it under one Windows account does not make
+sense to share with another. The Mac install pattern is the same.
 
 ## Why Inno Setup, not NSIS or MSI
 
-Tried NSIS first — direct downloads from SourceForge consistently failed
-across multiple mirrors (corrupted bytes, 404s). Tried Inno Setup direct
-downloads from jrsoftware.org — same problem (404s on multiple version URLs).
-Chocolatey absorbed the URL drift cleanly. Inno Setup also has nicer default
-UX than NSIS for non-technical users.
-
-MSI via WiX would be more enterprise-friendly but heavier toolchain. Inno
-Setup is the right balance for a consumer product shipped to individual users.
+NSIS and Inno Setup direct downloads both failed repeatedly (mirror drift);
+Chocolatey absorbed it. Inno Setup has the better default wizard for
+non-technical users. MSI via WiX would be more enterprise-friendly but is a
+heavier toolchain; for a managed deployment the silent switches above are
+enough.
