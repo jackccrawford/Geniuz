@@ -13,7 +13,7 @@
 ; mkdir failure.
 
 #define MyAppName "Geniuz"
-#define MyAppVersion "3.0.0"
+#define MyAppVersion "4.0.0"
 #define MyAppPublisher "Managed Ventures LLC"
 #define MyAppURL "https://geniuz.life"
 #define MyAppExeName "geniuz.exe"
@@ -178,7 +178,10 @@ begin
     AppDir := ExpandConstant('{app}');
     // Kill the running tray — otherwise we can't delete the running .exe
     // and the user has a lingering process after uninstall completes.
-    Exec('taskkill.exe', '/F /IM geniuz-tray.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // The tray binary is MyAppTrayExeName (geniuz-dashboard.exe); an earlier
+    // name, geniuz-tray.exe, lingered here after the rename and left the
+    // dashboard running through uninstall.
+    Exec('taskkill.exe', '/F /IM {#MyAppTrayExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     // PATH cleanup
     if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath) then
     begin

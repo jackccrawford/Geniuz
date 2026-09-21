@@ -31,13 +31,14 @@ file and the script disagree, the script is right; fix this file.
 - **Uninstall** removes the `Path` entry and `GENIUZ_HOME`, and leaves the
   memory folder and database in place by design.
 
-Known defect, present in the script as of this commit: the uninstall step
-runs `taskkill /F /IM geniuz-tray.exe`, but the binary shipped and autostarted
-is `geniuz-dashboard.exe`. On uninstall the running dashboard is not stopped
-and its executable cannot be deleted. Fix the name in `CurUninstallStepChanged`.
+Uninstall first stops the running tray by the name in `MyAppTrayExeName`
+(`geniuz-dashboard.exe`). Until 4.0.0 this step named the old binary,
+`geniuz-tray.exe`, so the dashboard survived uninstall and its executable
+could not be deleted.
 
 Version: `MyAppVersion` is defined at the top of `Geniuz.iss` and is set by
-hand; keep it in step with the crate version when cutting a release.
+hand; keep it in step with the crate version when cutting a release (both
+are 4.0.0 as of this commit).
 
 ## Silent / managed install
 
