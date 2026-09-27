@@ -358,6 +358,24 @@ impl DatabaseManager {
                 parent_uuid: None, content: None, score: Some(r.score),
             }).collect();
 
+        // The embedding cache carries no lineage, so semantic hits came back
+        // unthreaded while recent and keyword showed `<- PARENT`. Fill it in
+        // with the same root rule as the other readers (self-parent = root).
+        {
+            let conn = self.conn()?;
+            let mut stmt = conn
+                .prepare("SELECT parent_uuid FROM memories WHERE memory_uuid = ?1")
+                .map_err(|e| format!("Query failed: {}", e))?;
+            for e in results.iter_mut() {
+                let parent: Option<String> = stmt
+                    .query_row([&e.memory_uuid], |row| row.get(0))
+                    .optional()
+                    .map_err(|err| format!("Query failed: {}", err))?
+                    .flatten();
+                e.parent_uuid = parent.filter(|p| p != &e.memory_uuid);
+            }
+        }
+
         // A partial embedding failure (ONNX/Ollama down for one write) must not
         // make that memory invisible: it's absent from the cache, not from the
         // corpus.

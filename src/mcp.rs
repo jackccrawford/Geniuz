@@ -213,17 +213,61 @@ fn execute_recall_recent(db: &DatabaseManager, params: &Value) -> (String, bool)
 fn format_entries(entries: &[SignalEntry], full: bool, db: &DatabaseManager) -> String {
     let mut lines = Vec::new();
     for e in entries {
-        let ts = crate::shorten_ts(&e.created_at);
-        let score_str = e.score.map(|s| format!(" ({:.3})", s)).unwrap_or_default();
+        let head = entry_line(e);
         if full {
             let content = db.get_full_content(&e.memory_uuid)
                 .ok().flatten().unwrap_or_default();
-            lines.push(format!("{} | {} | {}{}\n  {}", &e.memory_uuid[..8], ts, e.gist, score_str, content));
+            lines.push(format!("{}\n  {}", head, content));
         } else {
-            lines.push(format!("{} | {} | {}{}", &e.memory_uuid[..8], ts, e.gist, score_str));
+            lines.push(head);
         }
     }
     lines.join("\n")
+}
+
+/// One result line, in the CLI's shape: `UUID | time | gist <- PARENT (score)`.
+/// The parent arrow is what lets an MCP caller see the threads it builds with
+/// `thread:` — without it, chains were stored but invisible through this door.
+fn entry_line(e: &SignalEntry) -> String {
+    let ts = crate::shorten_ts(&e.created_at);
+    let mut suffix = String::new();
+    if let Some(ref p) = e.parent_uuid {
+        suffix.push_str(&format!(" <- {}", &p[..8.min(p.len())]));
+    }
+    if let Some(s) = e.score {
+        suffix.push_str(&format!(" ({:.3})", s));
+    }
+    format!("{} | {} | {}{}", &e.memory_uuid[..8], ts, e.gist, suffix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(parent: Option<&str>, score: Option<f32>) -> SignalEntry {
+        SignalEntry {
+            memory_uuid: "5B1A36D9-0000-0000-0000-000000000000".into(),
+            gist: "test: child".into(),
+            created_at: "2026-09-27 07:19:39".into(),
+            parent_uuid: parent.map(String::from),
+            content: None,
+            score,
+        }
+    }
+
+    #[test]
+    fn line_shows_parent_before_score_like_the_cli() {
+        let line = entry_line(&entry(Some("6B3F7B38-0000-0000-0000-000000000000"), Some(0.483)));
+        assert!(line.starts_with("5B1A36D9 | "), "{line}");
+        assert!(line.ends_with("test: child <- 6B3F7B38 (0.483)"), "{line}");
+    }
+
+    #[test]
+    fn root_line_has_no_arrow() {
+        let line = entry_line(&entry(None, None));
+        assert!(line.ends_with("test: child"), "{line}");
+        assert!(!line.contains("<-"), "{line}");
+    }
 }
 
 // =============================================================================
