@@ -122,9 +122,13 @@ jsign \
 echo
 echo "→ Verifying signature..."
 if command -v osslsigncode >/dev/null 2>&1; then
+  # Informational only. The Mac's osslsigncode lacks Microsoft's roots and
+  # reports "Failed" on a good signature; under pipefail that aborted
+  # sign-binaries.sh after its first file. The authoritative check is
+  # `signtool verify /pa /v` on Windows.
   osslsigncode verify -in "$TARGET" 2>&1 \
     | grep -E 'Subject:|Issuer:|Signing time|Timestamp|Number of verified|Succeeded|Failed' \
-    | sed 's/^/  /'
+    | sed 's/^/  /' || true
 else
   echo "  (osslsigncode not installed; skipping local verify."
   echo "   Install with: brew install osslsigncode"
