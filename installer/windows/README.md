@@ -91,10 +91,10 @@ Two signing paths exist in this directory:
   (PIV slot 9A) through `osslsigncode`, timestamp from `ts.ssl.com`, prompts
   for the PIN once per file. Kept as the fallback when Azure is unavailable.
 
-`sign-binaries.sh` signs the three inner binaries in place and still calls
-`sign-installer.sh` (the hardware-key path). To sign the inner binaries with
-Trusted Signing, call `sign-installer-trustedsigning.sh` on each, or point
-`SIGN_CMD` in `sign-binaries.sh` at it.
+`sign-binaries.sh` signs the three inner binaries in place with Trusted
+Signing by default; set `GENIUZ_SIGN_CMD=./sign-installer.sh` to use the
+hardware key instead. Its binary list must match the `[Files]` entries in
+`Geniuz.iss`.
 
 Verify any signed file from the Mac with `osslsigncode verify -in <file>`.
 The Mac copy of that tool may lack Microsoft's timestamp root and report the
