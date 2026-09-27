@@ -548,12 +548,37 @@ pub fn run() {
             Ok(())
         })
         .on_menu_event(|app, event| {
-            // Relay menu events to the frontend so JS can switch surfaces.
             // Predefined items (undo/redo/cut/copy/paste) are handled by the
             // webview natively and never reach this handler.
             let id = event.id().0.as_str();
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.emit("menu", id);
+            match id {
+                // Help items act here, not in JS. The webview route did
+                // nothing: window.alert() is not shown by the Tauri webview,
+                // and opening the site went through open_path, which the
+                // capability file scopes to $HOME paths, so it was denied.
+                "menu_about" => {
+                    use tauri_plugin_dialog::{DialogExt, MessageDialogKind};
+                    app.dialog()
+                        .message(format!(
+                            "Geniuz {}\n\nPersistent memory for AI agents.\nManaged Ventures LLC\nhttps://geniuz.life",
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .title("About Geniuz")
+                        .kind(MessageDialogKind::Info)
+                        .show(|_| {});
+                }
+                "menu_website" => {
+                    use tauri_plugin_opener::OpenerExt;
+                    if let Err(e) = app.opener().open_url("https://geniuz.life", None::<&str>) {
+                        eprintln!("[geniuz] open website failed: {e}");
+                    }
+                }
+                // Everything else switches surfaces in the frontend.
+                _ => {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.emit("menu", id);
+                    }
+                }
             }
         })
         .run(tauri::generate_context!())

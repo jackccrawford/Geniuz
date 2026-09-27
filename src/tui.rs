@@ -99,7 +99,7 @@ impl App {
             list_state,
             input: String::new(),
             status: format!("{} memories", total),
-            hint: "/recent  /search <q>  /find <q>  /remember  /detail  /random  /reorder  /status  /help  /quit".into(),
+            hint: "/recent  /search <q>  /find <q>  /remember  /detail  /random  /reorder  /status  /version  /help  /quit".into(),
             mode: Mode::List,
             detail: None,
             should_quit: false,
@@ -224,6 +224,9 @@ impl App {
                     count,
                     geniuz::data_dir().join("memory.db").display()
                 );
+            }
+            "version" => {
+                self.status = format!("geniuz {}", env!("CARGO_PKG_VERSION"));
             }
             "help" | "?" => {
                 self.mode = Mode::Help;
@@ -628,6 +631,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from(vec![Span::styled("  /random       ", cmd), Span::raw("open a random memory")]),
         Line::from(vec![Span::styled("  /reorder      ", cmd), Span::raw("toggle list order (newest / oldest first)")]),
         Line::from(vec![Span::styled("  /status       ", cmd), Span::raw("refresh memory count and show db path")]),
+        Line::from(vec![Span::styled("  /version      ", cmd), Span::raw("show the Geniuz version")]),
         Line::from(vec![Span::styled("  /help         ", cmd), Span::raw("this screen")]),
         Line::from(vec![Span::styled("  /quit         ", cmd), Span::raw("exit")]),
         Line::raw(""),

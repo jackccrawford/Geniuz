@@ -186,7 +186,7 @@ if [ "$os" = "linux" ]; then
   if [ -n "$GENIUZ_NO_DASHBOARD" ]; then
     DASHBOARD_SKIPPED_REASON="GENIUZ_NO_DASHBOARD set"
   elif [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
-    DASHBOARD_SKIPPED_REASON="no graphical session ($DISPLAY/$WAYLAND_DISPLAY unset)"
+    DASHBOARD_SKIPPED_REASON="no graphical session (\$DISPLAY and \$WAYLAND_DISPLAY unset)"
   elif [ "$arch" != "amd64" ]; then
     DASHBOARD_SKIPPED_REASON="dashboard package not built for ${arch} yet"
   else

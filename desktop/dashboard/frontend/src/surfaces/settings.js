@@ -182,13 +182,19 @@ export async function mount(container) {
       update({ recent_memories_count: n });
     });
 
-    shell.appendChild(section('Display', [
-      row({
-        title: 'Recent memories in the tray',
-        help: 'How many memories the menubar dropdown shows. 0 hides the section.',
-        control: countInput,
-      }),
-    ]));
+    // Only the macOS menubar app (desktop/Geniuz, Swift) reads
+    // recent_memories_count. The Windows/Linux tray is a plain menu with no
+    // memory list, so there the setting changed nothing — show it only
+    // where it does something.
+    if (/Macintosh|Mac OS X/.test(navigator.userAgent)) {
+      shell.appendChild(section('Display', [
+        row({
+          title: 'Recent memories in the menu bar',
+          help: 'How many memories the menu bar dropdown shows. 0 hides the section.',
+          control: countInput,
+        }),
+      ]));
+    }
 
     // About
     const aboutSection = document.createElement('section');

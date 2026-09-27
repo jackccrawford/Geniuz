@@ -124,16 +124,8 @@ async function wireMenuEvents() {
         // Force a re-render of the current surface via state-key bump.
         setState({ _refresh: Date.now() });
         break;
-      case 'menu_website':
-        try {
-          await api.openPath('https://geniuz.life');
-        } catch (e) {
-          console.error('[geniuz] open website failed:', e);
-        }
-        break;
-      case 'menu_about':
-        alert(`Geniuz ${getState().appVersion || ''}\nManaged Ventures LLC\nhttps://geniuz.life`);
-        break;
+      // menu_about and menu_website are handled in Rust (src/lib.rs
+      // on_menu_event) and never reach the frontend.
       default:
         console.warn('[geniuz] unhandled nav event:', id);
     }

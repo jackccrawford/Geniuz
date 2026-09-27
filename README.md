@@ -167,7 +167,7 @@ Or skip the DMG entirely and use the CLI-first install below. That path installs
 
 ### Windows · one click
 
-Download **[Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe)** (NSIS). Signed via Azure Trusted Signing (Microsoft-rooted cert, no "unknown publisher" warning). Versioned MSI/EXE pairs are attached to each [release](https://github.com/jackccrawford/geniuz/releases) for enterprise deploy.
+Download **[Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe)** Windows 11, per-user, no admin prompt. Signed via Azure Trusted Signing (Microsoft-rooted cert, no "unknown publisher" warning). For managed deployment it runs silently with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`.
 
 ![Geniuz on Windows 11. Claude Desktop with the Geniuz MCP server alongside the Station Dashboard, showing a memory written from Claude appearing live in the dashboard.](images/windows-dashboard.jpg)
 
@@ -407,7 +407,7 @@ This repo contains the full Geniuz source (CLI, TUI, dashboard, Mac menubar app,
 Built artifacts are attached to each [GitHub release](https://github.com/jackccrawford/geniuz/releases):
 
 - `Geniuz.dmg` — Mac (arm64, Sonoma 14+) — menubar + dashboard + CLI
-- `Geniuz-Setup.exe` — Windows NSIS (x86_64, Win 10/11) — dashboard with system tray. Versioned `Geniuz_<version>_x64-setup.exe` + `.msi` also attached per release.
+- `Geniuz-Setup.exe` — Windows installer (Inno Setup, x86_64, Windows 11) — CLI, MCP server and the dashboard with system tray.
 - `geniuz-linux-amd64.tar.gz` — Linux x86_64 CLI + TUI
 - `geniuz-linux-arm64.tar.gz` — Linux arm64 CLI + TUI (Pi 5 compatible)
 - `Geniuz_<version>_amd64.deb` / `Geniuz-<version>-1.x86_64.rpm` / `Geniuz_<version>_amd64.AppImage` — Linux x86_64 dashboard
