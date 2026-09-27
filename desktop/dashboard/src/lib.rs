@@ -97,6 +97,7 @@ fn remember_memory(gist: Option<String>, content: String) -> Result<String, Stri
     let db = open_db()?;
     let gist_trimmed = gist.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty());
     db.signal(content.trim(), gist_trimmed, None, None)
+        .map(|r| r.uuid)
 }
 
 #[tauri::command]
