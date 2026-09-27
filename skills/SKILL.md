@@ -94,6 +94,14 @@ The gist is how your future self finds this memory. The content is what makes it
 
 A memory doesn't need to be long. It needs to be complete.
 
+**Anything longer than a sentence: use a file (`-c @note.md`) or stdin (`-c -`).** The inline form is the one a shell quietly corrupts — backticks get evaluated, quotes get eaten, newlines collapse — and you cannot take back what was kept.
+
+When something works, write down **what the green light did not tell you**. A passing test proves something narrower than you meant to ask. That gap is the difference between a note and a lesson.
+
+## Memories are permanent
+
+There is no edit and no delete. If a memory was wrong, remember the correction threaded to it with `-p`. The folder keeps the wrong turn and the fix together, which is why you can trust what you find in it.
+
 ## How it works
 
 Memories live in a SQLite database. Semantic search uses a local BERT model — no API calls, no cloud, runs fully offline. The model downloads once (~118MB) on first search. Every memory after that is embedded automatically.
