@@ -5,6 +5,14 @@ name: Linux GUI (AppImage + deb)
 # glibc 2.39 and will not start on 22.04 LTS (found 2026-09-29 when the
 # AppImage catalog, which tests on 22.04, reported it).
 #
+# ONNX Runtime is linked DYNAMICALLY against Microsoft's official 1.22 build
+# (glibc 2.27-compatible), exactly as release.yml does for the CLI: the ORT
+# that the `ort` crate downloads by default is compiled against glibc 2.38+
+# (__isoc23_strtol) and cannot even link on 22.04. The library ships inside
+# the AppImage (the bundler copies it) and the .deb (/usr/lib/geniuz/, found
+# through the binary's rpath — never /usr/lib, where a distro package might
+# own the same name).
+#
 # Also fixes the AppImage's .DirIcon: the Tauri bundler writes it as an
 # ABSOLUTE symlink into the build machine, which dangles everywhere else.
 #
@@ -56,12 +64,28 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      - name: Install ONNX Runtime 1.22 (glibc 2.27-compatible, dynamic link)
+        run: |
+          ORT_ARCHIVE="onnxruntime-linux-x64-1.22.0"
+          curl -sL "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/${ORT_ARCHIVE}.tgz" | tar xz -C /tmp
+          sudo cp /tmp/${ORT_ARCHIVE}/lib/libonnxruntime.so.1.22.0 /usr/local/lib/
+          sudo ln -sf libonnxruntime.so.1.22.0 /usr/local/lib/libonnxruntime.so
+          sudo ln -sf libonnxruntime.so.1.22.0 /usr/local/lib/libonnxruntime.so.1
+          sudo cp -r /tmp/${ORT_ARCHIVE}/include/* /usr/local/include/
+          sudo ldconfig
+          echo "ORT_LIB_LOCATION=/usr/local/lib" >> "$GITHUB_ENV"
+          echo "ORT_PREFER_DYNAMIC_LINK=1" >> "$GITHUB_ENV"
+
       - name: Install the Tauri CLI
         run: cargo install tauri-cli --version '^2' --locked
 
       - name: Build AppImage and deb
         working-directory: desktop/dashboard
-        run: cargo tauri build --bundles deb,appimage
+        run: |
+          # The .deb carries ORT in /usr/lib/geniuz; the binary looks there.
+          export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/../lib/geniuz'
+          cargo tauri build --bundles deb,appimage --config \
+            '{"bundle":{"linux":{"deb":{"files":{"/usr/lib/geniuz/libonnxruntime.so.1":"/usr/local/lib/libonnxruntime.so.1.22.0"}}}}}'
 
       - name: Collect the bundles
         run: |
@@ -97,6 +121,10 @@ jobs:
       - name: Verify what will ship
         run: |
           set -euo pipefail
+          # Take ORT off this machine first, so every library check below has
+          # to find the copy that SHIPS, not the one the build used.
+          sudo rm -f /usr/local/lib/libonnxruntime.so*
+          sudo ldconfig
           A=$(ls out/*.AppImage)
           V=$(mktemp -d)
           (cd "$V" && "$OLDPWD/$A" --appimage-extract > /dev/null)
@@ -105,6 +133,11 @@ jobs:
           ABS=$(find "$R" -type l -lname '/*' | wc -l)
           [ "$ABS" -eq 0 ] || { echo "::error::$ABS absolute symlink(s) in the AppImage"; find "$R" -type l -lname '/*'; exit 1; }
           desktop-file-validate "$R"/*.desktop
+          # Every library the dashboard needs resolves — ORT from inside the image.
+          if ldd "$R/usr/bin/geniuz-dashboard" | grep -q "not found"; then
+            echo "::error::the AppImage's binary has unresolved libraries"; ldd "$R/usr/bin/geniuz-dashboard" | grep "not found"; exit 1
+          fi
+          ldd "$R/usr/bin/geniuz-dashboard" | grep -i onnxruntime
           # The newest glibc symbol any ELF in the AppImage requires.
           NEED=$(find "$R" -type f -exec sh -c 'od -An -tx1 -N4 "$1" | grep -q "7f 45 4c 46" && objdump -T "$1" 2>/dev/null' _ {} \; \
                  | grep '\*UND\*' | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -V | tail -1)
@@ -116,7 +149,12 @@ jobs:
           fi
           # The .deb's binary is the same build; check it too.
           D=$(mktemp -d); dpkg-deb -x out/*.deb "$D"
-          DNEED=$(objdump -T "$D"/usr/bin/* 2>/dev/null | grep '\*UND\*' | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -V | tail -1)
+          test -f "$D/usr/lib/geniuz/libonnxruntime.so.1" || { echo "::error::the deb does not carry ORT"; exit 1; }
+          if ldd "$D/usr/bin/geniuz-dashboard" | grep -q "not found"; then
+            echo "::error::the deb's binary has unresolved libraries"; ldd "$D/usr/bin/geniuz-dashboard" | grep "not found"; exit 1
+          fi
+          ldd "$D/usr/bin/geniuz-dashboard" | grep -i onnxruntime
+          DNEED=$(objdump -T "$D"/usr/bin/* "$D"/usr/lib/geniuz/* 2>/dev/null | grep '\*UND\*' | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -V | tail -1)
           echo "deb binary needs glibc $DNEED"
           [ "$(printf '%s\n%s\n' "$DNEED" "$MAX_GLIBC" | sort -V | tail -1)" = "$MAX_GLIBC" ] || { echo "::error::the deb needs glibc $DNEED"; exit 1; }
           (cd out && sha256sum * | tee SHA256SUMS-linux-gui.txt)
