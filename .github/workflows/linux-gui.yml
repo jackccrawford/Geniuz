@@ -1,0 +1,139 @@
+name: Linux GUI (AppImage + deb)
+
+# The Geniuz dashboard for Linux, built on the OLDEST Ubuntu we support so it
+# runs on as many machines as possible. A binary built on Ubuntu 24.04 needs
+# glibc 2.39 and will not start on 22.04 LTS (found 2026-09-29 when the
+# AppImage catalog, which tests on 22.04, reported it).
+#
+# Also fixes the AppImage's .DirIcon: the Tauri bundler writes it as an
+# ABSOLUTE symlink into the build machine, which dangles everywhere else.
+#
+# Runs on every release tag (and uploads to that release), or by hand against
+# any tag — by hand it only produces workflow artifacts unless `publish` is
+# set, so a build can be verified before a release asset is replaced.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Tag to build (e.g. v4.0.1)'
+        required: true
+      publish:
+        description: 'Replace the Linux GUI assets on that release'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  # The oldest glibc a build may require: Ubuntu 22.04's.
+  MAX_GLIBC: '2.35'
+  # linuxdeploy is itself an AppImage; CI runners have no FUSE.
+  APPIMAGE_EXTRACT_AND_RUN: '1'
+
+jobs:
+  linux-gui:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Resolve the tag
+        id: tag
+        run: echo "ref=${{ github.event.inputs.ref || github.ref_name }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.ref }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev build-essential curl wget file patchelf \
+            squashfs-tools desktop-file-utils
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install the Tauri CLI
+        run: cargo install tauri-cli --version '^2' --locked
+
+      - name: Build AppImage and deb
+        working-directory: desktop/dashboard
+        run: cargo tauri build --bundles deb,appimage
+
+      - name: Collect the bundles
+        run: |
+          mkdir -p out
+          cp desktop/dashboard/target/release/bundle/appimage/*.AppImage out/
+          cp desktop/dashboard/target/release/bundle/deb/*.deb out/
+          ls -la out
+
+      - name: Fix .DirIcon (make it a real file, not a link into the build machine)
+        run: |
+          set -euo pipefail
+          A=$(ls out/*.AppImage)
+          OFFSET=$("$A" --appimage-offset)
+          W=$(mktemp -d)
+          unsquashfs -q -o "$OFFSET" -d "$W/root" "$A"
+          COMP=$(unsquashfs -o "$OFFSET" -s "$A" | awk '/^Compression/ {print $2}')
+          BLOCK=$(unsquashfs -o "$OFFSET" -s "$A" | awk '/^Block size/ {print $3}')
+          ICON=$(readlink "$W/root/.DirIcon" || true)
+          echo ".DirIcon was: ${ICON:-a regular file}"
+          if [ -L "$W/root/.DirIcon" ]; then
+            # The file the link meant (same name, inside the image), else the
+            # top-level icon.
+            SRC="$W/root/$(basename "$ICON")"
+            [ -f "$SRC" ] || SRC=$(ls "$W/root"/*.png | head -1)
+            rm "$W/root/.DirIcon"
+            cp "$SRC" "$W/root/.DirIcon"
+          fi
+          head -c "$OFFSET" "$A" > "$W/runtime"
+          mksquashfs "$W/root" "$W/fs.sqfs" -comp "$COMP" -b "$BLOCK" -root-owned -noappend -no-progress -quiet
+          cat "$W/runtime" "$W/fs.sqfs" > "$A"
+          chmod 755 "$A"
+
+      - name: Verify what will ship
+        run: |
+          set -euo pipefail
+          A=$(ls out/*.AppImage)
+          V=$(mktemp -d)
+          (cd "$V" && "$OLDPWD/$A" --appimage-extract > /dev/null)
+          R="$V/squashfs-root"
+          test -f "$R/.DirIcon" && ! test -L "$R/.DirIcon" || { echo "::error::.DirIcon is not a regular file"; exit 1; }
+          ABS=$(find "$R" -type l -lname '/*' | wc -l)
+          [ "$ABS" -eq 0 ] || { echo "::error::$ABS absolute symlink(s) in the AppImage"; find "$R" -type l -lname '/*'; exit 1; }
+          desktop-file-validate "$R"/*.desktop
+          # The newest glibc symbol any ELF in the AppImage requires.
+          NEED=$(find "$R" -type f -exec sh -c 'od -An -tx1 -N4 "$1" | grep -q "7f 45 4c 46" && objdump -T "$1" 2>/dev/null' _ {} \; \
+                 | grep '\*UND\*' | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -V | tail -1)
+          echo "newest glibc required: $NEED (limit $MAX_GLIBC)"
+          if [ "$(printf '%s\n%s\n' "$NEED" "$MAX_GLIBC" | sort -V | tail -1)" != "$MAX_GLIBC" ]; then
+            echo "::error::the AppImage needs glibc $NEED; Ubuntu 22.04 has $MAX_GLIBC"
+            find "$R" -type f -exec sh -c 'od -An -tx1 -N4 "$1" | grep -q "7f 45 4c 46" && { v=$(objdump -T "$1" 2>/dev/null | grep "\*UND\*" | grep -oE "GLIBC_[0-9]+(\.[0-9]+)+" | sed s/GLIBC_// | sort -V | tail -1); [ -n "$v" ] && echo "$v $1"; }' _ {} \; | sort -V | tail -8
+            exit 1
+          fi
+          # The .deb's binary is the same build; check it too.
+          D=$(mktemp -d); dpkg-deb -x out/*.deb "$D"
+          DNEED=$(objdump -T "$D"/usr/bin/* 2>/dev/null | grep '\*UND\*' | grep -oE 'GLIBC_[0-9]+(\.[0-9]+)+' | sed 's/GLIBC_//' | sort -V | tail -1)
+          echo "deb binary needs glibc $DNEED"
+          [ "$(printf '%s\n%s\n' "$DNEED" "$MAX_GLIBC" | sort -V | tail -1)" = "$MAX_GLIBC" ] || { echo "::error::the deb needs glibc $DNEED"; exit 1; }
+          (cd out && sha256sum * | tee SHA256SUMS-linux-gui.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: geniuz-linux-gui-${{ steps.tag.outputs.ref }}
+          path: out/*
+
+      - name: Replace the Linux GUI assets on the release
+        if: github.event_name == 'push' || github.event.inputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # On a tag push, release.yml creates the release; wait for it.
+          for i in $(seq 1 60); do
+            gh release view "${{ steps.tag.outputs.ref }}" > /dev/null 2>&1 && break
+            sleep 20
+          done
+          gh release upload "${{ steps.tag.outputs.ref }}" out/*.AppImage out/*.deb --clobber
