@@ -3,6 +3,8 @@
 use rusqlite::{Connection, OptionalExtension};
 use std::path::Path;
 
+use crate::window::Window;
+
 pub struct DatabaseManager {
     pub db_path: String,
 }
@@ -214,15 +216,23 @@ impl DatabaseManager {
     // =========================================================================
 
     pub fn recent(&self, limit: usize) -> Result<Vec<SignalEntry>, String> {
+        self.recent_in(&Window::all(), limit)
+    }
+
+    /// The newest memories inside `window`, newest first.
+    pub fn recent_in(&self, window: &Window, limit: usize) -> Result<Vec<SignalEntry>, String> {
+        let (cond, wparams) = window.sql("created_at", 2);
         let conn = self.conn()?;
-        let mut stmt = conn.prepare(
+        let mut stmt = conn.prepare(&format!(
             "SELECT memory_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
                     created_at, parent_uuid
-             FROM memories ORDER BY created_at DESC LIMIT ?1"
-        ).map_err(|e| format!("Query failed: {}", e))?;
+             FROM memories WHERE {cond} ORDER BY created_at DESC LIMIT ?1"
+        )).map_err(|e| format!("Query failed: {}", e))?;
 
-        let rows = stmt.query_map(rusqlite::params![limit as i32], |row| {
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(limit as i64)];
+        params.extend(wparams.into_iter().map(|p| Box::new(p) as Box<dyn rusqlite::types::ToSql>));
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
             let uuid: String = row.get(0)?;
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
@@ -304,22 +314,29 @@ impl DatabaseManager {
     }
 
     pub fn keyword_search(&self, query: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
-        let terms: Vec<&str> = query.split_whitespace().collect();
-        if terms.is_empty() { return self.recent(limit); }
+        self.keyword_search_in(query, &Window::all(), limit)
+    }
 
-        // Build parameterized LIKE conditions: ?1, ?2, ... for terms, ?N+1 for limit
+    /// Keyword search inside `window`, newest first.
+    pub fn keyword_search_in(&self, query: &str, window: &Window, limit: usize) -> Result<Vec<SignalEntry>, String> {
+        let terms: Vec<&str> = query.split_whitespace().collect();
+        if terms.is_empty() { return self.recent_in(window, limit); }
+
+        // Build parameterized LIKE conditions: ?1, ?2, ... for terms, ?N+1 for
+        // limit, then the window's bounds.
         let conditions: Vec<String> = (0..terms.len())
             .map(|i| format!("payload LIKE ?{} ESCAPE '\\'", i + 1))
             .collect();
         let where_clause = conditions.join(" OR ");
         let limit_param = terms.len() + 1;
+        let (wcond, wparams) = window.sql("created_at", limit_param + 1);
 
         let sql = format!(
             "SELECT memory_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
                     created_at, parent_uuid
-             FROM memories WHERE {} ORDER BY created_at DESC LIMIT ?{}",
-            where_clause, limit_param
+             FROM memories WHERE ({}) AND {} ORDER BY created_at DESC LIMIT ?{}",
+            where_clause, wcond, limit_param
         );
 
         let conn = self.conn()?;
@@ -331,6 +348,7 @@ impl DatabaseManager {
             .map(|t| Box::new(format!("%{}%", escape_like(t))) as Box<dyn rusqlite::types::ToSql>)
             .collect();
         params.push(Box::new(limit as i32));
+        params.extend(wparams.into_iter().map(|p| Box::new(p) as Box<dyn rusqlite::types::ToSql>));
 
         let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
             let uuid: String = row.get(0)?;
@@ -346,13 +364,38 @@ impl DatabaseManager {
     }
 
     pub fn semantic_search(&self, query: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
+        self.semantic_search_in(query, &Window::all(), limit)
+    }
+
+    /// Semantic search inside `window`. The cache is narrowed to the window
+    /// BEFORE ranking: ranking all of time and filtering after would hand back
+    /// the top `limit` of all time, of which a recent window usually holds none.
+    pub fn semantic_search_in(&self, query: &str, window: &Window, limit: usize) -> Result<Vec<SignalEntry>, String> {
+        self.semantic_search_with(query, window, limit, None)
+    }
+
+    /// [`Self::semantic_search_in`] with the query embedded by `backend`
+    /// (tests pass a deterministic one; `None` is the production backend).
+    fn semantic_search_with(
+        &self, query: &str, window: &Window, limit: usize,
+        backend: Option<&dyn crate::embedding::EmbeddingBackend>,
+    ) -> Result<Vec<SignalEntry>, String> {
         let cached = self.get_cached_embeddings()?;
         if cached.is_empty() {
             eprintln!("[geniuz] No embedding cache. Run: geniuz backfill");
-            return self.keyword_search(query, limit);
+            return self.keyword_search_in(query, window, limit);
         }
+        let cached: Vec<_> = cached.into_iter().filter(|c| window.contains(&c.created_at)).collect();
 
-        let mut results: Vec<SignalEntry> = crate::embedding::semantic_search_cached(query, cached, limit)?
+        let ranked = if cached.is_empty() {
+            Vec::new()
+        } else {
+            match backend {
+                Some(b) => crate::embedding::rank_cached(&b.embed(query)?, cached, limit),
+                None => crate::embedding::semantic_search_cached(query, cached, limit)?,
+            }
+        };
+        let mut results: Vec<SignalEntry> = ranked
             .into_iter().map(|r| SignalEntry {
                 memory_uuid: r.memory_uuid, gist: r.gist, created_at: r.created_at,
                 parent_uuid: None, content: None, score: Some(r.score),
@@ -393,7 +436,7 @@ impl DatabaseManager {
         // capped by how many actually matched. Semantic still leads. At
         // limit 1 the share is zero and the single best cosine hit wins,
         // which is the right answer when the caller asked for exactly one.
-        if let Ok(unembedded) = self.keyword_search_unembedded(query, limit) {
+        if let Ok(unembedded) = self.keyword_search_unembedded(query, window, limit) {
             let take = unembedded_share(limit, results.len(), unembedded.len());
             if take > 0 {
                 results.truncate(limit.saturating_sub(take));
@@ -407,7 +450,7 @@ impl DatabaseManager {
     /// Keyword search restricted to memories with no cached embedding — used
     /// by `semantic_search` to surface memories a backend outage left
     /// unembedded, so they degrade to keyword-findable rather than vanishing.
-    fn keyword_search_unembedded(&self, query: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    fn keyword_search_unembedded(&self, query: &str, window: &Window, limit: usize) -> Result<Vec<SignalEntry>, String> {
         let terms: Vec<&str> = query.split_whitespace().collect();
         if terms.is_empty() { return Ok(Vec::new()); }
 
@@ -416,6 +459,7 @@ impl DatabaseManager {
             .collect();
         let where_clause = conditions.join(" OR ");
         let limit_param = terms.len() + 1;
+        let (wcond, wparams) = window.sql("m.created_at", limit_param + 1);
 
         let sql = format!(
             "SELECT m.memory_uuid,
@@ -423,9 +467,9 @@ impl DatabaseManager {
                     m.created_at, m.parent_uuid
              FROM memories m
              LEFT JOIN memory_embeddings e ON e.memory_uuid = m.memory_uuid
-             WHERE e.memory_uuid IS NULL AND ({})
+             WHERE e.memory_uuid IS NULL AND ({}) AND {}
              ORDER BY m.created_at DESC LIMIT ?{}",
-            where_clause, limit_param
+            where_clause, wcond, limit_param
         );
 
         let conn = self.conn()?;
@@ -435,6 +479,7 @@ impl DatabaseManager {
             .map(|t| Box::new(format!("%{}%", escape_like(t))) as Box<dyn rusqlite::types::ToSql>)
             .collect();
         params.push(Box::new(limit as i32));
+        params.extend(wparams.into_iter().map(|p| Box::new(p) as Box<dyn rusqlite::types::ToSql>));
 
         let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
             let uuid: String = row.get(0)?;
@@ -450,13 +495,19 @@ impl DatabaseManager {
     }
 
     pub fn random(&self) -> Result<Option<SignalEntry>, String> {
+        self.random_in(&Window::all())
+    }
+
+    /// One memory at random from inside `window`.
+    pub fn random_in(&self, window: &Window) -> Result<Option<SignalEntry>, String> {
+        let (cond, wparams) = window.sql("created_at", 1);
         let conn = self.conn()?;
         let result = conn.query_row(
-            "SELECT memory_uuid,
+            &format!("SELECT memory_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)),
                     created_at, parent_uuid
-             FROM memories ORDER BY RANDOM() LIMIT 1",
-            [], |row| {
+             FROM memories WHERE {cond} ORDER BY RANDOM() LIMIT 1"),
+            rusqlite::params_from_iter(wparams.iter()), |row| {
                 let uuid: String = row.get(0)?;
                 let parent: Option<String> = row.get(3)?;
                 let display_parent = parent.filter(|p| p != &uuid);
@@ -901,7 +952,7 @@ mod tests {
             .unwrap();
         db.signal_with_backend("authentication flow unembedded", None, None, None, Some(&FailingBackend))
             .unwrap();
-        let hits = db.keyword_search_unembedded("authentication", 10).unwrap();
+        let hits = db.keyword_search_unembedded("authentication", &Window::all(), 10).unwrap();
         assert_eq!(hits.len(), 1, "only the unembedded memory should surface here");
         assert!(hits[0].gist.contains("unembedded"));
     }
@@ -1102,6 +1153,60 @@ mod tests {
             .unwrap();
         let ts = db.last_write_timestamp().unwrap().expect("has timestamp");
         assert!(ts.starts_with("2026-06-15"), "got: {}", ts);
+    }
+
+    /// Embeds by whether a text names "Cubic": everything is about reviews,
+    /// and the one memory that names Cubic sits a little off the review axis —
+    /// the shape of Pumpkin's question (2026-09-30), where months of review-ish
+    /// memories outranked last week's answer.
+    struct ReviewAxis;
+    impl crate::embedding::EmbeddingBackend for ReviewAxis {
+        fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
+            let mut v = vec![0.0; MOCK_DIM];
+            v[0] = 1.0;
+            if text.contains("Cubic") { v[0] = 0.8; v[1] = 0.6; }
+            Ok(v)
+        }
+        fn name(&self) -> &str { "review-axis" }
+    }
+
+    fn pumpkins_station() -> (DatabaseManager, tempfile::TempDir, String) {
+        let (db, dir) = fresh_db();
+        for i in 0..30 {
+            let ts = format!("2026-{:02}-{:02} 12:00:00", 2 + i / 6, 1 + (i % 6) * 4);
+            db.signal_with_backend(&format!("code review notes, round {i}"), Some(&format!("review round {i}")),
+                None, Some(&ts), Some(&ReviewAxis)).unwrap();
+        }
+        let recent = (chrono::Utc::now() - chrono::Duration::days(3)).format("%Y-%m-%d %H:%M:%S").to_string();
+        let r = db.signal_with_backend("Cubic reviewed the PR; third-party reviewer", Some("Cubic reviewed the PR"),
+            None, Some(&recent), Some(&ReviewAxis)).unwrap();
+        (db, dir, r.uuid)
+    }
+
+    #[test]
+    fn semantic_without_a_window_buries_last_weeks_answer() {
+        let (db, _dir, cubic) = pumpkins_station();
+        let hits = db.semantic_search_with("third-party reviewers", &Window::all(), 5, Some(&ReviewAxis)).unwrap();
+        assert_eq!(hits.len(), 5);
+        assert!(hits.iter().all(|h| !h.memory_uuid.starts_with(&cubic)), "{:?}",
+            hits.iter().map(|h| &h.gist).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn a_window_narrows_before_ranking_so_last_weeks_answer_comes_first() {
+        let (db, _dir, cubic) = pumpkins_station();
+        let week = Window::parse(Some("7d"), None).unwrap();
+        let hits = db.semantic_search_with("third-party reviewers", &week, 5, Some(&ReviewAxis)).unwrap();
+        assert_eq!(hits.len(), 1, "only last week's memory is inside the window");
+        assert!(hits[0].memory_uuid.starts_with(&cubic));
+        // The same window holds for the other readers.
+        assert_eq!(db.recent_in(&week, 20).unwrap().len(), 1);
+        assert_eq!(db.keyword_search_in("review", &week, 20).unwrap().len(), 1);
+        assert!(db.random_in(&week).unwrap().unwrap().memory_uuid.starts_with(&cubic));
+        // And a window with nothing in it answers with nothing, not with all of time.
+        let empty = Window::parse(Some("2025-01-01"), Some("2025-01-31")).unwrap();
+        assert!(db.semantic_search_with("review", &empty, 5, Some(&ReviewAxis)).unwrap().is_empty());
+        assert!(db.keyword_search_in("review", &empty, 5).unwrap().is_empty());
     }
 
     #[test]

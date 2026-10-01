@@ -268,13 +268,20 @@ pub fn semantic_search_cached(
 ) -> Result<Vec<ScoredSignal>, String> {
     let backend = create_backend()?;
     let query_embedding = backend.embed(query)?;
+    Ok(rank_cached(&query_embedding, cached, limit))
+}
+
+/// Rank cached embeddings against an already-embedded query, best first.
+pub fn rank_cached(
+    query_embedding: &[f32], cached: Vec<CachedEmbedding>, limit: usize,
+) -> Vec<ScoredSignal> {
     let mut scored: Vec<ScoredSignal> = cached.into_iter().map(|c| {
-        let score = cosine_similarity(&query_embedding, &c.embedding);
+        let score = cosine_similarity(query_embedding, &c.embedding);
         ScoredSignal { memory_uuid: c.memory_uuid, gist: c.gist, created_at: c.created_at, score }
     }).collect();
     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(limit);
-    Ok(scored)
+    scored
 }
 
 /// Embed content — socket first, inline fallback.

@@ -2,6 +2,7 @@ pub mod embedding;
 pub mod embed_client;
 pub mod db;
 pub mod settings;
+pub mod window;
 
 use std::path::PathBuf;
 

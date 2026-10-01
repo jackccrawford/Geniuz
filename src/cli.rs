@@ -58,7 +58,7 @@ pub enum Command {
 
     /// Search your memories — semantic by default
     #[command(
-        after_help = "Examples:\n  geniuz recall \"auth token\"                  Semantic search\n  geniuz recall --keyword \"auth\"               Keyword fallback\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n\nTip: Run 'geniuz backfill' first to enable semantic search."
+        after_help = "Examples:\n  geniuz recall \"auth token\"                  Semantic search\n  geniuz recall --keyword \"auth\"               Keyword fallback\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n\nTip: Run 'geniuz backfill' first to enable semantic search."
     )]
     Recall {
         /// Search query
@@ -76,6 +76,15 @@ pub enum Command {
         #[arg(short, long)]
         full: bool,
 
+        /// Only memories from this time on: 24h, 7d, 2w, a date (2026-09-23),
+        /// a local time (2026-09-23 14:00) or RFC 3339
+        #[arg(long, value_name = "WHEN")]
+        since: Option<String>,
+
+        /// Only memories before this time (same forms; a date includes that whole day)
+        #[arg(long, value_name = "WHEN")]
+        until: Option<String>,
+
         /// Max results
         #[arg(short, long, default_value = "20")]
         limit: usize,
@@ -87,12 +96,21 @@ pub enum Command {
 
     /// Show recent memories
     #[command(
-        after_help = "Examples:\n  geniuz recent                              Latest 20 memories\n  geniuz recent -l 5                         Latest 5\n  geniuz recent --full                       Include full content\n  geniuz recent --json                       JSON output"
+        after_help = "Examples:\n  geniuz recent                              Latest 20 memories\n  geniuz recent -l 5                         Latest 5\n  geniuz recent --full                       Include full content\n  geniuz recent --since 24h                  Everything from the last day\n  geniuz recent --json                       JSON output"
     )]
     Recent {
         /// Max results
         #[arg(short, long, default_value = "20")]
         limit: usize,
+
+        /// Only memories from this time on: 24h, 7d, 2w, a date (2026-09-23),
+        /// a local time (2026-09-23 14:00) or RFC 3339
+        #[arg(long, value_name = "WHEN")]
+        since: Option<String>,
+
+        /// Only memories before this time (same forms; a date includes that whole day)
+        #[arg(long, value_name = "WHEN")]
+        until: Option<String>,
 
         /// Include full content
         #[arg(short, long)]

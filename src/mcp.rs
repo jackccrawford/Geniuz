@@ -12,6 +12,7 @@ use std::io::{self, BufRead, Write};
 
 use geniuz::db::{DatabaseManager, SignalEntry};
 use geniuz::embedding::{self, EmbeddingBackend};
+use geniuz::window::Window;
 
 // =============================================================================
 // MCP Protocol Types
@@ -101,6 +102,14 @@ fn tool_definitions() -> Value {
                         "limit": {
                             "type": "integer",
                             "description": "Maximum results. Default 10."
+                        },
+                        "since": {
+                            "type": "string",
+                            "description": "Optional. Only memories from this time on: '24h', '7d', '2w', a date ('2026-09-23'), a local time ('2026-09-23 14:00') or RFC 3339. Use it whenever the question has a time in it ('last week', 'yesterday') — without it, older memories outrank recent ones."
+                        },
+                        "until": {
+                            "type": "string",
+                            "description": "Optional. Only memories before this time. Same forms as since; a date includes that whole day."
                         }
                     },
                     "required": ["query"]
@@ -119,6 +128,14 @@ fn tool_definitions() -> Value {
                         "full": {
                             "type": "boolean",
                             "description": "If true, returns full content. Default false (gist summaries only)."
+                        },
+                        "since": {
+                            "type": "string",
+                            "description": "Optional. Only memories from this time on: '24h', '7d', '2w', a date ('2026-09-23'), a local time ('2026-09-23 14:00') or RFC 3339. Use it whenever the question has a time in it ('last week', 'yesterday') — without it, older memories outrank recent ones."
+                        },
+                        "until": {
+                            "type": "string",
+                            "description": "Optional. Only memories before this time. Same forms as since; a date includes that whole day."
                         }
                     }
                 }
@@ -168,11 +185,15 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
     };
     let full = params.get("full").and_then(|f| f.as_bool()).unwrap_or(false);
     let limit = params.get("limit").and_then(|l| l.as_u64()).unwrap_or(10).min(100) as usize;
+    let window = match window_from(params) {
+        Ok(w) => w,
+        Err(e) => return (format!("Error: {}", e), true),
+    };
 
     // Semantic first, keyword fallback
-    let results = match db.semantic_search(query, limit) {
+    let results = match db.semantic_search_in(query, &window, limit) {
         Ok(r) if !r.is_empty() => r,
-        _ => match db.keyword_search(query, limit) {
+        _ => match db.keyword_search_in(query, &window, limit) {
             Ok(r) => r,
             Err(e) => return (format!("Error: {}", e), true),
         },
@@ -200,14 +221,26 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
 fn execute_recall_recent(db: &DatabaseManager, params: &Value) -> (String, bool) {
     let limit = params.get("limit").and_then(|l| l.as_u64()).unwrap_or(5).min(100) as usize;
     let full = params.get("full").and_then(|f| f.as_bool()).unwrap_or(false);
+    let window = match window_from(params) {
+        Ok(w) => w,
+        Err(e) => return (format!("Error: {}", e), true),
+    };
 
-    match db.recent(limit) {
+    match db.recent_in(&window, limit) {
         Ok(entries) if entries.is_empty() => {
             ("No memories yet. This is a fresh start.".to_string(), false)
         }
         Ok(entries) => (format_entries(&entries, full, db), false),
         Err(e) => (format!("Error: {}", e), true),
     }
+}
+
+/// The `since` / `until` arguments of a recall call, parsed the CLI's way.
+fn window_from(params: &Value) -> Result<Window, String> {
+    Window::parse(
+        params.get("since").and_then(|v| v.as_str()),
+        params.get("until").and_then(|v| v.as_str()),
+    )
 }
 
 fn format_entries(entries: &[SignalEntry], full: bool, db: &DatabaseManager) -> String {

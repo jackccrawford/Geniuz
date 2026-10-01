@@ -383,7 +383,7 @@ fn run(cli: Cli) -> Result<String, String> {
             }
         }
 
-        Command::Recall { query, random, keyword, full, limit, json } => {
+        Command::Recall { query, random, keyword, full, limit, since, until, json } => {
             if query.as_deref() == Some("help") {
                 let mut cmd = Cli::build();
                 let sub = cmd.find_subcommand_mut("recall").unwrap();
@@ -392,6 +392,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 return Ok(String::new());
             }
 
+            let window = geniuz::window::Window::parse(since.as_deref(), until.as_deref())?;
             let db = get_db()?;
 
             // UUID-shaped queries are a lookup key, not a semantic search target.
@@ -412,13 +413,13 @@ fn run(cli: Cli) -> Result<String, String> {
             }
 
             let mut entries = if random {
-                match db.random()? {
+                match db.random_in(&window)? {
                     Some(e) => vec![e],
                     None => vec![],
                 }
             } else if query.is_none() {
                 // No query on recall → show recent as fallback
-                db.recent(limit)?
+                db.recent_in(&window, limit)?
             } else {
                 let q = query.as_deref().unwrap();
                 if !keyword && looks_like_uuid(q) {
@@ -426,13 +427,13 @@ fn run(cli: Cli) -> Result<String, String> {
                         Some(entry) => vec![entry],
                         None => {
                             eprintln!("[geniuz] No memory found matching UUID {} — falling back to semantic search.", q);
-                            db.semantic_search(q, limit)?
+                            db.semantic_search_in(q, &window, limit)?
                         }
                     }
                 } else if keyword {
-                    db.keyword_search(q, limit)?
+                    db.keyword_search_in(q, &window, limit)?
                 } else {
-                    db.semantic_search(q, limit)?
+                    db.semantic_search_in(q, &window, limit)?
                 }
             };
 
@@ -504,9 +505,10 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(lines.join("\n"))
         }
 
-        Command::Recent { limit, full, json } => {
+        Command::Recent { limit, full, since, until, json } => {
+            let window = geniuz::window::Window::parse(since.as_deref(), until.as_deref())?;
             let db = get_db()?;
-            let mut entries = db.recent(limit)?;
+            let mut entries = db.recent_in(&window, limit)?;
 
             if full {
                 for entry in &mut entries {
