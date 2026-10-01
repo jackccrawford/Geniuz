@@ -212,7 +212,9 @@ pub struct Harvest {
 
 impl Harvest {
     /// Harvest `texts` (the hits as returned). A name is a Capitalized word
-    /// that does not open a sentence, seen at least twice, not in `query`.
+    /// that does not open a sentence, looks like a word rather than code
+    /// ([`name_shaped`]), appears in at least two different hits, and is not
+    /// in `query`.
     /// A pointer is two 8-hex groups joined by `:`, or one 8-hex word holding
     /// both a digit and a letter (so dates and words are not ids); the hits'
     /// own ids (`own`) are not pointers onward.
@@ -225,6 +227,9 @@ impl Harvest {
         let mut names: Vec<(String, usize)> = Vec::new();
         let mut pointers: Vec<String> = Vec::new();
         for text in texts {
+            // Counted once per hit: a heading repeated inside one memory
+            // (a table's columns, say) is not a name recurring across them.
+            let mut seen_here: Vec<String> = Vec::new();
             for line in text.lines() {
                 let mut sentence_start = true;
                 for raw in line.split_whitespace() {
@@ -235,12 +240,11 @@ impl Harvest {
                             pointers.push(p);
                         }
                     } else {
-                        let w = word.trim_matches(|c: char| !c.is_alphanumeric());
-                        let capital = w.chars().next().is_some_and(|c| c.is_uppercase());
-                        let has_lower = w.chars().any(|c| c.is_lowercase());
-                        if capital && has_lower && w.chars().count() > 1 && !sentence_start
-                            && !asked.contains(&w.to_lowercase()) && !is_calendar_word(w)
+                        let w = raw.trim_matches(|c: char| !c.is_alphanumeric());
+                        if !sentence_start && name_shaped(w) && !asked.contains(&w.to_lowercase())
+                            && !is_calendar_word(w) && !seen_here.iter().any(|s| s == w)
                         {
+                            seen_here.push(w.to_string());
                             match names.iter_mut().find(|(n, _)| n == w) {
                                 Some((_, k)) => *k += 1,
                                 None => names.push((w.to_string(), 1)),
@@ -271,6 +275,24 @@ impl Harvest {
         }
         out
     }
+}
+
+/// Whether `w` looks like a proper name and not code: a capital, then
+/// letters (a hyphen or apostrophe may join two parts, as in Jean-Luc or
+/// O'Brien), at most two capitals (LimeJello, Jean-Luc), and no digit, `_`,
+/// `=`, path or dot. Found on a Windows store (2026-10-01): Get-CimInstance,
+/// Win32_OperatingSystem and TotalVirtualMemorySize were offered as names.
+fn name_shaped(w: &str) -> bool {
+    let mut chars = w.chars();
+    if !chars.next().is_some_and(|c| c.is_uppercase()) || w.chars().count() < 2 {
+        return false;
+    }
+    if !w.chars().all(|c| c.is_alphabetic() || c == '-' || c == '\'') {
+        return false;
+    }
+    // Three capitals or more is an identifier (Get-CimInstance,
+    // TotalVirtualMemorySize); a name has one or two (Jean-Luc, LimeJello).
+    w.chars().filter(|c| c.is_uppercase()).count() <= 2 && w.chars().any(|c| c.is_lowercase())
 }
 
 /// Month and weekday names, whole or short ("Sep 2026", "on Tuesday"):
@@ -346,6 +368,15 @@ mod tests {
         assert_eq!(h.lines(), ["names seen: Devin (2)", "pointers: 00000000:87C1FADC, 13625F6B"]);
         let dated = Harvest::of(&["Shipped Sep 2026 and Sep 30.", "Met on Tuesday, then Tuesday again."], "", &[]);
         assert!(dated.names.is_empty(), "calendar words are not names: {:?}", dated.names);
+        // Found on a Windows store: code and one memory's repeated headings
+        // were offered as names.
+        let code = Harvest::of(&[
+            "Ran Get-CimInstance on Win32_OperatingSystem; TotalVirtualMemorySize was low. Set GENIUZ_STATION=C:\\path\\to.db first.",
+            "Again Get-CimInstance and Win32_OperatingSystem. Columns: Name High Thermal Zone, then High Thermal Zone again.",
+            "Asked LimeJello and Jean-Luc.", "Then LimeJello and Jean-Luc replied.",
+        ], "", &[]);
+        let got: Vec<&str> = code.names.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(got, ["Jean-Luc", "LimeJello"], "{:?}", code.names);
         let asked = Harvest::of(&hits, "and Devin?", &[]);
         assert!(asked.names.is_empty(), "a name the query asked for is not news");
         assert!(Harvest::of(&[], "", &[]).lines().is_empty());
