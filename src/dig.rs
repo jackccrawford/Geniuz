@@ -239,7 +239,7 @@ impl Harvest {
                         let capital = w.chars().next().is_some_and(|c| c.is_uppercase());
                         let has_lower = w.chars().any(|c| c.is_lowercase());
                         if capital && has_lower && w.chars().count() > 1 && !sentence_start
-                            && !asked.contains(&w.to_lowercase())
+                            && !asked.contains(&w.to_lowercase()) && !is_calendar_word(w)
                         {
                             match names.iter_mut().find(|(n, _)| n == w) {
                                 Some((_, k)) => *k += 1,
@@ -271,6 +271,21 @@ impl Harvest {
         }
         out
     }
+}
+
+/// Month and weekday names, whole or short ("Sep 2026", "on Tuesday"):
+/// capitalised by the calendar, not because they name anyone.
+fn is_calendar_word(w: &str) -> bool {
+    const SHORT: [&str; 20] = [
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+        "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+    ];
+    const FULL: [&str; 18] = [
+        "january", "february", "march", "april", "june", "july", "august", "september", "october",
+        "november", "december", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    ];
+    let l = w.to_lowercase();
+    SHORT.contains(&l.as_str()) || FULL.contains(&l.as_str())
 }
 
 /// `word` as a pointer: `XXXXXXXX:YYYYYYYY`, or a bare 8-hex id with at
@@ -329,6 +344,8 @@ mod tests {
         assert_eq!(h.names, [("Devin".to_string(), 2)], "Cubic opens a sentence once, so it is seen once mid-sentence");
         assert_eq!(h.pointers, ["00000000:87C1FADC", "13625F6B"]);
         assert_eq!(h.lines(), ["names seen: Devin (2)", "pointers: 00000000:87C1FADC, 13625F6B"]);
+        let dated = Harvest::of(&["Shipped Sep 2026 and Sep 30.", "Met on Tuesday, then Tuesday again."], "", &[]);
+        assert!(dated.names.is_empty(), "calendar words are not names: {:?}", dated.names);
         let asked = Harvest::of(&hits, "and Devin?", &[]);
         assert!(asked.names.is_empty(), "a name the query asked for is not news");
         assert!(Harvest::of(&[], "", &[]).lines().is_empty());
