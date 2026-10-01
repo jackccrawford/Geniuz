@@ -377,6 +377,14 @@ mod tests {
         ], "", &[]);
         let got: Vec<&str> = code.names.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(got, ["Jean-Luc", "LimeJello"], "{:?}", code.names);
+        // SSH's caution (13625F6B:CB7E79C3): real surnames carry two capitals,
+        // and the rule allows two. Checked, not assumed.
+        for n in ["McDonald", "MacArthur", "DeShawn", "LaToya", "O'Brien", "DiCaprio", "Jean-Luc", "LimeJello"] {
+            assert!(name_shaped(n), "{n} must count as a name");
+        }
+        for n in ["Get-CimInstance", "TotalVirtualMemorySize", "Win32_OperatingSystem", "GENIUZ", "C:\\path"] {
+            assert!(!name_shaped(n), "{n} is code, not a name");
+        }
         let asked = Harvest::of(&hits, "and Devin?", &[]);
         assert!(asked.names.is_empty(), "a name the query asked for is not news");
         assert!(Harvest::of(&[], "", &[]).lines().is_empty());
