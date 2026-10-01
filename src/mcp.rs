@@ -246,6 +246,10 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
             ));
         }
     }
+    let harvest = db.harvest(&results, query).lines();
+    if !harvest.is_empty() {
+        out.push_str(&format!("\n{}", harvest.join("\n")));
+    }
     out.push_str(&format!("\n{scope}"));
     (out, false)
 }
@@ -265,10 +269,13 @@ fn execute_recall_recent(db: &DatabaseManager, params: &Value) -> (String, bool)
         Ok(entries) if entries.is_empty() => {
             (format!("No memories found.\n{}", scope(db, &window, "recent")), false)
         }
-        Ok(entries) => (
-            format!("{}\n{}", format_entries(&entries, full, db), scope(db, &window, "recent")),
-            false,
-        ),
+        Ok(entries) => {
+            let mut out = format_entries(&entries, full, db);
+            for line in db.harvest(&entries, "").lines() {
+                out.push_str(&format!("\n{line}"));
+            }
+            (format!("{out}\n{}", scope(db, &window, "recent")), false)
+        }
         Err(e) => (format!("Error: {}", e), true),
     }
 }
@@ -307,6 +314,9 @@ fn execute_grep(
     let mut lines: Vec<String> = dig.hits.iter().map(|h| format!(
         "{} · {} · {}", &h.memory_uuid[..8.min(h.memory_uuid.len())], crate::shorten_ts(&h.created_at), h.line,
     )).collect();
+    let found: Vec<&str> = dig.hits.iter().map(|h| h.line.as_str()).collect();
+    let own: Vec<String> = dig.hits.iter().map(|h| h.memory_uuid.clone()).collect();
+    lines.extend(geniuz::dig::Harvest::of(&found, &terms.describe(), &own).lines());
     lines.push(scope);
     (lines.join("\n"), false)
 }
@@ -327,7 +337,11 @@ fn execute_thread(db: &DatabaseManager, id: &str, window: &Window, limit: usize,
     if t.entries.is_empty() {
         return (format!("No memories in that thread inside the window.\n{scope}"), false);
     }
-    (format!("{}\n{scope}", format_entries(&t.entries, full, db)), false)
+    let mut out = format_entries(&t.entries, full, db);
+    for line in db.harvest(&t.entries, "").lines() {
+        out.push_str(&format!("\n{line}"));
+    }
+    (format!("{out}\n{scope}"), false)
 }
 
 /// The closing scope line (search feature 5): what was searched, so an empty
@@ -405,6 +419,22 @@ mod tests {
         assert!(out.ends_with("searched: 1 memory · all time · recent"), "{out}");
         let (out, is_err) = execute_recall_recent(&db, &json!({"since": "someday"}));
         assert!(is_err && out.contains("--since `someday`"), "{out}");
+    }
+
+    /// Every answer ends with where to go next: recurring names not asked
+    /// for, and the pointers the hits cite, just before the scope.
+    #[test]
+    fn an_answer_ends_with_its_harvest_then_its_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
+        db.signal("Review notes\nThe PR went to Devin, see 00000000:87C1FADC.", Some("reviews"), None, None).unwrap();
+        db.signal("More review\nAsked Devin again.", Some("reviews again"), None, None).unwrap();
+        let (out, _) = execute_recall_recent(&db, &json!({}));
+        let lines: Vec<&str> = out.lines().collect();
+        let n = lines.len();
+        assert_eq!(lines[n - 3], "names seen: Devin (2)", "{out}");
+        assert_eq!(lines[n - 2], "pointers: 00000000:87C1FADC", "{out}");
+        assert!(lines[n - 1].starts_with("searched: "), "{out}");
     }
 
     /// recall with `grep` returns lines, and the terms can be a string or a list.

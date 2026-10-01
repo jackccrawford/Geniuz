@@ -169,6 +169,9 @@ fn recall_grep(
     let mut lines: Vec<String> = dig.hits.iter().map(|h| format!(
         "{} · {} · {}", &h.memory_uuid[..8.min(h.memory_uuid.len())], shorten_ts(&h.created_at), h.line,
     )).collect();
+    let found: Vec<&str> = dig.hits.iter().map(|h| h.line.as_str()).collect();
+    let own: Vec<String> = dig.hits.iter().map(|h| h.memory_uuid.clone()).collect();
+    lines.extend(geniuz::dig::Harvest::of(&found, &terms.describe(), &own).lines());
     lines.push(scope);
     Ok(lines.join("\n"))
 }
@@ -222,6 +225,7 @@ fn recall_thread(
             lines.push(String::new());
         }
     }
+    lines.extend(db.harvest(&thread.entries, "").lines());
     lines.push(scope);
     Ok(lines.join("\n"))
 }
@@ -602,6 +606,7 @@ fn run(cli: Cli) -> Result<String, String> {
             if entries.is_empty() {
                 return Ok(format!("No memories found.\n{scope}"));
             }
+            let harvest = db.harvest(&entries, query.as_deref().unwrap_or(""));
 
             let mut lines: Vec<String> = Vec::new();
             for e in &entries {
@@ -633,6 +638,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     ));
                 }
             }
+            lines.extend(harvest.lines());
             lines.push(scope);
             Ok(lines.join("\n"))
         }
@@ -674,6 +680,7 @@ fn run(cli: Cli) -> Result<String, String> {
             if entries.is_empty() {
                 return Ok(format!("No memories found.\n{scope}"));
             }
+            let harvest = db.harvest(&entries, "");
 
             let mut lines: Vec<String> = Vec::new();
             for e in &entries {
@@ -691,6 +698,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     lines.push(String::new());
                 }
             }
+            lines.extend(harvest.lines());
             lines.push(scope);
             Ok(lines.join("\n"))
         }

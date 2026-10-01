@@ -612,6 +612,20 @@ impl DatabaseManager {
         ).optional().map_err(|e| format!("Query failed: {}", e))
     }
 
+    /// What these results point onward to (search feature 4), read from the
+    /// returned memories' gist and full content only.
+    pub fn harvest(&self, entries: &[SignalEntry], query: &str) -> crate::dig::Harvest {
+        let texts: Vec<String> = entries.iter().map(|e| {
+            let body = e.content.clone()
+                .or_else(|| self.get_full_content(&e.memory_uuid).ok().flatten())
+                .unwrap_or_default();
+            format!("{}\n{}", e.gist, body)
+        }).collect();
+        let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
+        let own: Vec<String> = entries.iter().map(|e| e.memory_uuid.clone()).collect();
+        crate::dig::Harvest::of(&refs, query, &own)
+    }
+
     /// How many memories lie inside `window` — the pool a windowed search drew from.
     pub fn count_in(&self, window: &Window) -> Result<usize, String> {
         let (cond, params) = window.sql("created_at", 1);

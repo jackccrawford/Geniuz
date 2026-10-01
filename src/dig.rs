@@ -183,6 +183,91 @@ impl Dig {
     }
 }
 
+/// What a result set points onward to (search feature 4): proper names
+/// that recur in the hits but were not asked for, and ids the hits cite.
+/// Read from the returned text only, so it costs nothing to keep.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Harvest {
+    /// `(name, times seen)`, most seen first.
+    pub names: Vec<(String, usize)>,
+    /// `XXXXXXXX:YYYYYYYY` signal pointers and bare 8-hex memory ids.
+    pub pointers: Vec<String>,
+}
+
+impl Harvest {
+    /// Harvest `texts` (the hits as returned). A name is a Capitalized word
+    /// that does not open a sentence, seen at least twice, not in `query`.
+    /// A pointer is two 8-hex groups joined by `:`, or one 8-hex word holding
+    /// both a digit and a letter (so dates and words are not ids); the hits'
+    /// own ids (`own`) are not pointers onward.
+    pub fn of(texts: &[&str], query: &str, own: &[String]) -> Self {
+        let asked: Vec<String> = query
+            .split(|c: char| !c.is_alphanumeric() && c != '-')
+            .map(|w| w.to_lowercase())
+            .collect();
+        let own: Vec<String> = own.iter().map(|u| u.chars().take(8).collect::<String>().to_lowercase()).collect();
+        let mut names: Vec<(String, usize)> = Vec::new();
+        let mut pointers: Vec<String> = Vec::new();
+        for text in texts {
+            for line in text.lines() {
+                let mut sentence_start = true;
+                for raw in line.split_whitespace() {
+                    let word = raw.trim_matches(|c: char| !c.is_alphanumeric() && c != ':' && c != '-');
+                    let word = word.trim_end_matches(|c: char| c == ':' || c == '-');
+                    if let Some(p) = pointer(word) {
+                        if !own.contains(&p[..8].to_lowercase()) && !pointers.contains(&p) {
+                            pointers.push(p);
+                        }
+                    } else {
+                        let w = word.trim_matches(|c: char| !c.is_alphanumeric());
+                        let capital = w.chars().next().is_some_and(|c| c.is_uppercase());
+                        let has_lower = w.chars().any(|c| c.is_lowercase());
+                        if capital && has_lower && w.chars().count() > 1 && !sentence_start
+                            && !asked.contains(&w.to_lowercase())
+                        {
+                            match names.iter_mut().find(|(n, _)| n == w) {
+                                Some((_, k)) => *k += 1,
+                                None => names.push((w.to_string(), 1)),
+                            }
+                        }
+                    }
+                    sentence_start = raw.ends_with(['.', '!', '?', ':']);
+                }
+            }
+        }
+        names.retain(|(_, k)| *k >= 2);
+        names.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        names.truncate(8);
+        pointers.truncate(12);
+        Harvest { names, pointers }
+    }
+
+    /// The closing lines, before the scope: `names seen: Cubic (3), Devin (2)`
+    /// and `pointers: 00000000:87C1FADC, 13625F6B`. Empty parts are left out.
+    pub fn lines(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if !self.names.is_empty() {
+            let n: Vec<String> = self.names.iter().map(|(n, k)| format!("{n} ({k})")).collect();
+            out.push(format!("names seen: {}", n.join(", ")));
+        }
+        if !self.pointers.is_empty() {
+            out.push(format!("pointers: {}", self.pointers.join(", ")));
+        }
+        out
+    }
+}
+
+/// `word` as a pointer: `XXXXXXXX:YYYYYYYY`, or a bare 8-hex id with at
+/// least one digit and one letter. Kept in the case it was written.
+fn pointer(word: &str) -> Option<String> {
+    let hex8 = |s: &str| s.len() == 8 && s.chars().all(|c| c.is_ascii_hexdigit());
+    if let Some((a, b)) = word.split_once(':') {
+        return (hex8(a) && hex8(b)).then(|| word.to_string());
+    }
+    let mixed = word.chars().any(|c| c.is_ascii_digit()) && word.chars().any(|c| c.is_ascii_alphabetic());
+    (hex8(word) && mixed).then(|| word.to_string())
+}
+
 /// `line` cut to [`LINE_MAX`] characters, keeping the match at byte `at` of
 /// its lowercase form in view. Lowercasing can shift byte offsets, so the cut
 /// is made by characters on the original.
@@ -215,6 +300,22 @@ mod tests {
         assert_eq!(names("what did \"cubic\" say"), ["cubic"]);
         assert_eq!(names("\"Cubic\" and Devin, on PR-123?"), ["Cubic", "Devin", "PR-123"]);
         assert_eq!(names_in(&names("from Cubic and Devin"), "Cubic said so; cubic is a shape"), 1);
+    }
+
+    #[test]
+    fn harvest_names_recur_and_pointers_point_onward() {
+        let hits = [
+            "Cubic reviewed it. Then Devin and Cubic argued.",
+            "We asked Devin about 00000000:87C1FADC and 13625F6B.",
+            "In March the date 20260930 is not an id; DEADBEEF has no digit; 0123ABCD is ours.",
+        ];
+        let h = Harvest::of(&hits, "what did reviewers say", &["0123ABCD-0000".to_string()]);
+        assert_eq!(h.names, [("Devin".to_string(), 2)], "Cubic opens a sentence once, so it is seen once mid-sentence");
+        assert_eq!(h.pointers, ["00000000:87C1FADC", "13625F6B"]);
+        assert_eq!(h.lines(), ["names seen: Devin (2)", "pointers: 00000000:87C1FADC, 13625F6B"]);
+        let asked = Harvest::of(&hits, "and Devin?", &[]);
+        assert!(asked.names.is_empty(), "a name the query asked for is not news");
+        assert!(Harvest::of(&[], "", &[]).lines().is_empty());
     }
 
     #[test]
