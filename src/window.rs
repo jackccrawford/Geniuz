@@ -115,7 +115,7 @@ impl Window {
 
 /// The closing line of every recall answer: what was searched, so that
 /// "nothing found" carries its scope and a short list says how big the pool
-/// was (docs/SEARCH-DESIGN.md, feature 5). For example
+/// was (search feature 5). For example
 /// `searched: PILOT · 312 memories · since 7d · semantic "reviewers"`.
 pub fn scope_line(station: Option<&str>, memories: usize, window: &Window, mode: &str) -> String {
     let mut parts: Vec<String> = Vec::new();

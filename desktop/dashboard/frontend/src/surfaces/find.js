@@ -4,7 +4,7 @@
 // results: Meaning ranks memories (proper names first); Exact returns the
 // matching LINES from full content (Ember's dig). Every answer ends with
 // where to go next (names seen, pointers) and what was searched
-// (docs/SEARCH-DESIGN.md in Geniuz Team, features 1-5). Mode and window are
+// (search features 1-5). Mode and window are
 // local to the surface; the query persists to the store so navigating to
 // detail and back restores it.
 //

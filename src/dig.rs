@@ -5,7 +5,7 @@
 //! "review", not near itself, and the deciding facts often sit deep in a body
 //! a gist never mentions. So `--grep` reads FULL content and returns the
 //! matching LINES, not whole memories, which keeps the reader's context small
-//! (Ember's dig, docs/SEARCH-DESIGN.md).
+//! (Ember's dig).
 //!
 //! A memory qualifies when EVERY term appears in it, anywhere; from it, each
 //! line holding ANY term is shown. Matching is case-blind, Unicode included.
