@@ -93,7 +93,7 @@ fn tool_definitions() -> Value {
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ. Required unless thread is given."
+                            "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ. Proper names (a Capitalized word after the first, or anything in \"quotes\") must match exactly, and memories holding them come first. Required unless thread is given."
                         },
                         "grep": {
                             "type": ["string", "array"],
@@ -217,7 +217,7 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
     let limit = params.get("limit").and_then(|l| l.as_u64()).unwrap_or(10).min(100) as usize;
 
     // Semantic first, keyword fallback
-    let mut mode = format!("semantic \"{query}\"");
+    let mut mode = geniuz::dig::semantic_mode(query);
     let results = match db.semantic_search_in(query, &window, limit) {
         Ok(r) if !r.is_empty() => r,
         _ => {

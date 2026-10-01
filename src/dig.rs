@@ -73,6 +73,57 @@ impl Terms {
     }
 }
 
+/// The proper names in a meaning query (search feature 3): every "quoted
+/// term", and every word that starts with a capital letter but is not the
+/// query's first word. A deliberately simple rule, so it can be steered:
+/// quote a term to make it a name; lowercase a word to make it a meaning.
+/// Plain lowercase queries have no names and rank exactly as before.
+pub fn names(query: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut rest = String::new();
+    let mut quoted = query.split('"');
+    if let Some(first) = quoted.next() {
+        rest.push_str(first);
+    }
+    for (i, part) in quoted.enumerate() {
+        if i % 2 == 0 {
+            let p = part.trim();
+            if !p.is_empty() {
+                out.push(p.to_string());
+            }
+            rest.push(' ');
+        } else {
+            rest.push_str(part);
+        }
+    }
+    let first_word = query.split_whitespace().next().unwrap_or("").trim_matches(|c: char| !c.is_alphanumeric());
+    for (i, word) in rest.split_whitespace().enumerate() {
+        let w = word.trim_matches(|c: char| !c.is_alphanumeric());
+        let capital = w.chars().next().is_some_and(|c| c.is_uppercase());
+        let is_first = i == 0 && w == first_word && !query.trim_start().starts_with('"');
+        if capital && !is_first && !out.iter().any(|n| n == w) {
+            out.push(w.to_string());
+        }
+    }
+    out
+}
+
+/// A meaning search's mode for its scope line: `semantic "q"`, plus
+/// ` · names first: Cubic` when the query held proper names.
+pub fn semantic_mode(query: &str) -> String {
+    let n = names(query);
+    if n.is_empty() {
+        format!("semantic \"{query}\"")
+    } else {
+        format!("semantic \"{query}\" · names first: {}", n.join(", "))
+    }
+}
+
+/// How many of `names` appear in `text` verbatim (case kept).
+pub fn names_in(names: &[String], text: &str) -> usize {
+    names.iter().filter(|n| text.contains(n.as_str())).count()
+}
+
 /// One matching line, with the memory it came from.
 #[derive(Debug, Clone)]
 pub struct Hit {
@@ -155,6 +206,16 @@ fn escape_like(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_are_quoted_terms_and_capitals_past_the_first_word() {
+        assert!(names("third-party reviewers past week").is_empty());
+        assert_eq!(names("reviews from Cubic last week"), ["Cubic"]);
+        assert!(names("Cubic reviews").is_empty(), "the first word is capitalised by grammar");
+        assert_eq!(names("what did \"cubic\" say"), ["cubic"]);
+        assert_eq!(names("\"Cubic\" and Devin, on PR-123?"), ["Cubic", "Devin", "PR-123"]);
+        assert_eq!(names_in(&names("from Cubic and Devin"), "Cubic said so; cubic is a shape"), 1);
+    }
 
     #[test]
     fn every_term_must_appear_and_any_term_shows_a_line() {

@@ -387,14 +387,22 @@ impl DatabaseManager {
         }
         let cached: Vec<_> = cached.into_iter().filter(|c| window.contains(&c.created_at)).collect();
 
-        let ranked = if cached.is_empty() {
+        // Every cached memory in the window is scored, not only the top
+        // `limit`: a memory that names the query's proper name may sit far
+        // down by meaning, and still needs its score to order the name hits.
+        let mut ranked = if cached.is_empty() {
             Vec::new()
         } else {
-            match backend {
-                Some(b) => crate::embedding::rank_cached(&b.embed(query)?, cached, limit),
-                None => crate::embedding::semantic_search_cached(query, cached, limit)?,
-            }
+            let q = match backend {
+                Some(b) => b.embed(query)?,
+                None => crate::embedding::create_backend()?.embed(query)?,
+            };
+            let n = cached.len();
+            crate::embedding::rank_cached(&q, cached, n)
         };
+        let scores: std::collections::HashMap<String, f32> =
+            ranked.iter().map(|r| (r.memory_uuid.clone(), r.score)).collect();
+        ranked.truncate(limit);
         let mut results: Vec<SignalEntry> = ranked
             .into_iter().map(|r| SignalEntry {
                 memory_uuid: r.memory_uuid, gist: r.gist, created_at: r.created_at,
@@ -444,7 +452,83 @@ impl DatabaseManager {
             }
         }
 
+        // Search feature 3: proper names in the query ("Cubic", or anything
+        // quoted) are not meanings. Memories holding them verbatim come first
+        // (more names first, then by meaning, then newest), whether or not
+        // meaning alone would have reached them; meaning fills the rest.
+        let names = crate::dig::names(query);
+        if !names.is_empty() {
+            let mut named = self.name_hits(&names, window, limit)?;
+            for (e, _) in named.iter_mut() {
+                e.score = scores.get(&e.memory_uuid).copied();
+            }
+            named.sort_by(|(a, an), (b, bn)| {
+                bn.cmp(an)
+                    .then(b.score.unwrap_or(-1.0).partial_cmp(&a.score.unwrap_or(-1.0)).unwrap_or(std::cmp::Ordering::Equal))
+                    .then(b.created_at.cmp(&a.created_at))
+            });
+            let mut merged: Vec<SignalEntry> = named.into_iter().map(|(e, _)| e).take(limit).collect();
+            for e in results {
+                if merged.len() >= limit { break; }
+                if !merged.iter().any(|m| m.memory_uuid == e.memory_uuid) {
+                    merged.push(e);
+                }
+            }
+            results = merged;
+        }
+
         Ok(results)
+    }
+
+    /// Memories inside `window` holding any of `names` verbatim (case kept),
+    /// with how many they hold. SQL narrows on ASCII names (case-blind, so it
+    /// over-includes); the verbatim check is made here.
+    fn name_hits(&self, names: &[String], window: &Window, limit: usize) -> Result<Vec<(SignalEntry, usize)>, String> {
+        let text = "(COALESCE(json_extract(payload, '$.gist'), '') || char(10) ||
+                     COALESCE(json_extract(payload, '$.content'), ''))";
+        let (wcond, wparams) = window.sql("created_at", 1);
+        let mut params: Vec<String> = wparams;
+        // Any name may match, so the narrowing is an OR — and only when every
+        // name can narrow; one non-ASCII name means reading the window whole.
+        let ncond = if names.iter().all(|n| n.is_ascii()) {
+            let parts: Vec<String> = names.iter().map(|n| {
+                params.push(format!("%{}%", escape_like(n)));
+                format!("{text} LIKE ?{} ESCAPE '\\'", params.len())
+            }).collect();
+            format!("({})", parts.join(" OR "))
+        } else {
+            "1".to_string()
+        };
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT memory_uuid,
+                    COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)),
+                    created_at, parent_uuid, {text}
+               FROM memories WHERE json_valid(payload) AND {wcond} AND {ncond}
+              ORDER BY created_at DESC"
+        )).map_err(|e| format!("Query failed: {}", e))?;
+        let mut rows = stmt.query(rusqlite::params_from_iter(params.iter()))
+            .map_err(|e| format!("Query failed: {}", e))?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let body: String = row.get(4).map_err(|e| e.to_string())?;
+            let n = crate::dig::names_in(names, &body);
+            if n == 0 { continue; }
+            let uuid: String = row.get(0).map_err(|e| e.to_string())?;
+            let parent: Option<String> = row.get(3).map_err(|e| e.to_string())?;
+            let display_parent = parent.filter(|p| p != &uuid);
+            out.push((SignalEntry {
+                memory_uuid: uuid,
+                gist: row.get(1).map_err(|e| e.to_string())?,
+                created_at: row.get(2).map_err(|e| e.to_string())?,
+                parent_uuid: display_parent, content: None, score: None,
+            }, n));
+        }
+        // Enough to fill the page after sorting by names held; more would
+        // only be cut.
+        out.sort_by(|a, b| b.1.cmp(&a.1));
+        out.truncate(limit.max(1) * 4);
+        Ok(out)
     }
 
     /// Keyword search restricted to memories with no cached embedding — used
@@ -1443,6 +1527,49 @@ mod tests {
         assert_eq!(week.memories, 1);
         let both = crate::dig::Terms::parse(&["cubic", "third-party"]).unwrap();
         assert_eq!(db.grep_in(&both, &Window::all(), None, 50).unwrap().memories, 1);
+    }
+
+    /// Everything is about reviews except lunch, which is about nothing else.
+    struct LunchAxis;
+    impl crate::embedding::EmbeddingBackend for LunchAxis {
+        fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
+            let mut v = vec![0.0; MOCK_DIM];
+            if text.contains("lunch") { v[2] = 1.0 } else { v[0] = 1.0 }
+            Ok(v)
+        }
+        fn name(&self) -> &str { "lunch-axis" }
+    }
+
+    /// Search feature 3: a proper name is not a meaning. The one memory that
+    /// names Cubic is about lunch, so by meaning it sits below thirty review
+    /// memories; asked about Cubic by name, it comes first. Asked in
+    /// lowercase, nothing changes.
+    #[test]
+    fn a_proper_name_in_the_query_puts_its_memories_first() {
+        let (db, _dir) = fresh_db();
+        for i in 0..30 {
+            db.signal_with_backend(&format!("code review notes, round {i}"), Some(&format!("review {i}")),
+                None, Some(&format!("2026-09-{:02} 12:00:00", 1 + i % 28)), Some(&LunchAxis)).unwrap();
+        }
+        let cubic = db.signal_with_backend("Cubic and I had lunch", Some("lunch"), None,
+            Some("2026-06-01 12:00:00"), Some(&LunchAxis)).unwrap().uuid;
+        db.signal_with_backend("a cubic box for lunch", Some("box"), None,
+            Some("2026-06-02 12:00:00"), Some(&LunchAxis)).unwrap();
+
+        let named = db.semantic_search_with("reviewers like Cubic", &Window::all(), 5, Some(&LunchAxis)).unwrap();
+        assert_eq!(named.len(), 5);
+        assert!(named[0].memory_uuid.starts_with(&cubic), "{:?}", named.iter().map(|e| &e.gist).collect::<Vec<_>>());
+        assert!(named[1..].iter().all(|e| e.gist.starts_with("review")), "verbatim: the lowercase 'cubic box' is not a name hit");
+
+        let plain = db.semantic_search_with("reviewers like cubic", &Window::all(), 5, Some(&LunchAxis)).unwrap();
+        assert!(!plain.iter().any(|e| e.memory_uuid.starts_with(&cubic)), "lowercase ranks by meaning only");
+
+        let quoted = db.semantic_search_with("reviewers like \"Cubic\"", &Window::all(), 5, Some(&LunchAxis)).unwrap();
+        assert!(quoted[0].memory_uuid.starts_with(&cubic));
+        // A window still bounds the names.
+        let june = Window::parse(Some("2026-07-01"), None).unwrap();
+        let none = db.semantic_search_with("reviewers like Cubic", &june, 5, Some(&LunchAxis)).unwrap();
+        assert!(!none.iter().any(|e| e.memory_uuid.starts_with(&cubic)));
     }
 
     #[test]

@@ -538,7 +538,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 None => "recent".to_string(),
                 Some(q) if !keyword && looks_like_uuid(q) => format!("id {}", q.trim()),
                 Some(q) if keyword || !semantic_ready => format!("keyword \"{q}\""),
-                Some(q) => format!("semantic \"{q}\""),
+                Some(q) => geniuz::dig::semantic_mode(q),
             };
             let mut entries = if random {
                 match db.random_in(&window)? {
