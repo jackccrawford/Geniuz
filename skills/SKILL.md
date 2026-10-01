@@ -35,9 +35,20 @@ geniuz remember -c "Same fix needed in staging compose" -g "fix: staging auth or
 
 # Search by meaning — not keywords
 geniuz recall "authentication middleware"
-geniuz recall "what broke in production last week"
+geniuz recall "what broke in production" --since 7d
 
-# Keyword fallback
+# Proper names match exactly and come first (a Capitalized word after the
+# first, or anything in "quotes")
+geniuz recall "who reviewed the PR, was it Cubic"
+
+# Exact words: the matching LINES from full content, newest first
+geniuz recall --grep Cubic --since 7d
+geniuz recall --grep Cubic --grep "pull request"   # every term must appear
+
+# A whole thread, root first, from any memory in it
+geniuz recall --thread A1B2C3D4
+
+# Keyword fallback (whole memories, any word)
 geniuz recall --keyword "auth"
 
 # Recent memories
@@ -81,6 +92,24 @@ GENIUZ_STATION=/shared/team.db geniuz recall "deploy"
 - **Starting a new task.** You may have already solved part of it last week.
 - **When stuck.** The answer might be in a memory from three sessions ago.
 - **After compaction.** Your context was compressed. Your folder wasn't.
+
+## How to find things
+
+Meaning is for **discovery**: concepts and names you didn't know to ask for.
+Exact is for **recall**: who, when, did it happen, by proper name.
+
+1. If the question has a time in it ("last week", "yesterday"), add
+   `--since`: `7d`, `24h`, `2w`, or a date. Without it, months of older
+   memories outrank last week's answer.
+2. Start by meaning. Every answer ends with `names seen:` and `pointers:`.
+   Those are your next hops.
+3. Go exact with what you found: `--grep Devin`, or `--thread 13625F6B` to
+   read the whole conversation.
+4. Read the last line. `searched: 312 memories · since 7d · grep "Cubic"`
+   says what "nothing found" means: nothing *in that scope*.
+
+Through MCP the same works as `recall` arguments: `since`, `until`,
+`grep` (a word or a list), `thread`.
 
 > Note: `geniuz recall help` prints recall's help instead of searching for the literal word "help". To find memories about that word, use a phrase containing it — e.g. `geniuz recall "help with debugging"` or `geniuz recall "how to help"`.
 

@@ -325,6 +325,10 @@ echo "content" | geniuz remember -c - -g "piped: from process"
 geniuz remember -c "follow-up" -g "update" -p 98672A90
 
 geniuz recall "topic"                         # semantic search
+geniuz recall "topic" --since 7d              # only the past week
+geniuz recall "reviews by Cubic"              # Capitalized names come first
+geniuz recall --grep Cubic --grep PR          # matching lines, every term
+geniuz recall --thread 98672A90               # a whole thread, root first
 geniuz recall --keyword "exact words"         # keyword fallback
 geniuz recall --random                        # discover something
 geniuz recall --full "topic"                  # include full content
@@ -436,6 +440,15 @@ Memories compound. A single memory is a note. A folder of memories is institutio
 - **Starting a new task.** You may have already solved part of it last week.
 - **When stuck.** The answer might be in a memory from three sessions ago.
 - **After compaction.** Your context was compressed. Your folder wasn't.
+
+### Meaning finds, exact recalls
+
+Search by meaning to discover; search exactly to recall. Every answer ends
+with `names seen:` and `pointers:` (the next hops) and a `searched:` line
+that says what was searched, so an empty answer carries its scope. When a
+question has a time in it, add `--since 7d`. When you know the name, use
+`--grep Name`. When you've found one piece of a conversation, read the rest
+with `--thread ID`.
 
 ### When to use the TUI
 
