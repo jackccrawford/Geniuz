@@ -60,7 +60,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
             librsvg2-dev libxdo-dev libssl-dev build-essential curl wget file patchelf \
-            squashfs-tools desktop-file-utils
+            squashfs-tools desktop-file-utils zsync
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -114,9 +114,21 @@ jobs:
             cp "$SRC" "$W/root/.DirIcon"
           fi
           head -c "$OFFSET" "$A" > "$W/runtime"
+          # Update information (the AppImage catalog's one warning): written
+          # into the runtime's reserved .upd_info section, as appimagetool -u
+          # would, so AppImageUpdate and integrators find newer releases via
+          # the .zsync made below.
+          UPD='gh-releases-zsync|jackccrawford|Geniuz|latest|Geniuz_*_amd64.AppImage.zsync'
+          SEC=$(readelf -SW "$W/runtime" | sed -n 's/.*\] \.upd_info *[A-Z]* *[0-9a-f]* \([0-9a-f]*\) \([0-9a-f]*\).*/\1 \2/p')
+          [ -n "$SEC" ] || { echo "::error::the runtime has no .upd_info section"; exit 1; }
+          read -r SOFF SSIZE <<< "$SEC"
+          [ "${#UPD}" -lt $((16#$SSIZE)) ] || { echo "::error::update information does not fit .upd_info"; exit 1; }
+          printf '%s' "$UPD" | dd of="$W/runtime" bs=1 seek=$((16#$SOFF)) conv=notrunc status=none
           mksquashfs "$W/root" "$W/fs.sqfs" -comp "$COMP" -b "$BLOCK" -root-owned -noappend -no-progress -quiet
           cat "$W/runtime" "$W/fs.sqfs" > "$A"
           chmod 755 "$A"
+          # The .zsync is made from the final file, so it must come last.
+          (cd out && N=$(basename "$A") && zsyncmake -u "$N" -o "$N.zsync" "$N")
 
       - name: Verify what will ship
         run: |
@@ -126,6 +138,10 @@ jobs:
           sudo rm -f /usr/local/lib/libonnxruntime.so*
           sudo ldconfig
           A=$(ls out/*.AppImage)
+          UPD_GOT=$("$A" --appimage-updateinformation)
+          [ "$UPD_GOT" = 'gh-releases-zsync|jackccrawford|Geniuz|latest|Geniuz_*_amd64.AppImage.zsync' ] \
+            || { echo "::error::update information reads back as: $UPD_GOT"; exit 1; }
+          test -s "$A.zsync" || { echo "::error::no .zsync beside the AppImage"; exit 1; }
           V=$(mktemp -d)
           (cd "$V" && "$OLDPWD/$A" --appimage-extract > /dev/null)
           R="$V/squashfs-root"
@@ -174,4 +190,4 @@ jobs:
             gh release view "${{ steps.tag.outputs.ref }}" > /dev/null 2>&1 && break
             sleep 20
           done
-          gh release upload "${{ steps.tag.outputs.ref }}" out/*.AppImage out/*.deb --clobber
+          gh release upload "${{ steps.tag.outputs.ref }}" out/*.AppImage out/*.AppImage.zsync out/*.deb --clobber
