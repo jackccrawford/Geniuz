@@ -467,8 +467,9 @@ fn run(cli: Cli) -> Result<String, String> {
             let db = get_db()?;
 
             if let Some(id) = thread {
-                return recall_thread(&db, &id, &window, limit, full, json);
+                return recall_thread(&db, &id, &window, limit.unwrap_or(100), full, json);
             }
+            let limit = limit.unwrap_or(20);
 
             // UUID-shaped queries are a lookup key, not a semantic search target.
             // A bare 8-char or 36-char hex-ish string embeds to noise; treating it as

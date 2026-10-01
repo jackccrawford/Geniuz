@@ -90,9 +90,9 @@ pub enum Command {
         #[arg(long, value_name = "WHEN")]
         until: Option<String>,
 
-        /// Max results
-        #[arg(short, long, default_value = "20")]
-        limit: usize,
+        /// Max results [default: 20; 100 with --thread]
+        #[arg(short, long)]
+        limit: Option<usize>,
 
         /// Output as JSON
         #[arg(long)]
