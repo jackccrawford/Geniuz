@@ -95,6 +95,11 @@ fn tool_definitions() -> Value {
                             "type": "string",
                             "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ. Required unless thread is given."
                         },
+                        "grep": {
+                            "type": ["string", "array"],
+                            "items": { "type": "string" },
+                            "description": "Optional. Exact words to find, case-blind, in the FULL content: returns the matching lines, not whole memories. Use it for names, numbers and anything you know verbatim (semantic search does not find proper names reliably). A list means every term must appear in the memory. Combines with since/until and thread."
+                        },
                         "thread": {
                             "type": "string",
                             "description": "Optional. The short UUID of any memory in a thread (the 8 characters before '|', or the one after '<-'). Returns that whole thread, root first, oldest to newest, instead of searching. Use it to read a conversation you found one piece of."
@@ -187,9 +192,23 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
         Ok(w) => w,
         Err(e) => return (format!("Error: {}", e), true),
     };
-    if let Some(id) = params.get("thread").and_then(|t| t.as_str()).filter(|t| !t.trim().is_empty()) {
+    let thread = params.get("thread").and_then(|t| t.as_str()).map(str::trim).filter(|t| !t.is_empty());
+    let grep: Vec<String> = match params.get("grep") {
+        Some(Value::String(t)) => vec![t.clone()],
+        Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+        _ => Vec::new(),
+    };
+    if !grep.is_empty() {
+        let terms = match geniuz::dig::Terms::parse(&grep) {
+            Ok(t) => t,
+            Err(e) => return (format!("Error: {}", e), true),
+        };
+        let limit = params.get("limit").and_then(|l| l.as_u64()).unwrap_or(50).min(500) as usize;
+        return execute_grep(db, &terms, &window, thread, limit);
+    }
+    if let Some(id) = thread {
         let limit = params.get("limit").and_then(|l| l.as_u64()).unwrap_or(100).min(500) as usize;
-        return execute_thread(db, id.trim(), &window, limit, full);
+        return execute_thread(db, id, &window, limit, full);
     }
     let query = match params.get("query").and_then(|q| q.as_str()) {
         Some(q) => q,
@@ -260,6 +279,36 @@ fn window_from(params: &Value) -> Result<Window, String> {
         params.get("since").and_then(|v| v.as_str()),
         params.get("until").and_then(|v| v.as_str()),
     )
+}
+
+/// Matching lines (search feature 2), each tagged `UUID · time ·`, closed
+/// by the scope: how many lines in how many memories, from what pool.
+fn execute_grep(
+    db: &DatabaseManager, terms: &geniuz::dig::Terms, window: &Window, thread: Option<&str>, limit: usize,
+) -> (String, bool) {
+    let dig = match db.grep_in(terms, window, thread, limit) {
+        Ok(d) => d,
+        Err(e) => return (format!("Error: {}", e), true),
+    };
+    let (pool, count) = match thread {
+        Some(id) => match db.thread_in(id, window, 1) {
+            Ok(t) => (Some(format!("thread {} · root {}", id.to_uppercase(), &t.root[..8.min(t.root.len())])), Some(t.total)),
+            Err(e) => return (format!("Error: {}", e), true),
+        },
+        None => (None, db.count_in(window).ok()),
+    };
+    let scope = match count {
+        Some(n) => geniuz::window::scope_line(pool.as_deref(), n, window, &dig.mode(terms)),
+        None => format!("searched: {}", dig.mode(terms)),
+    };
+    if dig.hits.is_empty() {
+        return (format!("No lines found.\n{scope}"), false);
+    }
+    let mut lines: Vec<String> = dig.hits.iter().map(|h| format!(
+        "{} · {} · {}", &h.memory_uuid[..8.min(h.memory_uuid.len())], crate::shorten_ts(&h.created_at), h.line,
+    )).collect();
+    lines.push(scope);
+    (lines.join("\n"), false)
 }
 
 /// A whole thread, root first (search feature 6), closed by its scope.
@@ -356,6 +405,21 @@ mod tests {
         assert!(out.ends_with("searched: 1 memory · all time · recent"), "{out}");
         let (out, is_err) = execute_recall_recent(&db, &json!({"since": "someday"}));
         assert!(is_err && out.contains("--since `someday`"), "{out}");
+    }
+
+    /// recall with `grep` returns lines, and the terms can be a string or a list.
+    #[test]
+    fn recall_with_grep_returns_the_matching_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
+        db.signal("Roundup\nCubic reviewed the PR.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
+        let (out, is_err) = execute_recall(&db, &json!({"grep": "cubic"}));
+        assert!(!is_err, "{out}");
+        assert!(out.contains(" · Cubic reviewed the PR."), "{out}");
+        assert!(!out.contains("Devin"), "only matching lines: {out}");
+        assert!(out.ends_with("grep \"cubic\" · 1 line in 1 memory"), "{out}");
+        let (out, _) = execute_recall(&db, &json!({"grep": ["cubic", "zebra"]}));
+        assert!(out.starts_with("No lines found."), "{out}");
     }
 
     /// recall with `thread` reads the whole conversation from any member.

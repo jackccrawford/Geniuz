@@ -672,28 +672,10 @@ impl DatabaseManager {
     /// end the upward walk at the last memory reached. `UNION` (not `UNION
     /// ALL`) keeps a malformed cycle from walking forever.
     pub fn thread_in(&self, id: &str, window: &Window, limit: usize) -> Result<Thread, String> {
-        let target = self.resolve_uuid(id)?
-            .ok_or_else(|| format!("No memory matches {}", id))?;
+        let root = self.thread_root(id)?;
         let conn = self.conn()?;
-        let root: String = conn.query_row(
-            "WITH RECURSIVE up(uuid, parent, depth) AS (
-                SELECT memory_uuid, parent_uuid, 0 FROM memories WHERE memory_uuid = ?1
-                UNION
-                SELECT m.memory_uuid, m.parent_uuid, up.depth + 1
-                  FROM memories m JOIN up ON m.memory_uuid = up.parent
-                 WHERE up.parent IS NOT up.uuid AND up.depth < 100000
-             )
-             SELECT uuid FROM up ORDER BY depth DESC LIMIT 1",
-            rusqlite::params![&target], |r| r.get(0),
-        ).optional().map_err(|e| format!("Thread walk failed: {}", e))?
-            .ok_or_else(|| format!("No memory matches {}", id))?;
+        let down = THREAD_DOWN;
 
-        let down = "WITH RECURSIVE down(uuid) AS (
-                SELECT ?1
-                UNION
-                SELECT m.memory_uuid FROM memories m JOIN down ON m.parent_uuid = down.uuid
-                 WHERE m.memory_uuid IS NOT m.parent_uuid
-             )";
         // Counted apart from the page, so the scope line can say how much of
         // a long thread the page shows.
         let (ccond, cparams) = window.sql("m.created_at", 2);
@@ -730,6 +712,73 @@ impl DatabaseManager {
             .collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
 
         Ok(Thread { root, total: total as usize, entries })
+    }
+
+    /// Lines matching every term of `terms` (search feature 2), newest memory
+    /// first, inside `window` and — when `thread` names one — inside that
+    /// thread. Reads gist and FULL content; at most `limit` lines are kept,
+    /// all are counted.
+    pub fn grep_in(
+        &self, terms: &crate::dig::Terms, window: &Window, thread: Option<&str>, limit: usize,
+    ) -> Result<crate::dig::Dig, String> {
+        let text = "(COALESCE(json_extract(m.payload, '$.gist'), '') || char(10) ||
+                     COALESCE(json_extract(m.payload, '$.content'), ''))";
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+        let (head, join) = match thread {
+            Some(id) => {
+                params.push(Box::new(self.thread_root(id)?));
+                (THREAD_DOWN, "JOIN down ON m.memory_uuid = down.uuid")
+            }
+            None => ("", ""),
+        };
+        let (wcond, wparams) = window.sql("m.created_at", params.len() + 1);
+        params.extend(wparams.into_iter().map(|p| Box::new(p) as Box<dyn rusqlite::types::ToSql>));
+        let (gcond, gparams) = terms.sql(text, params.len() + 1);
+        params.extend(gparams.into_iter().map(|p| Box::new(p) as Box<dyn rusqlite::types::ToSql>));
+
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(&format!(
+            "{head} SELECT m.memory_uuid, m.created_at,
+                    json_extract(m.payload, '$.gist'), json_extract(m.payload, '$.content')
+               FROM memories m {join}
+              WHERE json_valid(m.payload) AND {wcond} AND {gcond}
+              ORDER BY m.created_at DESC, m.rowid DESC"
+        )).map_err(|e| format!("Query failed: {}", e))?;
+        let mut rows = stmt.query(rusqlite::params_from_iter(params.iter()))
+            .map_err(|e| format!("Query failed: {}", e))?;
+        let mut dig = crate::dig::Dig::default();
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let uuid: String = row.get(0).map_err(|e| e.to_string())?;
+            let created_at: String = row.get(1).map_err(|e| e.to_string())?;
+            let gist: Option<String> = row.get(2).map_err(|e| e.to_string())?;
+            let content: Option<String> = row.get(3).map_err(|e| e.to_string())?;
+            let body = match (gist, content) {
+                (Some(g), Some(c)) => format!("{g}\n{c}"),
+                (g, c) => g.or(c).unwrap_or_default(),
+            };
+            dig.take(terms, &uuid, &created_at, None, &body, limit);
+        }
+        Ok(dig)
+    }
+
+    /// The root of the thread `id` belongs to: the walk up `parent_uuid`
+    /// ends at a self-parented root, a NULL parent, or a parent not here.
+    fn thread_root(&self, id: &str) -> Result<String, String> {
+        let target = self.resolve_uuid(id)?
+            .ok_or_else(|| format!("No memory matches {}", id))?;
+        let conn = self.conn()?;
+        conn.query_row(
+            "WITH RECURSIVE up(uuid, parent, depth) AS (
+                SELECT memory_uuid, parent_uuid, 0 FROM memories WHERE memory_uuid = ?1
+                UNION
+                SELECT m.memory_uuid, m.parent_uuid, up.depth + 1
+                  FROM memories m JOIN up ON m.memory_uuid = up.parent
+                 WHERE up.parent IS NOT up.uuid AND up.depth < 100000
+             )
+             SELECT uuid FROM up ORDER BY depth DESC LIMIT 1",
+            rusqlite::params![&target], |r| r.get(0),
+        ).optional().map_err(|e| format!("Thread walk failed: {}", e))?
+            .ok_or_else(|| format!("No memory matches {}", id))
     }
 
     /// Currently-configured embedding model name, or None if not set.
@@ -860,6 +909,14 @@ impl DatabaseManager {
 /// backends were unavailable — the memory is still saved and keyword
 /// searchable, but callers (CLI, MCP) can now tell the difference instead
 /// of getting a uniform "success" regardless of embedding state.
+/// Every memory under the root bound to `?1`, the root included.
+const THREAD_DOWN: &str = "WITH RECURSIVE down(uuid) AS (
+        SELECT ?1
+        UNION
+        SELECT m.memory_uuid FROM memories m JOIN down ON m.parent_uuid = down.uuid
+         WHERE m.memory_uuid IS NOT m.parent_uuid
+     )";
+
 /// A whole thread, as [`DatabaseManager::thread_in`] reads it.
 pub struct Thread {
     /// The root the walk reached.
@@ -1367,6 +1424,25 @@ mod tests {
             Err(e) => assert!(e.contains("No memory matches"), "{e}"),
             Ok(_) => panic!("an unknown id found a thread"),
         }
+    }
+
+    /// The design's second cause: names are not meanings, and the deciding
+    /// fact sits deep in a body its gist never mentions. Exact search finds
+    /// it, from the full content, inside the window asked for.
+    #[test]
+    fn grep_finds_a_name_deep_in_a_body_inside_the_window() {
+        let (db, _dir, cubic) = pumpkins_station();
+        db.signal_with_backend("Weekly notes\nlots of other text\n\nIn the end Cubic signed off.",
+            Some("weekly notes"), None, Some("2026-03-01 00:00:00"), Some(&ReviewAxis)).unwrap();
+        let terms = crate::dig::Terms::parse(&["cubic"]).unwrap();
+        let all = db.grep_in(&terms, &Window::all(), None, 50).unwrap();
+        assert_eq!((all.memories, all.lines), (2, 3), "gist line + body line, and the deep one");
+        assert!(all.hits.iter().any(|h| h.line == "In the end Cubic signed off."));
+        assert!(all.hits[0].memory_uuid.starts_with(&cubic), "newest first");
+        let week = db.grep_in(&terms, &Window::parse(Some("7d"), None).unwrap(), None, 50).unwrap();
+        assert_eq!(week.memories, 1);
+        let both = crate::dig::Terms::parse(&["cubic", "third-party"]).unwrap();
+        assert_eq!(db.grep_in(&both, &Window::all(), None, 50).unwrap().memories, 1);
     }
 
     #[test]

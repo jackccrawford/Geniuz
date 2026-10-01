@@ -134,6 +134,45 @@ pub fn get_db() -> Result<db::DatabaseManager, String> {
 /// Input: SQLite timestamp string like "2026-04-18 22:34:01" (UTC, space-separated).
 /// Output: "YYYY-MM-DD HH:MM" in the host machine's local timezone.
 /// If parsing fails (malformed timestamp), falls back to the original truncation.
+/// `recall --grep TERM…` (search feature 2): the matching lines, newest
+/// memory first, each tagged with the memory it came from.
+fn recall_grep(
+    db: &db::DatabaseManager, terms: &geniuz::dig::Terms, window: &geniuz::window::Window,
+    thread: Option<&str>, limit: usize, json: bool,
+) -> Result<String, String> {
+    let dig = db.grep_in(terms, window, thread, limit)?;
+    // The pool the dig drew from: the thread, or the whole store.
+    let (pool, count) = match thread {
+        Some(id) => {
+            let t = db.thread_in(id, window, 1)?;
+            let label = format!("thread {} · root {}", id.trim().to_uppercase(), &t.root[..8.min(t.root.len())]);
+            (Some(label), Some(t.total))
+        }
+        None => (None, db.count_in(window).ok()),
+    };
+    let scope = match count {
+        Some(n) => geniuz::window::scope_line(pool.as_deref(), n, window, &dig.mode(terms)),
+        None => format!("searched: {}", dig.mode(terms)),
+    };
+    if json {
+        let hits: Vec<serde_json::Value> = dig.hits.iter().map(|h| serde_json::json!({
+            "uuid": &h.memory_uuid[..8.min(h.memory_uuid.len())], "created_at": h.created_at, "line": h.line,
+        })).collect();
+        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "ok": true, "action": "grep", "lines": dig.lines, "memories": dig.memories,
+            "count": hits.len(), "hits": hits, "searched": scope,
+        })).unwrap());
+    }
+    if dig.hits.is_empty() {
+        return Ok(format!("No lines found.\n{scope}"));
+    }
+    let mut lines: Vec<String> = dig.hits.iter().map(|h| format!(
+        "{} · {} · {}", &h.memory_uuid[..8.min(h.memory_uuid.len())], shorten_ts(&h.created_at), h.line,
+    )).collect();
+    lines.push(scope);
+    Ok(lines.join("\n"))
+}
+
 /// `recall --thread ID` (search feature 6): the whole thread, oldest first,
 /// in the same line shape as every other answer, closed by its scope.
 fn recall_thread(
@@ -454,7 +493,7 @@ fn run(cli: Cli) -> Result<String, String> {
             }
         }
 
-        Command::Recall { query, thread, random, keyword, full, limit, since, until, json } => {
+        Command::Recall { query, thread, grep, random, keyword, full, limit, since, until, json } => {
             if query.as_deref() == Some("help") {
                 let mut cmd = Cli::build();
                 let sub = cmd.find_subcommand_mut("recall").unwrap();
@@ -466,6 +505,10 @@ fn run(cli: Cli) -> Result<String, String> {
             let window = geniuz::window::Window::parse(since.as_deref(), until.as_deref())?;
             let db = get_db()?;
 
+            if !grep.is_empty() {
+                let terms = geniuz::dig::Terms::parse(&grep)?;
+                return recall_grep(&db, &terms, &window, thread.as_deref(), limit.unwrap_or(50), json);
+            }
             if let Some(id) = thread {
                 return recall_thread(&db, &id, &window, limit.unwrap_or(100), full, json);
             }

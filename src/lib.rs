@@ -3,6 +3,7 @@ pub mod embed_client;
 pub mod db;
 pub mod settings;
 pub mod window;
+pub mod dig;
 
 use std::path::PathBuf;
 

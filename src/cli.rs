@@ -58,7 +58,7 @@ pub enum Command {
 
     /// Search your memories — semantic by default
     #[command(
-        after_help = "Examples:\n  geniuz recall \"auth token\"                  Semantic search\n  geniuz recall --keyword \"auth\"               Keyword fallback\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n\nTip: Run 'geniuz backfill' first to enable semantic search."
+        after_help = "Examples:\n  geniuz recall \"auth token\"                  Semantic search\n  geniuz recall --keyword \"auth\"               Keyword fallback\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n  geniuz recall --grep Cubic --since 7d        Lines naming Cubic, past week\n\nTip: Run 'geniuz backfill' first to enable semantic search."
     )]
     Recall {
         /// Search query
@@ -68,6 +68,12 @@ pub enum Command {
         /// up to its root, then everything under it, oldest first
         #[arg(long, value_name = "ID", conflicts_with_all = ["query", "random", "keyword"])]
         thread: Option<String>,
+
+        /// Exact match over full content, case-blind: show the matching
+        /// LINES. Repeat for more terms; every term must appear in a memory.
+        /// Combines with --since/--until and --thread
+        #[arg(long, value_name = "TERM", conflicts_with_all = ["query", "random", "keyword"])]
+        grep: Vec<String>,
 
         /// Discover a random memory
         #[arg(long)]
@@ -90,7 +96,7 @@ pub enum Command {
         #[arg(long, value_name = "WHEN")]
         until: Option<String>,
 
-        /// Max results [default: 20; 100 with --thread]
+        /// Max results [default: 20; 100 with --thread; 50 lines with --grep]
         #[arg(short, long)]
         limit: Option<usize>,
 
