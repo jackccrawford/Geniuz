@@ -528,6 +528,17 @@ impl DatabaseManager {
         ).optional().map_err(|e| format!("Query failed: {}", e))
     }
 
+    /// How many memories lie inside `window` — the pool a windowed search drew from.
+    pub fn count_in(&self, window: &Window) -> Result<usize, String> {
+        let (cond, params) = window.sql("created_at", 1);
+        let conn = self.conn()?;
+        let c: i64 = conn
+            .query_row(&format!("SELECT COUNT(*) FROM memories WHERE {cond}"),
+                rusqlite::params_from_iter(params.iter()), |r| r.get(0))
+            .map_err(|e| format!("Count failed: {}", e))?;
+        Ok(c as usize)
+    }
+
     pub fn count(&self) -> Result<usize, String> {
         let conn = self.conn()?;
         let c: i64 = conn.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))

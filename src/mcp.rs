@@ -191,16 +191,21 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
     };
 
     // Semantic first, keyword fallback
+    let mut mode = format!("semantic \"{query}\"");
     let results = match db.semantic_search_in(query, &window, limit) {
         Ok(r) if !r.is_empty() => r,
-        _ => match db.keyword_search_in(query, &window, limit) {
-            Ok(r) => r,
-            Err(e) => return (format!("Error: {}", e), true),
-        },
+        _ => {
+            mode = format!("keyword \"{query}\"");
+            match db.keyword_search_in(query, &window, limit) {
+                Ok(r) => r,
+                Err(e) => return (format!("Error: {}", e), true),
+            }
+        }
     };
+    let scope = scope(db, &window, &mode);
 
     if results.is_empty() {
-        return ("No memories found for that query.".to_string(), false);
+        return (format!("No memories found for that query.\n{scope}"), false);
     }
 
     // An MCP caller never sees stderr, so a partial index has to be said in
@@ -215,6 +220,7 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
             ));
         }
     }
+    out.push_str(&format!("\n{scope}"));
     (out, false)
 }
 
@@ -227,10 +233,16 @@ fn execute_recall_recent(db: &DatabaseManager, params: &Value) -> (String, bool)
     };
 
     match db.recent_in(&window, limit) {
-        Ok(entries) if entries.is_empty() => {
+        Ok(entries) if entries.is_empty() && window.is_all() => {
             ("No memories yet. This is a fresh start.".to_string(), false)
         }
-        Ok(entries) => (format_entries(&entries, full, db), false),
+        Ok(entries) if entries.is_empty() => {
+            (format!("No memories found.\n{}", scope(db, &window, "recent")), false)
+        }
+        Ok(entries) => (
+            format!("{}\n{}", format_entries(&entries, full, db), scope(db, &window, "recent")),
+            false,
+        ),
         Err(e) => (format!("Error: {}", e), true),
     }
 }
@@ -241,6 +253,15 @@ fn window_from(params: &Value) -> Result<Window, String> {
         params.get("since").and_then(|v| v.as_str()),
         params.get("until").and_then(|v| v.as_str()),
     )
+}
+
+/// The closing scope line (search feature 5): what was searched, so an empty
+/// answer carries its reach. A count that cannot be read is left out.
+fn scope(db: &DatabaseManager, window: &Window, mode: &str) -> String {
+    match db.count_in(window) {
+        Ok(n) => geniuz::window::scope_line(None, n, window, mode),
+        Err(_) => format!("searched: {mode}"),
+    }
 }
 
 fn format_entries(entries: &[SignalEntry], full: bool, db: &DatabaseManager) -> String {
@@ -293,6 +314,22 @@ mod tests {
         let line = entry_line(&entry(Some("6B3F7B38-0000-0000-0000-000000000000"), Some(0.483)));
         assert!(line.starts_with("5B1A36D9 | "), "{line}");
         assert!(line.ends_with("test: child <- 6B3F7B38 (0.483)"), "{line}");
+    }
+
+    /// An empty answer inside a window must say what it searched, or "nothing
+    /// found" reads as "nothing there" (search feature 5).
+    #[test]
+    fn an_empty_windowed_answer_carries_its_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
+        db.signal("an old note", Some("old"), None, Some("2020-01-01 00:00:00")).unwrap();
+        let (out, is_err) = execute_recall_recent(&db, &json!({"since": "7d"}));
+        assert!(!is_err, "{out}");
+        assert!(out.ends_with("searched: 0 memories · since 7d · recent"), "{out}");
+        let (out, _) = execute_recall_recent(&db, &json!({}));
+        assert!(out.ends_with("searched: 1 memory · all time · recent"), "{out}");
+        let (out, is_err) = execute_recall_recent(&db, &json!({"since": "someday"}));
+        assert!(is_err && out.contains("--since `someday`"), "{out}");
     }
 
     #[test]

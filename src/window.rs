@@ -113,6 +113,21 @@ impl Window {
     }
 }
 
+/// The closing line of every recall answer: what was searched, so that
+/// "nothing found" carries its scope and a short list says how big the pool
+/// was (docs/SEARCH-DESIGN.md, feature 5). For example
+/// `searched: PILOT · 312 memories · since 7d · semantic "reviewers"`.
+pub fn scope_line(station: Option<&str>, memories: usize, window: &Window, mode: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if let Some(s) = station.filter(|s| !s.is_empty()) {
+        parts.push(s.to_string());
+    }
+    parts.push(format!("{memories} {}", if memories == 1 { "memory" } else { "memories" }));
+    parts.push(if window.is_all() { "all time".to_string() } else { window.describe() });
+    parts.push(mode.to_string());
+    format!("searched: {}", parts.join(" · "))
+}
+
 /// One bound as a UTC instant. An `until` that names a day or a minute covers
 /// all of it, so the exclusive bound is the start of the next one.
 fn bound(raw: &str, now: DateTime<Utc>, is_until: bool) -> Result<DateTime<Utc>, String> {
@@ -224,6 +239,16 @@ mod tests {
         assert!(e.contains("holds nothing"), "{e}");
         let e = Window::parse_at(Some("last tuesday"), None, now()).unwrap_err();
         assert!(e.starts_with("--since `last tuesday`"), "{e}");
+    }
+
+    #[test]
+    fn the_scope_line_names_pool_window_and_mode() {
+        let w = Window::parse_at(Some("7d"), None, now()).unwrap();
+        assert_eq!(
+            scope_line(Some("PILOT"), 312, &w, "semantic \"reviewers\""),
+            "searched: PILOT · 312 memories · since 7d · semantic \"reviewers\""
+        );
+        assert_eq!(scope_line(None, 1, &Window::all(), "recent"), "searched: 1 memory · all time · recent");
     }
 
     #[test]

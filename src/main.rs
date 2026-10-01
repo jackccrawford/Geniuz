@@ -134,6 +134,24 @@ pub fn get_db() -> Result<db::DatabaseManager, String> {
 /// Input: SQLite timestamp string like "2026-04-18 22:34:01" (UTC, space-separated).
 /// Output: "YYYY-MM-DD HH:MM" in the host machine's local timezone.
 /// If parsing fails (malformed timestamp), falls back to the original truncation.
+/// The scope line for a CLI answer (search feature 5). A count that cannot
+/// be read is left out rather than guessed.
+fn scope_text(db: &db::DatabaseManager, window: &geniuz::window::Window, mode: &str) -> String {
+    match db.count_in(window) {
+        Ok(n) => geniuz::window::scope_line(None, n, window, mode),
+        Err(_) => format!("searched: {} · {mode}",
+            if window.is_all() { "all time".to_string() } else { window.describe() }),
+    }
+}
+
+fn scope_json(db: &db::DatabaseManager, window: &geniuz::window::Window, mode: &str) -> serde_json::Value {
+    serde_json::json!({
+        "memories": db.count_in(window).ok(),
+        "since": window.since_label, "until": window.until_label,
+        "mode": mode,
+    })
+}
+
 pub fn shorten_ts(ts: &str) -> String {
     use chrono::{DateTime, NaiveDateTime, Utc, Local};
 
@@ -412,6 +430,15 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
             }
 
+            // What kind of search this is, for the scope line.
+            let semantic_ready = db.embedding_count().map(|n| n > 0).unwrap_or(false);
+            let mut mode = match query.as_deref() {
+                _ if random => "random".to_string(),
+                None => "recent".to_string(),
+                Some(q) if !keyword && looks_like_uuid(q) => format!("id {}", q.trim()),
+                Some(q) if keyword || !semantic_ready => format!("keyword \"{q}\""),
+                Some(q) => format!("semantic \"{q}\""),
+            };
             let mut entries = if random {
                 match db.random_in(&window)? {
                     Some(e) => vec![e],
@@ -427,6 +454,7 @@ fn run(cli: Cli) -> Result<String, String> {
                         Some(entry) => vec![entry],
                         None => {
                             eprintln!("[geniuz] No memory found matching UUID {} — falling back to semantic search.", q);
+                            mode = format!("semantic \"{q}\" (no memory has that id)");
                             db.semantic_search_in(q, &window, limit)?
                         }
                     }
@@ -458,7 +486,8 @@ fn run(cli: Cli) -> Result<String, String> {
                     v
                 }).collect();
                 let mut out = serde_json::json!({
-                    "ok": true, "action": "recall", "count": data.len(), "memories": data
+                    "ok": true, "action": "recall", "count": data.len(), "memories": data,
+                    "searched": scope_json(&db, &window, &mode),
                 });
                 // Report a partial index rather than presenting these results
                 // as the whole corpus.
@@ -468,8 +497,9 @@ fn run(cli: Cli) -> Result<String, String> {
                 return Ok(serde_json::to_string_pretty(&out).unwrap());
             }
 
+            let scope = scope_text(&db, &window, &mode);
             if entries.is_empty() {
-                return Ok("No memories found.".to_string());
+                return Ok(format!("No memories found.\n{scope}"));
             }
 
             let mut lines: Vec<String> = Vec::new();
@@ -502,6 +532,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     ));
                 }
             }
+            lines.push(scope);
             Ok(lines.join("\n"))
         }
 
@@ -530,12 +561,17 @@ fn run(cli: Cli) -> Result<String, String> {
                     v
                 }).collect();
                 return Ok(serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": true, "action": "recent", "count": data.len(), "memories": data
+                    "ok": true, "action": "recent", "count": data.len(), "memories": data,
+                    "searched": scope_json(&db, &window, "recent"),
                 })).unwrap());
             }
 
-            if entries.is_empty() {
+            let scope = scope_text(&db, &window, "recent");
+            if entries.is_empty() && window.is_all() {
                 return Ok("No memories yet.".to_string());
+            }
+            if entries.is_empty() {
+                return Ok(format!("No memories found.\n{scope}"));
             }
 
             let mut lines: Vec<String> = Vec::new();
@@ -554,6 +590,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     lines.push(String::new());
                 }
             }
+            lines.push(scope);
             Ok(lines.join("\n"))
         }
 
