@@ -637,6 +637,47 @@ a { color: inherit; text-decoration: none; }
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
 }
 
+.find-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  align-items: center;
+}
+.find-line { flex-direction: row; align-items: baseline; gap: var(--s-3); }
+.find-line .memory-row__gist { flex: 1; min-width: 0; }
+.find-line__id {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+}
+.find-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-4);
+  font-size: var(--fs-meta);
+}
+.find-next__label { color: var(--ink-3); margin-right: var(--s-1); }
+.find-next__label:not(:first-child) { margin-left: var(--s-3); }
+.find-next__chip {
+  font: inherit;
+  padding: 2px 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--hairline-2);
+  border-radius: 4px;
+  color: var(--ink-1);
+}
+button.find-next__chip { cursor: pointer; }
+button.find-next__chip:hover { border-color: var(--accent); }
+.find-next__chip--mono { font-family: var(--font-mono); font-size: var(--fs-micro); }
+.find-scope {
+  margin-top: var(--s-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+}
+
 /* ============================================================================
    Detail surface
    ============================================================================ */

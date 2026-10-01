@@ -46,6 +46,25 @@ struct RecentMemory {
     parent_uuid: Option<String>,
 }
 
+/// One matching line from an Exact search.
+#[derive(Serialize)]
+struct FindLine {
+    uuid: String,
+    created_at: String,
+    line: String,
+}
+
+/// What Find shows: memories (Meaning) or lines (Exact), then where to go
+/// next and what was searched (search features 4 and 5).
+#[derive(Serialize)]
+struct FindResult {
+    memories: Vec<RecentMemory>,
+    lines: Vec<FindLine>,
+    names: Vec<String>,
+    pointers: Vec<String>,
+    scope: String,
+}
+
 #[derive(Serialize)]
 struct DailyCount {
     date: String,
@@ -150,6 +169,46 @@ fn keyword_search(query: String, limit: Option<u32>) -> Result<Vec<RecentMemory>
     let db = open_db()?;
     let entries = db.keyword_search(&query, limit.unwrap_or(20) as usize)?;
     Ok(entries.into_iter().map(map_recent).collect())
+}
+
+/// Find, the dashboard's door to search: `mode` is "meaning" or "exact";
+/// `since` is any window the CLI takes (24h, 7d, a date), or none.
+#[tauri::command]
+fn find(query: String, mode: String, since: Option<String>, limit: Option<u32>) -> Result<FindResult, String> {
+    use geniuz::{dig, window};
+    let db = open_db()?;
+    let window = window::Window::parse(since.as_deref(), None)?;
+    let pool = db.count_in(&window).ok();
+    let scope = |mode: &str| match pool {
+        Some(n) => window::scope_line(None, n, &window, mode),
+        None => format!("searched: {mode}"),
+    };
+    let names = |h: &dig::Harvest| h.names.iter().map(|(n, _)| n.clone()).collect();
+    if mode == "exact" {
+        let terms = dig::Terms::parse(&dig::split_terms(&query))?;
+        let d = db.grep_in(&terms, &window, None, limit.unwrap_or(100) as usize)?;
+        let found: Vec<&str> = d.hits.iter().map(|h| h.line.as_str()).collect();
+        let own: Vec<String> = d.hits.iter().map(|h| h.memory_uuid.clone()).collect();
+        let h = dig::Harvest::of(&found, &query, &own);
+        return Ok(FindResult {
+            memories: Vec::new(),
+            lines: d.hits.iter().map(|h| FindLine {
+                uuid: h.memory_uuid.clone(), created_at: h.created_at.clone(), line: h.line.clone(),
+            }).collect(),
+            names: names(&h),
+            pointers: h.pointers.clone(),
+            scope: scope(&d.mode(&terms)),
+        });
+    }
+    let entries = db.semantic_search_in(&query, &window, limit.unwrap_or(40) as usize)?;
+    let h = db.harvest(&entries, &query);
+    Ok(FindResult {
+        memories: entries.into_iter().map(map_recent).collect(),
+        lines: Vec::new(),
+        names: names(&h),
+        pointers: h.pointers.clone(),
+        scope: scope(&dig::semantic_mode(&query)),
+    })
 }
 
 #[tauri::command]
@@ -409,6 +468,7 @@ pub fn run() {
             get_activity,
             semantic_search,
             keyword_search,
+            find,
             get_memory_detail,
             get_thread_chain,
             get_status,
@@ -588,4 +648,33 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running geniuz-dashboard");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Find's Exact mode returns lines, the harvest and the scope, from the
+    /// data folder GENIUZ_HOME names (a scratch one here, never a real one).
+    #[test]
+    fn find_exact_returns_lines_harvest_and_scope() {
+        let dir = std::env::temp_dir().join(format!("geniuz-find-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("GENIUZ_HOME", &dir);
+        let db = open_db().unwrap();
+        db.signal("Roundup\nCubic reviewed the PR; see 13625F6B:D824ADA7.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
+        db.signal("Asked Devin to retest.", Some("follow-up"), None, None).unwrap();
+
+        let r = find("Devin".into(), "exact".into(), Some("24h".into()), None).unwrap();
+        let lines: Vec<&str> = r.lines.iter().map(|l| l.line.as_str()).collect();
+        assert_eq!(lines, ["Asked Devin to retest.", "Devin filed issues."]);
+        assert!(r.memories.is_empty());
+        assert_eq!(r.scope, "searched: 2 memories · since 24h · grep \"Devin\" · 2 lines in 2 memories");
+
+        let r = find("\"the PR\" Cubic".into(), "exact".into(), None, None).unwrap();
+        assert_eq!(r.lines.len(), 1);
+        assert_eq!(r.pointers, ["13625F6B:D824ADA7"]);
+        assert!(find("x".into(), "exact".into(), Some("someday".into()), None).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

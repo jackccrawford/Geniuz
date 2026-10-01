@@ -73,6 +73,22 @@ impl Terms {
     }
 }
 
+/// Terms as a person types them in one box: words, with "quoted phrases"
+/// kept whole. `Cubic "pull request"` is two terms.
+pub fn split_terms(input: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for (i, part) in input.split('"').enumerate() {
+        if i % 2 == 1 {
+            if !part.trim().is_empty() {
+                out.push(part.trim().to_string());
+            }
+        } else {
+            out.extend(part.split_whitespace().map(String::from));
+        }
+    }
+    out
+}
+
 /// The proper names in a meaning query (search feature 3): every "quoted
 /// term", and every word that starts with a capital letter but is not the
 /// query's first word. A deliberately simple rule, so it can be steered:
@@ -316,6 +332,12 @@ mod tests {
         let asked = Harvest::of(&hits, "and Devin?", &[]);
         assert!(asked.names.is_empty(), "a name the query asked for is not news");
         assert!(Harvest::of(&[], "", &[]).lines().is_empty());
+    }
+
+    #[test]
+    fn typed_terms_keep_quoted_phrases_whole() {
+        assert_eq!(split_terms("Cubic \"pull request\"  PR"), ["Cubic", "pull request", "PR"]);
+        assert!(split_terms("  \"\" ").is_empty());
     }
 
     #[test]

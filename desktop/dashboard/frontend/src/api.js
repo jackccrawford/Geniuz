@@ -45,6 +45,15 @@ export function keywordSearch(query, limit = 20) {
   return invoke('keyword_search', { query, limit });
 }
 
+/**
+ * Find — mode 'meaning' | 'exact', since e.g. '7d' or null for all time.
+ * Returns: { memories: [...], lines: [{ uuid, created_at, line }],
+ *            names: [string], pointers: [string], scope: string }
+ */
+export function find(query, mode, since = null, limit = null) {
+  return invoke('find', { query, mode, since, limit });
+}
+
 export function getDataDir() {
   return invoke('get_data_dir');
 }

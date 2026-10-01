@@ -1,9 +1,12 @@
 // find.js — Find surface in Tool register.
 //
-// Large prominent input, mode toggle (Meaning | Keyword), ranked results
-// rendered as the same dense .memory-row layout used by recent.js. Mode is
-// local to the surface; the active query persists to the store so navigating
-// to detail and back restores the input.
+// Large prominent input, mode toggle (Meaning | Exact), a time window, and
+// results: Meaning ranks memories (proper names first); Exact returns the
+// matching LINES from full content (Ember's dig). Every answer ends with
+// where to go next (names seen, pointers) and what was searched
+// (docs/SEARCH-DESIGN.md in Geniuz Team, features 1-5). Mode and window are
+// local to the surface; the query persists to the store so navigating to
+// detail and back restores it.
 //
 // Mirrors recent.js's discipline: mount(container) signature, escapeHtml,
 // handle loading / empty / error states inside the result region.
@@ -13,17 +16,23 @@ import * as fmt from '../format.js';
 import { getState, setState, navigate } from '../store.js';
 
 const MODES = {
-  semantic: {
+  meaning: {
     label: 'Meaning',
-    placeholder: 'Search by meaning…',
-    call: (q, n) => api.semanticSearch(q, n),
+    placeholder: 'Search by meaning… (Capitalized names match exactly)',
   },
-  keyword: {
-    label: 'Keyword',
-    placeholder: 'Search by keyword…',
-    call: (q, n) => api.keywordSearch(q, n),
+  exact: {
+    label: 'Exact',
+    placeholder: 'Exact words or "a phrase"… every term must appear',
   },
 };
+
+// The time window: a value the CLI's --since takes, or null for all time.
+const WINDOWS = [
+  { label: 'Any time', since: null },
+  { label: '24 hours', since: '24h' },
+  { label: '7 days', since: '7d' },
+  { label: '30 days', since: '30d' },
+];
 
 const DEBOUNCE_MS = 250;
 const RESULT_LIMIT = 40;
@@ -32,7 +41,8 @@ export async function mount(container) {
   // Mount-scoped state. Local `mounted` flag drops late results when the
   // router replaces this surface mid-flight.
   let mounted = true;
-  let mode = 'semantic';
+  let mode = 'meaning';
+  let since = null;
   let query = (getState().searchQuery || '');
   let debounceTimer = null;
   let inFlight = 0; // monotonic ticket; ignore replies older than the latest.
@@ -94,7 +104,30 @@ export async function mount(container) {
     modeButtons[key] = btn;
     toggle.appendChild(btn);
   }
-  body.appendChild(toggle);
+  const controls = document.createElement('div');
+  controls.className = 'find-controls';
+  controls.appendChild(toggle);
+
+  const windowToggle = document.createElement('div');
+  windowToggle.className = 'find-mode-toggle';
+  windowToggle.setAttribute('aria-label', 'Time window');
+  const windowButtons = [];
+  for (const w of WINDOWS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = w.label;
+    if (w.since === since) btn.classList.add('is-active');
+    btn.addEventListener('click', () => {
+      if (since === w.since) return;
+      since = w.since;
+      windowButtons.forEach((b, i) => b.classList.toggle('is-active', WINDOWS[i].since === since));
+      runSearch(query, /* immediate */ true);
+    });
+    windowButtons.push(btn);
+    windowToggle.appendChild(btn);
+  }
+  controls.appendChild(windowToggle);
+  body.appendChild(controls);
 
   // ---- Results region -------------------------------------------------
   const resultsEl = document.createElement('div');
@@ -152,7 +185,7 @@ export async function mount(container) {
     renderLoading();
     let results;
     try {
-      results = await MODES[mode].call(q, RESULT_LIMIT);
+      results = await api.find(q, mode, since, mode === 'exact' ? 100 : RESULT_LIMIT);
     } catch (e) {
       if (!mounted || ticket !== inFlight) return;
       renderError(e);
@@ -166,7 +199,8 @@ export async function mount(container) {
   function renderHint() {
     resultsEl.innerHTML = `
       <div class="surface-empty">
-        Type to search. Meaning ranks by semantic similarity; Keyword matches words directly.
+        Type to search. Meaning ranks by similarity, with Capitalized names
+        matched exactly and first. Exact shows the lines holding every word.
       </div>
     `;
   }
@@ -184,15 +218,30 @@ export async function mount(container) {
     `;
   }
 
-  function renderResults(results) {
-    if (!results || results.length === 0) {
-      resultsEl.innerHTML = `<div class="surface-empty">No matches in your memory</div>`;
-      return;
-    }
+  function renderResults(r) {
     resultsEl.innerHTML = '';
+    const empty = r.memories.length === 0 && r.lines.length === 0;
+    if (empty) {
+      const none = document.createElement('div');
+      none.className = 'surface-empty';
+      none.textContent = 'No matches in your memory';
+      resultsEl.appendChild(none);
+    }
     const list = document.createElement('div');
     list.className = 'memory-list';
-    for (const m of results) {
+    for (const l of r.lines) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'memory-row find-line';
+      row.innerHTML = `
+        <span class="find-line__id">${escapeHtml(l.uuid.slice(0, 8))}</span>
+        <span class="memory-row__gist">${escapeHtml(l.line)}</span>
+        <span class="memory-row__time">${fmt.ago(l.created_at)}</span>
+      `;
+      row.addEventListener('click', () => navigate('detail', { selectedMemoryUuid: l.uuid }));
+      list.appendChild(row);
+    }
+    for (const m of r.memories) {
       const row = document.createElement('button');
       row.type = 'button';
       row.className = 'memory-row';
@@ -205,7 +254,62 @@ export async function mount(container) {
       row.addEventListener('click', () => navigate('detail', { selectedMemoryUuid: m.uuid }));
       list.appendChild(row);
     }
-    resultsEl.appendChild(list);
+    if (!empty) resultsEl.appendChild(list);
+
+    // Where to go next: a name digs for it exactly; an id opens it.
+    if (r.names.length || r.pointers.length) {
+      const next = document.createElement('div');
+      next.className = 'find-next';
+      if (r.names.length) {
+        const label = document.createElement('span');
+        label.className = 'find-next__label';
+        label.textContent = 'Names seen';
+        next.appendChild(label);
+        for (const n of r.names) {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'find-next__chip';
+          chip.textContent = n;
+          chip.title = `Find lines naming ${n}`;
+          chip.addEventListener('click', () => {
+            mode = 'exact';
+            for (const k of Object.keys(modeButtons)) modeButtons[k].classList.toggle('is-active', k === mode);
+            input.placeholder = MODES[mode].placeholder;
+            input.value = n;
+            query = n;
+            setState({ searchQuery: query });
+            runSearch(n, true);
+          });
+          next.appendChild(chip);
+        }
+      }
+      if (r.pointers.length) {
+        const label = document.createElement('span');
+        label.className = 'find-next__label';
+        label.textContent = 'Pointers';
+        next.appendChild(label);
+        for (const p of r.pointers) {
+          // A bare id may be a memory here; a signal pointer (A:B) lives
+          // on a station elsewhere, so it is shown, not followed.
+          const bare = !p.includes(':');
+          const chip = document.createElement(bare ? 'button' : 'span');
+          chip.className = 'find-next__chip find-next__chip--mono';
+          chip.textContent = p;
+          if (bare) {
+            chip.type = 'button';
+            chip.title = 'Open this memory';
+            chip.addEventListener('click', () => navigate('detail', { selectedMemoryUuid: p }));
+          }
+          next.appendChild(chip);
+        }
+      }
+      resultsEl.appendChild(next);
+    }
+
+    const scope = document.createElement('div');
+    scope.className = 'find-scope';
+    scope.textContent = r.scope;
+    resultsEl.appendChild(scope);
   }
 }
 
