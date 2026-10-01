@@ -93,7 +93,11 @@ fn tool_definitions() -> Value {
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ."
+                            "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ. Required unless thread is given."
+                        },
+                        "thread": {
+                            "type": "string",
+                            "description": "Optional. The short UUID of any memory in a thread (the 8 characters before '|', or the one after '<-'). Returns that whole thread, root first, oldest to newest, instead of searching. Use it to read a conversation you found one piece of."
                         },
                         "full": {
                             "type": "boolean",
@@ -111,8 +115,7 @@ fn tool_definitions() -> Value {
                             "type": "string",
                             "description": "Optional. Only memories before this time. Same forms as since; a date includes that whole day."
                         }
-                    },
-                    "required": ["query"]
+                    }
                 }
             },
             {
@@ -179,16 +182,20 @@ fn execute_remember(
 }
 
 fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
-    let query = match params.get("query").and_then(|q| q.as_str()) {
-        Some(q) => q,
-        None => return ("Error: query is required".to_string(), true),
-    };
     let full = params.get("full").and_then(|f| f.as_bool()).unwrap_or(false);
-    let limit = params.get("limit").and_then(|l| l.as_u64()).unwrap_or(10).min(100) as usize;
     let window = match window_from(params) {
         Ok(w) => w,
         Err(e) => return (format!("Error: {}", e), true),
     };
+    if let Some(id) = params.get("thread").and_then(|t| t.as_str()).filter(|t| !t.trim().is_empty()) {
+        let limit = params.get("limit").and_then(|l| l.as_u64()).unwrap_or(100).min(500) as usize;
+        return execute_thread(db, id.trim(), &window, limit, full);
+    }
+    let query = match params.get("query").and_then(|q| q.as_str()) {
+        Some(q) => q,
+        None => return ("Error: query is required (or thread, to read a whole thread)".to_string(), true),
+    };
+    let limit = params.get("limit").and_then(|l| l.as_u64()).unwrap_or(10).min(100) as usize;
 
     // Semantic first, keyword fallback
     let mut mode = format!("semantic \"{query}\"");
@@ -253,6 +260,25 @@ fn window_from(params: &Value) -> Result<Window, String> {
         params.get("since").and_then(|v| v.as_str()),
         params.get("until").and_then(|v| v.as_str()),
     )
+}
+
+/// A whole thread, root first (search feature 6), closed by its scope.
+fn execute_thread(db: &DatabaseManager, id: &str, window: &Window, limit: usize, full: bool) -> (String, bool) {
+    let t = match db.thread_in(id, window, limit) {
+        Ok(t) => t,
+        Err(e) => return (format!("Error: {}", e), true),
+    };
+    let label = format!("thread {} · root {}", id.to_uppercase(), &t.root[..8.min(t.root.len())]);
+    let shown = if t.entries.len() < t.total {
+        format!("oldest {} shown (raise limit for more)", t.entries.len())
+    } else {
+        "oldest first".to_string()
+    };
+    let scope = geniuz::window::scope_line(Some(&label), t.total, window, &shown);
+    if t.entries.is_empty() {
+        return (format!("No memories in that thread inside the window.\n{scope}"), false);
+    }
+    (format!("{}\n{scope}", format_entries(&t.entries, full, db)), false)
 }
 
 /// The closing scope line (search feature 5): what was searched, so an empty
@@ -330,6 +356,25 @@ mod tests {
         assert!(out.ends_with("searched: 1 memory · all time · recent"), "{out}");
         let (out, is_err) = execute_recall_recent(&db, &json!({"since": "someday"}));
         assert!(is_err && out.contains("--since `someday`"), "{out}");
+    }
+
+    /// recall with `thread` reads the whole conversation from any member.
+    #[test]
+    fn recall_with_thread_reads_the_whole_conversation() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
+        let root = db.signal("the question", Some("question"), None, Some("2026-09-01 00:00:00")).unwrap().uuid;
+        let reply = db.signal("the answer", Some("answer"), Some(&root), Some("2026-09-02 00:00:00")).unwrap().uuid;
+        db.signal("elsewhere", Some("elsewhere"), None, Some("2026-09-03 00:00:00")).unwrap();
+        let (out, is_err) = execute_recall(&db, &json!({"thread": reply}));
+        assert!(!is_err, "{out}");
+        let q = out.find("question").unwrap();
+        let a = out.find(&format!("answer <- {root}")).unwrap();
+        assert!(q < a, "root first: {out}");
+        assert!(!out.contains("elsewhere"), "{out}");
+        assert!(out.ends_with(&format!("searched: thread {reply} · root {root} · 2 memories · all time · oldest first")), "{out}");
+        let (out, is_err) = execute_recall(&db, &json!({}));
+        assert!(is_err && out.contains("or thread"), "{out}");
     }
 
     #[test]

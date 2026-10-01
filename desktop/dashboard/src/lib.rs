@@ -162,8 +162,13 @@ fn get_memory_detail(uuid: String) -> Result<Option<MemoryDetail>, String> {
 #[tauri::command]
 fn get_thread_chain(uuid: String, limit: Option<u32>) -> Result<Vec<RecentMemory>, String> {
     let db = open_db()?;
-    let entries = db.thread_for(&uuid, limit.unwrap_or(100) as usize)?;
-    Ok(entries.into_iter().map(map_recent).collect())
+    // thread_in, not the memory_chains view: the view loses a thread whose
+    // root names a parent that is not in this store.
+    let mut thread = db.thread_in(&uuid, &geniuz::window::Window::all(), limit.unwrap_or(100) as usize)?;
+    for e in &mut thread.entries {
+        e.content = db.get_full_content(&e.memory_uuid).ok().flatten();
+    }
+    Ok(thread.entries.into_iter().map(map_recent).collect())
 }
 
 #[tauri::command]

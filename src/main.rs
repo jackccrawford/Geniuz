@@ -134,6 +134,59 @@ pub fn get_db() -> Result<db::DatabaseManager, String> {
 /// Input: SQLite timestamp string like "2026-04-18 22:34:01" (UTC, space-separated).
 /// Output: "YYYY-MM-DD HH:MM" in the host machine's local timezone.
 /// If parsing fails (malformed timestamp), falls back to the original truncation.
+/// `recall --thread ID` (search feature 6): the whole thread, oldest first,
+/// in the same line shape as every other answer, closed by its scope.
+fn recall_thread(
+    db: &db::DatabaseManager, id: &str, window: &geniuz::window::Window,
+    limit: usize, full: bool, json: bool,
+) -> Result<String, String> {
+    let mut thread = db.thread_in(id, window, limit)?;
+    if full {
+        for e in &mut thread.entries {
+            e.content = db.get_full_content(&e.memory_uuid).ok().flatten();
+        }
+    }
+    let label = format!("thread {} · root {}", id.trim().to_uppercase(), &thread.root[..8.min(thread.root.len())]);
+    let shown = if thread.entries.len() < thread.total {
+        format!("oldest {} shown", thread.entries.len())
+    } else {
+        "oldest first".to_string()
+    };
+    let scope = geniuz::window::scope_line(Some(&label), thread.total, window, &shown);
+
+    if json {
+        let data: Vec<serde_json::Value> = thread.entries.iter().map(|e| {
+            let mut v = serde_json::json!({ "uuid": &e.memory_uuid[..8], "gist": e.gist, "created_at": e.created_at });
+            if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8.min(p.len())]); }
+            if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+            v
+        }).collect();
+        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+            "ok": true, "action": "thread", "root": &thread.root[..8.min(thread.root.len())],
+            "total": thread.total, "count": data.len(), "memories": data,
+            "searched": { "thread": id, "since": window.since_label, "until": window.until_label },
+        })).unwrap());
+    }
+
+    if thread.entries.is_empty() {
+        return Ok(format!("No memories in that thread inside the window.\n{scope}"));
+    }
+    let mut lines = Vec::new();
+    for e in &thread.entries {
+        let parent = e.parent_uuid.as_deref()
+            .map(|p| format!(" <- {}", &p[..8.min(p.len())])).unwrap_or_default();
+        lines.push(format!("{} | {} | {}{}", &e.memory_uuid[..8], shorten_ts(&e.created_at), e.gist, parent));
+        if let Some(ref content) = e.content {
+            for line in content.lines() {
+                lines.push(format!("           {}", line));
+            }
+            lines.push(String::new());
+        }
+    }
+    lines.push(scope);
+    Ok(lines.join("\n"))
+}
+
 /// The scope line for a CLI answer (search feature 5). A count that cannot
 /// be read is left out rather than guessed.
 fn scope_text(db: &db::DatabaseManager, window: &geniuz::window::Window, mode: &str) -> String {
@@ -401,7 +454,7 @@ fn run(cli: Cli) -> Result<String, String> {
             }
         }
 
-        Command::Recall { query, random, keyword, full, limit, since, until, json } => {
+        Command::Recall { query, thread, random, keyword, full, limit, since, until, json } => {
             if query.as_deref() == Some("help") {
                 let mut cmd = Cli::build();
                 let sub = cmd.find_subcommand_mut("recall").unwrap();
@@ -412,6 +465,10 @@ fn run(cli: Cli) -> Result<String, String> {
 
             let window = geniuz::window::Window::parse(since.as_deref(), until.as_deref())?;
             let db = get_db()?;
+
+            if let Some(id) = thread {
+                return recall_thread(&db, &id, &window, limit, full, json);
+            }
 
             // UUID-shaped queries are a lookup key, not a semantic search target.
             // A bare 8-char or 36-char hex-ish string embeds to noise; treating it as

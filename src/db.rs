@@ -661,6 +661,77 @@ impl DatabaseManager {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
+    /// The whole thread `id` (a UUID or prefix) belongs to, as `relay tune
+    /// --thread` reads one: up from `id` to its root, then every memory under
+    /// that root, oldest first, inside `window`, at most `limit` of them
+    /// (search feature 6).
+    ///
+    /// The walk is written out rather than read from `memory_chains`, whose
+    /// anchor misses a memory whose parent is not in this store: here a
+    /// self-parented root, a NULL parent and a parent that is not here all
+    /// end the upward walk at the last memory reached. `UNION` (not `UNION
+    /// ALL`) keeps a malformed cycle from walking forever.
+    pub fn thread_in(&self, id: &str, window: &Window, limit: usize) -> Result<Thread, String> {
+        let target = self.resolve_uuid(id)?
+            .ok_or_else(|| format!("No memory matches {}", id))?;
+        let conn = self.conn()?;
+        let root: String = conn.query_row(
+            "WITH RECURSIVE up(uuid, parent, depth) AS (
+                SELECT memory_uuid, parent_uuid, 0 FROM memories WHERE memory_uuid = ?1
+                UNION
+                SELECT m.memory_uuid, m.parent_uuid, up.depth + 1
+                  FROM memories m JOIN up ON m.memory_uuid = up.parent
+                 WHERE up.parent IS NOT up.uuid AND up.depth < 100000
+             )
+             SELECT uuid FROM up ORDER BY depth DESC LIMIT 1",
+            rusqlite::params![&target], |r| r.get(0),
+        ).optional().map_err(|e| format!("Thread walk failed: {}", e))?
+            .ok_or_else(|| format!("No memory matches {}", id))?;
+
+        let down = "WITH RECURSIVE down(uuid) AS (
+                SELECT ?1
+                UNION
+                SELECT m.memory_uuid FROM memories m JOIN down ON m.parent_uuid = down.uuid
+                 WHERE m.memory_uuid IS NOT m.parent_uuid
+             )";
+        // Counted apart from the page, so the scope line can say how much of
+        // a long thread the page shows.
+        let (ccond, cparams) = window.sql("m.created_at", 2);
+        let mut count_params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(root.clone())];
+        count_params.extend(cparams.into_iter().map(|p| Box::new(p) as Box<dyn rusqlite::types::ToSql>));
+        let total: i64 = conn.query_row(
+            &format!("{down} SELECT COUNT(*) FROM memories m JOIN down ON m.memory_uuid = down.uuid
+                      WHERE {ccond}"),
+            rusqlite::params_from_iter(count_params.iter()), |r| r.get(0),
+        ).map_err(|e| format!("Thread walk failed: {}", e))?;
+
+        let (wcond, wparams) = window.sql("m.created_at", 3);
+        let mut params: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(root.clone()), Box::new(limit as i64)];
+        params.extend(wparams.into_iter().map(|p| Box::new(p) as Box<dyn rusqlite::types::ToSql>));
+
+        let mut stmt = conn.prepare(&format!(
+            "{down} SELECT m.memory_uuid,
+                    COALESCE(json_extract(m.payload, '$.gist'), substr(json_extract(m.payload, '$.content'), 1, 200)),
+                    m.created_at, m.parent_uuid
+               FROM memories m JOIN down ON m.memory_uuid = down.uuid
+              WHERE {wcond}
+              ORDER BY m.created_at ASC, m.rowid ASC LIMIT ?2"
+        )).map_err(|e| format!("Query failed: {}", e))?;
+        let entries = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| {
+            let uuid: String = row.get(0)?;
+            let parent: Option<String> = row.get(3)?;
+            let display_parent = parent.filter(|p| p != &uuid);
+            Ok(SignalEntry {
+                memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
+                parent_uuid: display_parent, content: None, score: None,
+            })
+        }).map_err(|e| format!("Query failed: {}", e))?
+            .collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
+
+        Ok(Thread { root, total: total as usize, entries })
+    }
+
     /// Currently-configured embedding model name, or None if not set.
     pub fn get_embedding_model(&self) -> Result<Option<String>, String> {
         let conn = self.conn()?;
@@ -789,6 +860,16 @@ impl DatabaseManager {
 /// backends were unavailable — the memory is still saved and keyword
 /// searchable, but callers (CLI, MCP) can now tell the difference instead
 /// of getting a uniform "success" regardless of embedding state.
+/// A whole thread, as [`DatabaseManager::thread_in`] reads it.
+pub struct Thread {
+    /// The root the walk reached.
+    pub root: String,
+    /// Memories in the thread inside the window — may exceed `entries.len()`.
+    pub total: usize,
+    /// Oldest first, at most the limit asked for.
+    pub entries: Vec<SignalEntry>,
+}
+
 #[derive(Debug)]
 pub struct SignalResult {
     pub uuid: String,
@@ -1218,6 +1299,74 @@ mod tests {
         let empty = Window::parse(Some("2025-01-01"), Some("2025-01-31")).unwrap();
         assert!(db.semantic_search_with("review", &empty, 5, Some(&ReviewAxis)).unwrap().is_empty());
         assert!(db.keyword_search_in("review", &empty, 5).unwrap().is_empty());
+    }
+
+    /// root ── a ── leaf
+    ///      └─ b          (a sibling branch), plus an unrelated memory.
+    fn branching_thread(db: &DatabaseManager) -> [String; 5] {
+        let at = |m: u32| format!("2026-09-{:02} 12:00:00", m);
+        let w = |c: &str, p: Option<&str>, t: &str| {
+            db.signal_with_backend(c, Some(c), p, Some(t), Some(&MockBackend)).unwrap().uuid
+        };
+        let root = w("root", None, &at(1));
+        let a = w("branch a", Some(&root), &at(2));
+        let b = w("branch b", Some(&root), &at(3));
+        let leaf = w("leaf", Some(&a), &at(4));
+        let other = w("unrelated", None, &at(5));
+        [root, a, b, leaf, other]
+    }
+
+    #[test]
+    fn a_thread_is_the_whole_tree_from_any_member_oldest_first() {
+        let (db, _dir) = fresh_db();
+        let [root, a, b, leaf, other] = branching_thread(&db);
+        for from in [&root, &a, &b, &leaf] {
+            let t = db.thread_in(from, &Window::all(), 50).unwrap();
+            assert!(t.root.starts_with(root.as_str()), "from {from}: root {}", t.root);
+            let got: Vec<&str> = t.entries.iter().map(|e| e.gist.as_str()).collect();
+            assert_eq!(got, ["root", "branch a", "branch b", "leaf"], "from {from}");
+            assert_eq!(t.total, 4);
+        }
+        // The root shows no arrow; children point at their parent.
+        let t = db.thread_in(&leaf, &Window::all(), 50).unwrap();
+        assert!(t.entries[0].parent_uuid.is_none());
+        assert!(t.entries[3].parent_uuid.as_deref().unwrap().starts_with(a.as_str()));
+        // An unrelated memory is a thread of one.
+        assert_eq!(db.thread_in(&other, &Window::all(), 50).unwrap().total, 1);
+        let _ = b;
+    }
+
+    #[test]
+    fn a_thread_honours_window_and_limit_and_counts_what_it_did_not_show() {
+        let (db, _dir) = fresh_db();
+        let [_, _, _, leaf, _] = branching_thread(&db);
+        let t = db.thread_in(&leaf, &Window::all(), 2).unwrap();
+        assert_eq!((t.entries.len(), t.total), (2, 4));
+        let late = Window::parse(Some("2026-09-03T00:00:00Z"), None).unwrap();
+        let t = db.thread_in(&leaf, &late, 50).unwrap();
+        let got: Vec<&str> = t.entries.iter().map(|e| e.gist.as_str()).collect();
+        assert_eq!(got, ["branch b", "leaf"]);
+    }
+
+    #[test]
+    fn a_parent_that_is_not_here_ends_the_walk_without_error() {
+        let (db, _dir) = fresh_db();
+        let orphan = "0RPHAN00-0000-4000-8000-000000000001";
+        db.conn().unwrap().execute(
+            "INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid)
+             VALUES (?1, '{\"gist\":\"orphan\",\"content\":\"orphan\"}', '2026-09-01 00:00:00',
+                     'FFFFFFFF-0000-4000-8000-000000000000')",
+            [orphan],
+        ).unwrap();
+        let child = db.signal_with_backend("child", Some("child"), Some("0RPHAN00"),
+            Some("2026-09-02 00:00:00"), Some(&MockBackend)).unwrap().uuid;
+        let t = db.thread_in(&child, &Window::all(), 50).unwrap();
+        assert_eq!(t.root, orphan);
+        assert_eq!(t.total, 2);
+        match db.thread_in("ABCDEF12", &Window::all(), 50) {
+            Err(e) => assert!(e.contains("No memory matches"), "{e}"),
+            Ok(_) => panic!("an unknown id found a thread"),
+        }
     }
 
     #[test]
