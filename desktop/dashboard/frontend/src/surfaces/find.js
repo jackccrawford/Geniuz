@@ -55,7 +55,7 @@ export async function mount(container) {
   header.className = 'main-header';
   header.innerHTML = `
     <h1 class="main-header__title">Find</h1>
-    <p class="main-header__sub">Search across everything you've remembered, by meaning or by word.</p>
+    <p class="main-header__sub">Search across everything you've remembered, by meaning or by exact words.</p>
   `;
   root.appendChild(header);
 
@@ -254,9 +254,9 @@ export async function mount(container) {
       row.addEventListener('click', () => navigate('detail', { selectedMemoryUuid: m.uuid }));
       list.appendChild(row);
     }
-    if (!empty) resultsEl.appendChild(list);
-
-    // Where to go next: a name digs for it exactly; an id opens it.
+    // Where to go next, at the top for a person reading down (agents get it
+    // at the end of the text answer): a name digs for it exactly; an id
+    // opens it.
     if (r.names.length || r.pointers.length) {
       const next = document.createElement('div');
       next.className = 'find-next';
@@ -289,13 +289,14 @@ export async function mount(container) {
         label.textContent = 'Pointers';
         next.appendChild(label);
         for (const p of r.pointers) {
-          // A bare id may be a memory here; a signal pointer (A:B) lives
-          // on a station elsewhere, so it is shown, not followed.
-          const bare = !p.includes(':');
-          const chip = document.createElement(bare ? 'button' : 'span');
-          chip.className = 'find-next__chip find-next__chip--mono';
+          // Only an id that is a memory here can be opened; the rest (a
+          // signal pointer A:B, or an id from another store) are shown.
+          const here = (r.pointers_here || []).includes(p);
+          const chip = document.createElement(here ? 'button' : 'span');
+          chip.className = 'find-next__chip find-next__chip--mono' + (here ? '' : ' find-next__chip--elsewhere');
           chip.textContent = p;
-          if (bare) {
+          if (!here) chip.title = 'Not in this store — it may be on another station';
+          if (here) {
             chip.type = 'button';
             chip.title = 'Open this memory';
             chip.addEventListener('click', () => navigate('detail', { selectedMemoryUuid: p }));
@@ -305,6 +306,8 @@ export async function mount(container) {
       }
       resultsEl.appendChild(next);
     }
+
+    if (!empty) resultsEl.appendChild(list);
 
     const scope = document.createElement('div');
     scope.className = 'find-scope';

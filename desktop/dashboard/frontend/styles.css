@@ -655,7 +655,9 @@ a { color: inherit; text-decoration: none; }
   flex-wrap: wrap;
   align-items: center;
   gap: var(--s-2);
-  margin-top: var(--s-4);
+  margin: var(--s-1) 0 var(--s-4);
+  padding-bottom: var(--s-3);
+  border-bottom: 1px solid var(--hairline-1);
   font-size: var(--fs-meta);
 }
 .find-next__label { color: var(--ink-3); margin-right: var(--s-1); }
@@ -671,6 +673,7 @@ a { color: inherit; text-decoration: none; }
 button.find-next__chip { cursor: pointer; }
 button.find-next__chip:hover { border-color: var(--accent); }
 .find-next__chip--mono { font-family: var(--font-mono); font-size: var(--fs-micro); }
+.find-next__chip--elsewhere { color: var(--ink-3); border-style: dashed; }
 .find-scope {
   margin-top: var(--s-3);
   font-family: var(--font-mono);

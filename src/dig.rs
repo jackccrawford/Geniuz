@@ -241,7 +241,9 @@ impl Harvest {
                         }
                     } else {
                         let w = raw.trim_matches(|c: char| !c.is_alphanumeric());
-                        if !sentence_start && name_shaped(w) && !asked.contains(&w.to_lowercase())
+                        // A possessive is the name it belongs to: Jack's is Jack.
+                        let w = w.strip_suffix("'s").or_else(|| w.strip_suffix("’s")).unwrap_or(w);
+                        if !sentence_start && !is_function_word(w) && name_shaped(w) && !asked.contains(&w.to_lowercase())
                             && !is_calendar_word(w) && !seen_here.iter().any(|s| s == w)
                         {
                             seen_here.push(w.to_string());
@@ -256,6 +258,11 @@ impl Harvest {
             }
         }
         names.retain(|(_, k)| *k >= 2);
+        // A name in nearly every hit is the background of this store (its
+        // owner, its product), not a next hop.
+        if texts.len() >= 4 {
+            names.retain(|(_, k)| *k * 4 < texts.len() * 3);
+        }
         names.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         names.truncate(8);
         pointers.truncate(12);
@@ -293,6 +300,17 @@ fn name_shaped(w: &str) -> bool {
     // Three capitals or more is an identifier (Get-CimInstance,
     // TotalVirtualMemorySize); a name has one or two (Jean-Luc, LimeJello).
     w.chars().filter(|c| c.is_uppercase()).count() <= 2 && w.chars().any(|c| c.is_lowercase())
+}
+
+/// Words that start a clause and are capitalised for grammar, caught when a
+/// quote or dash hides the sentence start ("— What we found").
+fn is_function_word(w: &str) -> bool {
+    const FW: [&str; 34] = [
+        "a", "an", "the", "this", "that", "these", "those", "it", "its", "we", "our", "you", "your",
+        "he", "she", "they", "i", "my", "what", "when", "where", "who", "why", "how", "which", "and",
+        "but", "or", "if", "so", "then", "there", "here", "not",
+    ];
+    FW.contains(&w.to_lowercase().as_str())
 }
 
 /// Month and weekday names, whole or short ("Sep 2026", "on Tuesday"):
@@ -385,6 +403,15 @@ mod tests {
         for n in ["Get-CimInstance", "TotalVirtualMemorySize", "Win32_OperatingSystem", "GENIUZ", "C:\\path"] {
             assert!(!name_shaped(n), "{n} is code, not a name");
         }
+        // Jack's Find, 2026-10-01: possessives, a quoted "What", and names in
+        // every hit.
+        let find = Harvest::of(&[
+            "Asked Devin — What we found was Jack's note.",
+            "Then Devin and Jack spoke. \"What next?\" said Jack.",
+            "Then Jack wrote it.", "Again Jack, with Mara.", "And Jack with Mara.",
+        ], "", &[]);
+        let got: Vec<&str> = find.names.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(got, ["Devin", "Mara"], "{:?}", find.names);
         let asked = Harvest::of(&hits, "and Devin?", &[]);
         assert!(asked.names.is_empty(), "a name the query asked for is not news");
         assert!(Harvest::of(&[], "", &[]).lines().is_empty());

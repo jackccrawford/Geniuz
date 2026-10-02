@@ -62,6 +62,9 @@ struct FindResult {
     lines: Vec<FindLine>,
     names: Vec<String>,
     pointers: Vec<String>,
+    /// The bare ids among `pointers` that are memories in this store (the
+    /// ones a click can open); the rest may live elsewhere, e.g. on Relay.
+    pointers_here: Vec<String>,
     scope: String,
 }
 
@@ -184,6 +187,11 @@ fn find(query: String, mode: String, since: Option<String>, limit: Option<u32>) 
         None => format!("searched: {mode}"),
     };
     let names = |h: &dig::Harvest| h.names.iter().map(|(n, _)| n.clone()).collect();
+    let here = |h: &dig::Harvest| -> Vec<String> {
+        h.pointers.iter()
+            .filter(|p| !p.contains(':') && db.get_by_uuid_prefix(p).ok().flatten().is_some())
+            .cloned().collect()
+    };
     if mode == "exact" {
         let terms = dig::Terms::parse(&dig::split_terms(&query))?;
         let d = db.grep_in(&terms, &window, None, limit.unwrap_or(100) as usize)?;
@@ -197,6 +205,7 @@ fn find(query: String, mode: String, since: Option<String>, limit: Option<u32>) 
             }).collect(),
             names: names(&h),
             pointers: h.pointers.clone(),
+            pointers_here: here(&h),
             scope: scope(&d.mode(&terms)),
         });
     }
@@ -207,6 +216,7 @@ fn find(query: String, mode: String, since: Option<String>, limit: Option<u32>) 
         lines: Vec::new(),
         names: names(&h),
         pointers: h.pointers.clone(),
+        pointers_here: here(&h),
         scope: scope(&dig::semantic_mode(&query)),
     })
 }
