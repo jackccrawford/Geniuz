@@ -13,7 +13,7 @@
 ; mkdir failure.
 
 #define MyAppName "Geniuz"
-#define MyAppVersion "4.1.0"
+#define MyAppVersion "4.1.1"
 #define MyAppPublisher "Managed Ventures LLC"
 #define MyAppURL "https://geniuz.life"
 #define MyAppExeName "geniuz.exe"

@@ -38,7 +38,7 @@ could not be deleted.
 
 Version: `MyAppVersion` is defined at the top of `Geniuz.iss` and is set by
 hand; keep it in step with the crate version when cutting a release (both
-are 4.1.0 as of this commit).
+are 4.1.1 as of this commit).
 
 ## Silent / managed install
 
