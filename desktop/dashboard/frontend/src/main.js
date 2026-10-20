@@ -66,9 +66,12 @@ async function bootstrap() {
   mainHost.style.flexDirection = 'column';
   appShell.appendChild(mainHost);
 
-  // Render the current surface, and re-render whenever it changes.
-  await renderSurface(mainHost);
+  // Re-render whenever the surface changes, then render it. Subscribe
+  // first: a surface that changes state while it mounts would otherwise
+  // change it before anyone listened, and draw nothing (found in Geniuz
+  // Team's dashboard, which shares this code, 2026-10-21).
   subscribe((s) => renderSurface(mainHost));
+  await renderSurface(mainHost);
 }
 
 let renderToken = 0;
