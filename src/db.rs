@@ -195,7 +195,7 @@ impl DatabaseManager {
             ).map_err(|e| format!("Failed to insert: {}", e))?;
         } else {
             tx.execute(
-                "INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, datetime('now', 'utc'), ?3)",
+                &format!("INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, {NOW_UTC}, ?3)"),
                 rusqlite::params![&uuid, &payload_str, &parent_uuid],
             ).map_err(|e| format!("Failed to insert: {}", e))?;
         }
@@ -1053,6 +1053,14 @@ pub struct SignalEntry {
 // Pattern: each test gets its own tempdir and DatabaseManager so they don't
 // share state and can run in parallel.
 
+/// The one clock: UTC now in the fleet format, computed by SQLite. Spelled
+/// with `strftime` rather than `datetime('now','utc')`: the `utc` modifier
+/// tells SQLite the value to its left is local time, and some builds take
+/// that literally and shift an already-UTC `now` by the local offset (SQLite
+/// 3.45 did, in Geniuz Team, 2026-10-21). Old memory.db files keep the old
+/// DEFAULT in their schema; every write names the clock itself.
+pub const NOW_UTC: &str = "strftime('%Y-%m-%d %H:%M:%S', 'now')";
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1100,6 +1108,25 @@ mod tests {
         db.signal_with_backend(content, gist, parent, None, Some(&MockBackend))
             .expect("signal_with_backend")
             .uuid
+    }
+
+    /// The clock is UTC whatever SQLite is linked in. Geniuz Team, bundling
+    /// SQLite 3.45, stamped every record seven hours ahead through
+    /// `datetime('now','utc')` (found 2026-10-21); Free was right only
+    /// because it bundled 3.46. The stamp must not depend on that guess.
+    #[test]
+    fn a_fresh_memory_is_stamped_now_in_utc() {
+        let (db, _dir) = fresh_db();
+        let short = insert(&db, "when", None, None);
+        let conn = db.conn().unwrap();
+        let stamped: String = conn
+            .query_row("SELECT created_at FROM memories WHERE memory_uuid LIKE ?1", [format!("{short}%")], |r| r.get(0))
+            .unwrap();
+        let at = chrono::NaiveDateTime::parse_from_str(&stamped, "%Y-%m-%d %H:%M:%S")
+            .unwrap_or_else(|e| panic!("fleet format is YYYY-MM-DD HH:MM:SS, got {stamped:?}: {e}"))
+            .and_utc();
+        let skew = (chrono::Utc::now() - at).num_seconds().abs();
+        assert!(skew < 120, "stamped {stamped} is {skew}s from UTC now");
     }
 
     #[test]

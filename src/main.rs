@@ -251,7 +251,7 @@ fn scope_json(db: &db::DatabaseManager, window: &geniuz::window::Window, mode: &
 pub fn shorten_ts(ts: &str) -> String {
     use chrono::{DateTime, NaiveDateTime, Utc, Local};
 
-    // SQLite's datetime('now', 'utc') produces "2026-04-18 22:34:01".
+    // The store stamps UTC as "2026-04-18 22:34:01" (db::NOW_UTC).
     // NaiveDateTime::parse_from_str treats it as unzoned, so we attach UTC
     // explicitly before converting to Local.
     if let Ok(naive) = NaiveDateTime::parse_from_str(ts, "%Y-%m-%d %H:%M:%S") {

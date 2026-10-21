@@ -6,7 +6,7 @@ INSERT OR IGNORE INTO _meta VALUES ('product', 'geniuz');
 CREATE TABLE IF NOT EXISTS memories (
     memory_uuid TEXT PRIMARY KEY NOT NULL CHECK(length(memory_uuid) = 36),
     payload TEXT NOT NULL CHECK(length(payload) >= 1),
-    created_at TEXT NOT NULL DEFAULT(datetime('now', 'utc')),
+    created_at TEXT NOT NULL DEFAULT(strftime('%Y-%m-%d %H:%M:%S', 'now')),
     parent_uuid TEXT CHECK(parent_uuid IS NULL OR length(parent_uuid) = 36)
 );
 

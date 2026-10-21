@@ -48,7 +48,7 @@ winresource = "0.1"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "=0.32.1", features = ["bundled"] }  # pinned: SQLite 3.46, the fleet's engine (relay, Team, kith); 3.45 shifted datetime('now','utc') by the local offset
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1", features = ["v4"] }
