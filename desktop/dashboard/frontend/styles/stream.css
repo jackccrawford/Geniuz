@@ -113,3 +113,42 @@ html.os-linux .sidebar {
 .smsg__more { margin-top: 2px; padding: 0; border: 0; background: none; color: var(--s-deep); font-weight: 600; font-size: 13px; cursor: pointer; }
 .smsg__more[hidden] { display: none; }
 .smsg__replies { margin-top: 4px; font-size: 13px; font-weight: 700; color: var(--s-deep); }
+
+/* ---- Threads as a tree (Jack: "like windows file manager") ------------------ */
+
+.smsg__gutter { gap: 2px; justify-content: flex-end; padding-right: 8px; }
+.smsg { grid-template-columns: 70px minmax(0, 1fr); }
+.stwisty {
+  width: 22px; height: 22px; margin-top: 7px; flex-shrink: 0;
+  display: inline-grid; place-items: center;
+  border: 0; border-radius: 5px; background: none; color: var(--s-muted); cursor: pointer;
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+.stwisty:hover { background: var(--s-paper-2); color: var(--s-ink); }
+.stwisty.is-open svg { transform: rotate(90deg); }
+.stwisty svg { transition: transform 120ms ease; }
+.stwisty--leaf { cursor: default; }
+@media (prefers-reduced-motion: reduce) { .stwisty svg { transition: none; } }
+
+.smsg__replies {
+  display: inline-block; padding: 0; border: 0; background: none; cursor: pointer;
+  font-size: 13px; font-weight: 700; color: var(--s-deep);
+}
+.smsg__replies:hover { text-decoration: underline; }
+
+/* Each level indents and hangs from a guide line, as folders do. */
+.stree { position: relative; margin-left: 46px; padding-left: 14px; }
+.stree::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 18px;
+  border-left: 1px solid var(--s-line);
+}
+.stree__node { position: relative; }
+.stree__node::before {
+  content: ""; position: absolute; left: -14px; top: 22px; width: 12px;
+  border-top: 1px solid var(--s-line);
+}
+.smsg--child { grid-template-columns: 56px minmax(0, 1fr); padding-top: 6px; padding-bottom: 6px; }
+.smsg--child .smsg__tag, .smsg--child .smsg__gist, .smsg--child .smsg__text { font-size: 14px; }
+.smsg--child .stwisty { margin-top: 3px; }
+.smsg.is-here { background: color-mix(in oklab, var(--s-teal) 12%, var(--s-paper)); box-shadow: inset 2px 0 0 var(--s-teal); }
+.s-tree-err { margin: 4px 0 8px 70px; color: var(--s-terra); font-size: 13px; }

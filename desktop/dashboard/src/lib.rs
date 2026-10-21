@@ -146,7 +146,12 @@ fn get_station_stats() -> Result<StationStats, String> {
 #[tauri::command]
 fn get_recent_memories(limit: Option<u32>) -> Result<Vec<RecentMemory>, String> {
     let db = open_db()?;
-    let entries = db.recent(limit.unwrap_or(24) as usize)?;
+    let mut entries = db.recent(limit.unwrap_or(24) as usize)?;
+    // recent() returns gists only; the stream reads each memory in place, so
+    // fetch the words for the ones it shows (as get_thread_chain does).
+    for e in &mut entries {
+        e.content = db.get_full_content(&e.memory_uuid).ok().flatten();
+    }
     Ok(entries.into_iter().map(map_recent).collect())
 }
 
