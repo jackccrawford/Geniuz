@@ -1,0 +1,115 @@
+/* ============================================================================
+   The new look, from Geniuz Team's room (2026-10-21): a deep-teal sidebar
+   with cream type, solid paper to read on, and memories as a stream you can
+   read in place. Palette: teal #2F94A6 · deep #1A6E7C · ground #12414B ·
+   cream #F2EADA · amber #E0A43B · terracotta #CF5535 · ink #1B2A30.
+   ============================================================================ */
+
+:root {
+  --s-paper: #FCFAF5;
+  --s-paper-2: #F4EFE4;
+  --s-hover: #F3EEE3;
+  --s-line: #E6DECD;
+  --s-ink: #1B2A30;
+  --s-ink-2: #3F5056;
+  --s-muted: #6C7A7E;
+  --s-teal: #2F94A6;
+  --s-deep: #1A6E7C;
+  --s-ground: #12414B;
+  --s-terra: #CF5535;
+  --s-name: "Hanken Grotesk", var(--font-ui);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.os-linux) {
+    --s-paper: #16252B;
+    --s-paper-2: #1C2E35;
+    --s-hover: #1D3038;
+    --s-line: #2A424B;
+    --s-ink: #EFE7D6;
+    --s-ink-2: #D2C9B6;
+    --s-muted: #96A3A6;
+    --s-deep: #86CBD6;
+  }
+}
+
+/* Sidebar: re-tokened, so every existing sidebar rule turns cream-on-teal. */
+.sidebar,
+html.os-linux .sidebar {
+  --ink-1: rgba(250, 244, 232, 0.96);
+  --ink-2: rgba(250, 244, 232, 0.76);
+  --ink-3: rgba(250, 244, 232, 0.52);
+  --bg-elevated: rgba(255, 255, 255, 0.08);
+  --bg-active: var(--s-teal);
+  --hairline-1: rgba(255, 255, 255, 0.10);
+  --accent: #FFFFFF;
+  background: var(--s-ground);
+  color: var(--ink-1);
+  border-right: 0;
+}
+.sidebar-item.is-active { color: #FFFFFF; font-weight: 600; }
+
+/* Solid paper to read on, over the window's vibrancy. */
+#main-host { background: var(--s-paper); }
+#main-host .main { --ink-1: var(--s-ink); --ink-2: var(--s-ink-2); --ink-3: var(--s-muted); --hairline-1: var(--s-line); }
+#main-host .main-header__title { font-family: "Newsreader", Georgia, serif; font-weight: 600; letter-spacing: -0.01em; }
+
+/* ---- The stream ------------------------------------------------------------ */
+
+.stream { display: flex; flex-direction: column; padding: 4px 0 24px; }
+
+.s-day { position: relative; display: flex; justify-content: center; margin: 14px 0 6px; }
+.s-day::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px solid var(--s-line); }
+.s-day span {
+  position: relative; padding: 3px 12px; border-radius: 999px;
+  background: var(--s-paper); border: 1px solid var(--s-line);
+  font-size: 12px; font-weight: 600; color: var(--s-ink-2);
+}
+
+.smsg {
+  display: grid; grid-template-columns: 52px minmax(0, 1fr);
+  padding: 8px 20px 8px 12px; border-radius: 8px; cursor: pointer; outline: none;
+}
+.smsg:hover, .smsg:focus-visible { background: var(--s-hover); }
+.smsg.is-current { background: color-mix(in oklab, var(--s-teal) 10%, var(--s-paper)); }
+.smsg__gutter { display: flex; justify-content: center; align-items: flex-start; padding-top: 2px; }
+
+.sm {
+  --sm: 36px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--sm); height: var(--sm); border-radius: calc(var(--sm) * 0.24);
+  background: color-mix(in oklab, var(--st) 18%, var(--s-paper));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--st) 32%, transparent);
+  color: color-mix(in oklab, var(--st) 85%, var(--s-ink));
+  font-family: var(--s-name); font-weight: 700; font-size: calc(var(--sm) * 0.42);
+}
+
+.smsg__head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.smsg__tag { font-family: var(--s-name); font-weight: 700; font-size: 15px; color: var(--s-ink); white-space: nowrap; }
+.smsg__tag--plain { white-space: normal; }
+.smsg__gist { font-size: 15px; color: var(--s-ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.smsg__head time { font-size: 12px; color: var(--s-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.smsg__num { margin-left: auto; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+.smsg__re { margin-top: 2px; font-size: 12.5px; color: var(--s-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.smsg__text {
+  margin-top: 3px; font-size: 15px; line-height: 1.47; color: var(--s-ink);
+  overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden;
+}
+.smsg__text code {
+  font-family: var(--font-mono); font-size: 12.5px; padding: 1px 5px; border-radius: 4px;
+  background: var(--s-paper-2); border: 1px solid var(--s-line); color: var(--s-terra);
+}
+.scode {
+  margin: 6px 0 2px; padding: 10px 12px; border-radius: 8px;
+  background: var(--s-paper-2); border: 1px solid var(--s-line);
+  font-family: var(--font-mono); font-size: 12.5px; white-space: pre-wrap;
+}
+.slink { color: var(--s-deep); text-decoration: underline; text-decoration-color: color-mix(in oklab, var(--s-deep) 40%, transparent); }
+.sptr {
+  font-family: var(--font-mono); font-size: 12px; padding: 1px 6px; border-radius: 5px;
+  background: color-mix(in oklab, var(--s-deep) 10%, transparent); color: var(--s-deep);
+}
+.smsg__more { margin-top: 2px; padding: 0; border: 0; background: none; color: var(--s-deep); font-weight: 600; font-size: 13px; cursor: pointer; }
+.smsg__more[hidden] { display: none; }
+.smsg__replies { margin-top: 4px; font-size: 13px; font-weight: 700; color: var(--s-deep); }

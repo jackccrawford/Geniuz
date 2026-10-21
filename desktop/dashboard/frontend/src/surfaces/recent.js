@@ -11,6 +11,7 @@
 import * as api from '../api.js';
 import * as fmt from '../format.js';
 import { navigate, getState, setState } from '../store.js';
+import * as su from '../stream-ui.js';
 
 export async function mount(container) {
   container.innerHTML = `<div class="surface-loading">Loading your memory…</div>`;
@@ -121,97 +122,76 @@ export async function mount(container) {
   const numbered = recent.map((m, i) => ({ ...m, _num: total - i }));
   const working = direction === 'asc' ? [...numbered].reverse() : numbered;
 
-  // Day-section headers (Today / Yesterday / Older) made the list feel busy
-  // when most memories were in one bucket — two stacked uppercase labels
-  // under the sort toggle. The per-row date already says when. Render the
-  // working list flat; grouping is still used for direction-reversal so
-  // sections stay in chronological order when ASC.
-  const groups = groupByDaySection(working, direction);
-  for (const [, items] of groups) {
-    const section = document.createElement('section');
-    section.className = 'day-section';
-
-    const list = document.createElement('div');
-    list.className = 'memory-list';
-    for (const m of items) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = m.uuid === selectedUuid ? 'memory-row is-current' : 'memory-row';
-      // Category lives inline in the gist (formatGist bolds the prefix).
-      // No separate chip — one visual anchor per row, matching the TUI.
-      row.innerHTML = `
-        <div class="memory-row__meta">
-          <span class="memory-row__num">#${m._num}</span>
-          <span class="memory-row__sep">·</span>
-          <span class="memory-row__date">${escapeHtml(fmt.dateTime(m.created_at))}</span>
-        </div>
-        <div class="memory-row__gist">${formatGist(m.gist || '(no gist)')}</div>
-      `;
-      row.addEventListener('click', () => navigate('detail', { selectedMemoryUuid: m.uuid }));
-      list.appendChild(row);
-    }
-    section.appendChild(list);
-    body.appendChild(section);
+  // The stream (2026-10-21, from Geniuz Team's room): day dividers, and each
+  // memory read in place: its category's mark, the gist as the header line,
+  // the words themselves (links, pointers and code drawn), long ones clamped,
+  // a reply saying what it answers, a memory saying how many answered it.
+  const key8 = (u) => String(u || '').slice(0, 8).toUpperCase();
+  const byKey = new Map(numbered.map((m) => [key8(m.uuid), m]));
+  const replyCount = new Map();
+  for (const m of numbered) {
+    const p = key8(m.parent_uuid);
+    if (p && p !== key8(m.uuid) && byKey.has(p)) replyCount.set(p, (replyCount.get(p) || 0) + 1);
   }
+  const stream = document.createElement('div');
+  stream.className = 'stream';
+  let html = '';
+  let lastDay = '';
+  for (const m of working) {
+    const day = su.dayKey(m.created_at);
+    if (day !== lastDay) {
+      html += `<div class="s-day"><span>${su.esc(su.dayLabel(m.created_at))}</span></div>`;
+      lastDay = day;
+    }
+    const { tag, rest } = su.splitGist(m.gist || '');
+    const parent = byKey.get(key8(m.parent_uuid));
+    const isReply = parent && key8(parent.uuid) !== key8(m.uuid);
+    const replies = replyCount.get(key8(m.uuid)) || 0;
+    const text = (m.content || '').trim();
+    const head = tag
+      ? `<b class="smsg__tag">${su.esc(tag)}</b><span class="smsg__gist">${su.esc(rest)}</span>`
+      : `<b class="smsg__tag smsg__tag--plain">${su.esc(m.gist || '(no gist)')}</b>`;
+    html += `
+      <article class="smsg${m.uuid === selectedUuid ? ' is-current' : ''}" data-uuid="${su.esc(m.uuid)}" tabindex="0">
+        <div class="smsg__gutter">${su.mark(tag)}</div>
+        <div class="smsg__body">
+          <div class="smsg__head">${head}
+            <time datetime="${su.esc(m.created_at)}" title="${su.esc(su.timeFull(m.created_at))}">${su.esc(su.timeShort(m.created_at))}</time>
+            <span class="smsg__num">#${m._num}</span></div>
+          ${isReply ? `<div class="smsg__re">↳ answers #${parent._num} · ${su.esc((parent.gist || '').slice(0, 80))}</div>` : ''}
+          ${text && text !== (m.gist || '').trim() ? `<div class="smsg__text">${su.renderText(text)}</div><button type="button" class="smsg__more" hidden>Read all</button>` : ''}
+          ${replies ? `<div class="smsg__replies">${replies} ${replies === 1 ? 'reply' : 'replies'}</div>` : ''}
+        </div>
+      </article>`;
+  }
+  stream.innerHTML = html;
+  stream.addEventListener('click', (ev) => {
+    const link = ev.target.closest('.slink');
+    if (link) {
+      ev.preventDefault();
+      api.openLink(link.dataset.href).catch((e) => console.error(e));
+      return;
+    }
+    const card = ev.target.closest('.smsg');
+    if (card) navigate('detail', { selectedMemoryUuid: card.dataset.uuid });
+  });
+  stream.addEventListener('keydown', (ev) => {
+    const card = ev.target.closest('.smsg');
+    if (card && ev.key === 'Enter') navigate('detail', { selectedMemoryUuid: card.dataset.uuid });
+  });
+  body.appendChild(stream);
+  // "Read all" only where the clamp actually cut something.
+  requestAnimationFrame(() => {
+    for (const t of stream.querySelectorAll('.smsg__text')) {
+      if (t.scrollHeight > t.clientHeight + 2) t.nextElementSibling.hidden = false;
+    }
+  });
 
   container.innerHTML = '';
   container.appendChild(root);
 }
 
 // ---- helpers ---------------------------------------------------------------
-
-function groupByDaySection(memories, direction = 'desc') {
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
-  const startOfThisWeek = startOfToday - 6 * 24 * 60 * 60 * 1000;
-
-  const today = [];
-  const yesterday = [];
-  const thisWeek = [];
-  const older = [];
-
-  for (const m of memories) {
-    const d = fmt.parseSqliteIso(m.created_at);
-    const ts = d ? d.getTime() : 0;
-    if (ts >= startOfToday)         today.push(m);
-    else if (ts >= startOfYesterday) yesterday.push(m);
-    else if (ts >= startOfThisWeek)  thisWeek.push(m);
-    else                              older.push(m);
-  }
-
-  // In asc order, oldest sections come first.
-  const desc = [];
-  if (today.length)     desc.push(['Today', today]);
-  if (yesterday.length) desc.push(['Yesterday', yesterday]);
-  if (thisWeek.length)  desc.push(['Earlier this week', thisWeek]);
-  if (older.length)     desc.push(['Older', older]);
-  return direction === 'asc' ? desc.reverse() : desc;
-}
-
-// Bold the convention-driven gist category — the short prefix before the
-// first colon (e.g. "substrate-discipline: failed to recall_recent..."
-// renders the leading "substrate-discipline" in semibold). Only bolds when
-// the colon falls within the first 40 characters and the prefix has no
-// internal spaces of more than one word — that filters out unrelated
-// colons inside long sentences ("12:00 PM", "use ratio of 3:1", etc.).
-function formatGist(gist) {
-  // Find the earliest separator: |, ;, or :. Matches the TUI's split_gist
-  // discipline so the dashboard's inline-bold category and the TUI's cyan
-  // category render the same way.
-  const positions = ['|', ';', ':']
-    .map((c) => gist.indexOf(c))
-    .filter((i) => i > 0 && i < 40);
-  if (positions.length === 0) return escapeHtml(gist);
-  const sepIdx = Math.min(...positions);
-  const prefix = gist.slice(0, sepIdx);
-  // Require the prefix to look like a short tag: no more than 3 words.
-  const wordCount = prefix.trim().split(/\s+/).length;
-  if (wordCount > 3 || prefix.trim().length === 0) {
-    return escapeHtml(gist);
-  }
-  return `<strong class="memory-row__gist-tag">${escapeHtml(prefix)}</strong>${escapeHtml(gist.slice(sepIdx))}`;
-}
 
 function escapeHtml(s) {
   return String(s ?? '')

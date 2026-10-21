@@ -454,6 +454,19 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Open a link from a memory in the viewer's browser. Only web addresses:
+/// a memory is words someone wrote, and a click must never run anything
+/// local. (Same as Geniuz Team's exchange_open_link.)
+#[tauri::command]
+fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let u = url.trim();
+    if !(u.starts_with("https://") || u.starts_with("http://")) {
+        return Err("Only web links open from a memory.".into());
+    }
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_url(u, None::<&str>).map_err(|e| e.to_string())
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -471,6 +484,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
+            open_link,
             get_app_version,
             remember_memory,
             get_station_stats,

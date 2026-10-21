@@ -119,3 +119,8 @@ export function updateSettings(settings) {
 export function exportMemoryDbTo(targetPath) {
   return invoke('export_memory_db_to', { targetPath });
 }
+
+/** Open a web link from a memory in the viewer's browser. */
+export function openLink(url) {
+  return invoke('open_link', { url });
+}
