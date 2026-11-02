@@ -1,12 +1,12 @@
 # How it works
 
-Geniuz is one compiled Rust program and one SQLite file. Everything else is a way of reaching them.
+Geniuz is a Rust core and one SQLite file. Everything else is a way of reaching them.
 
 ## What a memory is
 
 A memory has two parts: a **gist**, which is how you find it later, and **content**, which is the full detail. It can also have a **parent**, which links it to an earlier memory to form a thread.
 
-Memories are stored in the `memories` table of [`schema/schema.sql`](../schema/schema.sql). Database triggers refuse any update, delete or replace, so this holds for anything that opens the file, not only for Geniuz.
+Memories are stored in the `memories` table of [`schema/schema.sql`](../schema/schema.sql). Database triggers refuse any update, delete or replace, including from other tools that open the file. Changing the past takes a deliberate step: dropping the trigger.
 
 ## When you remember
 
@@ -28,7 +28,7 @@ Other kinds of recall skip meaning entirely:
 
 | Flag | What it does |
 |---|---|
-| `--grep Cubic --grep PR` | Matching lines, containing every term |
+| `--grep Cubic --grep PR` | Memories holding every term, showing each line with any of them |
 | `--thread 98672A90` | A whole thread, starting at its root |
 | `--keyword "exact words"` | Keyword search |
 | `--random` | Something you may have forgotten |
@@ -37,9 +37,9 @@ The reason is in [`src/dig.rs`](../src/dig.rs): "Semantic search is for discover
 
 ## The model
 
-Search by meaning runs locally through ONNX Runtime, using a BERT sentence model that covers more than 50 languages. It downloads once from Hugging Face, about 118 MB, into `~/.geniuz/models/`. Loading a model is slow, so a helper called `geniuz-embed` keeps it ready over a local socket and exits after five idle minutes.
+Search by meaning runs locally through ONNX Runtime, using a BERT sentence model that covers more than 50 languages. It downloads once from Hugging Face, about 118 MB, into `~/.geniuz/models/`, the first time anything is embedded. That includes your first `remember`. Loading a model is slow, so a helper called `geniuz-embed` keeps it ready over a local socket and exits after five idle minutes.
 
-Geniuz can also embed through Ollama, and tries it if the built-in model fails. See [Using it](using-it.md#settings).
+If the built-in model fails to load, Geniuz tries an embedding service instead: Ollama on your own machine by default. See [Using it](using-it.md#settings).
 
 ## Your data stays on your machine
 
@@ -51,4 +51,4 @@ For completeness, Geniuz reaches the network in a few small ways, and none of th
 - **GitHub:** when you run the install script or download a release.
 - **Google Fonts:** the dashboard loads its fonts from Google.
 
-The one way memory text can leave is if you choose it: with `GENIUZ_EMBED_URL` set to another machine, text goes there to be embedded. It is local by default.
+The one way memory text can reach another address: if the built-in model fails to load and `GENIUZ_EMBED_URL` points at another machine, text goes there to be embedded. By default that address is your own machine.

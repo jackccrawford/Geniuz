@@ -2,7 +2,7 @@
 
 | Term | Meaning |
 |---|---|
-| Memory | One entry that can never be changed: a gist, content, and optionally a parent. |
+| Memory | One entry that Geniuz will not change: a gist, content, and optionally a parent. |
 | Gist | The short line you find a memory by. |
 | Content | The full detail of a memory. |
 | Thread | Memories linked by parent, such as a problem and its solution. |

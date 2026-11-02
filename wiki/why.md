@@ -2,9 +2,9 @@
 
 ## Memories are never edited
 
-"Memories are immutable", says [`schema/schema.sql`](../schema/schema.sql), "the log is the truth". Triggers enforce it in the file itself, so no tool can quietly rewrite the past. To correct something, you add a memory that replies to it, and both remain.
+"Memories are immutable", says [`schema/schema.sql`](../schema/schema.sql), "the log is the truth". Triggers enforce it in the file itself, so changing the past takes a deliberate step: dropping the trigger. To correct something, you add a memory that replies to it, and both remain.
 
-The cost is that a mistake stays on the record. In return, what an AI remembers can always be traced.
+The cost is that a mistake stays on the record. In return, the history is hard to rewrite by accident.
 
 ## No server
 

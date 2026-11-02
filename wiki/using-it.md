@@ -4,7 +4,7 @@
 
 | You have | Do this |
 |---|---|
-| A Mac | Download [Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg) and drag it to Applications. |
+| A Mac | Download [Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg) and drag it to Applications. To use `geniuz` in a terminal, use **Copy Install Command** in the menubar. |
 | Windows 11 | Download [Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe). It installs per user, with no admin prompt. |
 | Linux | Run the command below, or see the [releases](https://github.com/jackccrawford/geniuz/releases/latest) for `.deb`, AppImage and tarballs (x86_64 and arm64). |
 
@@ -37,9 +37,11 @@ geniuz recall --thread 98672A90
 geniuz recall --keyword "exact words"
 geniuz recall --random
 geniuz recall --full "topic"
+geniuz recall --json "topic"
 
 geniuz recent -l 5
 geniuz tui
+geniuz dashboard
 geniuz capture ./docs/
 geniuz backfill
 geniuz status
@@ -50,18 +52,20 @@ geniuz mcp serve
 geniuz settings list
 ```
 
-**A care with `geniuz watch --exec`.** It runs your command through the shell for each new memory, with the memory's text placed into the command. Only use it on memories you wrote yourself and trust, and leave out `{gist}` and `{content}` if anything else can write to the store.
+**Caution: `geniuz watch --exec`.** It runs your command through the shell for each new memory, with the memory's text placed into the command. A memory containing shell syntax can then run commands as you, through `{gist}`, `{content}` or `{json}`, even inside quotes. Use `{uuid}` instead, unless you wrote every memory yourself.
+
+**Do not store secrets.** A memory cannot be removed through Geniuz.
 
 ## Where your data lives
 
-Everything is under `~/.geniuz/`: `memory.db`, `models/`, `settings.json` and `bin/`. To back up your memories, copy `memory.db`. Its schema is not a public interface and may change, so read and write through Geniuz.
+Everything is under `~/.geniuz/`: `memory.db`, `models/`, `settings.json` and `bin/`. To back up your memories, quit anything using Geniuz, then copy `memory.db`. Its schema is not a public interface and may change, so read and write through Geniuz.
 
 ## Settings
 
 | Variable | What it does |
 |---|---|
 | `GENIUZ_HOME` | Where Geniuz keeps its files |
-| `GENIUZ_STATION` | Use a different memory folder, for the CLI and MCP |
+| `GENIUZ_STATION` | Use a different memory file, for the CLI and MCP |
 | `GENIUZ_MODELS_PATH` | Where the model is stored |
-| `GENIUZ_EMBED_URL`, `GENIUZ_EMBED_MODEL` | Use an embedding service such as Ollama |
+| `GENIUZ_EMBED_URL`, `GENIUZ_EMBED_MODEL` | The embedding service to try if the built-in model fails to load |
 | `GENIUZ_EMBED_SOCKET`, `GENIUZ_EMBED_SPAWN`, `GENIUZ_EMBED_IDLE` | Control the embed helper |

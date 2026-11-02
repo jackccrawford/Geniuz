@@ -6,7 +6,7 @@ It describes version 4.1.1.
 
 ## The idea in one paragraph
 
-Your AI starts every conversation from zero. Geniuz gives it a place to keep what it learned: a local SQLite file it can write to and search by meaning. Nothing in that file is ever edited or deleted, so a correction is a new memory linked to the old one, and the history stays readable. Any tool that can run a command or speak MCP can use the same memory, so switching AI tools does not mean starting over.
+Your AI starts every conversation from zero. Geniuz gives it a place to keep what it learned: a local SQLite file it can write to and search by meaning. No memory in that file is ever edited or deleted, so a correction is a new memory linked to the old one, and the history stays readable. Any tool that can run a command or speak MCP can use the same memory, so switching AI tools does not mean starting over.
 
 ## Where to go next
 
@@ -18,4 +18,4 @@ Your AI starts every conversation from zero. Geniuz gives it a place to keep wha
 
 ## Free and Team
 
-This repository is Geniuz Free: one memory store for any AI tool. Geniuz Team is a separate paid product from [mVara](https://github.com/mvara-ai). If you want memory for yourself or a developer team using the AI tools you already have, Geniuz Free is what you want.
+This repository is Geniuz Free: one memory store for any AI tool. Geniuz Team is a separate commercial product from [mVara](https://github.com/mvara-ai), available by pilot. If you want memory for yourself or a developer team using the AI tools you already have, Geniuz Free is what you want.
