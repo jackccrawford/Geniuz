@@ -52,7 +52,7 @@ geniuz mcp serve
 geniuz settings list
 ```
 
-**Caution: `geniuz watch --exec`.** It runs your command through the shell for each new memory, with the memory's text placed into the command. A memory containing shell syntax can then run commands as you, through `{gist}`, `{content}` or `{json}`, even inside quotes. Use `{uuid}` instead, unless you wrote every memory yourself.
+**Note on `geniuz watch --exec`.** Your command runs through the shell with your own rights, and the memory's text is placed in it unquoted. Shell syntax in `{gist}`, `{content}` or `{json}` will run. If an AI tool or a captured file can write to your store, use `{uuid}` and look the memory up from your command.
 
 **Do not store secrets.** A memory cannot be removed through Geniuz.
 

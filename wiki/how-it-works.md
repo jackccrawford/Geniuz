@@ -51,4 +51,4 @@ For completeness, Geniuz reaches the network in a few small ways, and none of th
 - **GitHub:** when you run the install script or download a release.
 - **Google Fonts:** the dashboard loads its fonts from Google.
 
-The one way memory text can reach another address: if the built-in model fails to load and `GENIUZ_EMBED_URL` points at another machine, text goes there to be embedded. By default that address is your own machine.
+Geniuz itself sends memory text to another address in only one case: if the built-in model fails to load and `GENIUZ_EMBED_URL` points at another machine, text goes there to be embedded. By default that address is your own machine. What you recall through an AI tool goes wherever that tool sends it.
