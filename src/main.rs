@@ -8,6 +8,37 @@ use cli::{Cli, Command};
 use geniuz::db;
 use std::path::PathBuf;
 
+/// The command `watch --exec` runs for one memory, and the variables it runs
+/// with. A memory's words are data: they reach the shell as environment
+/// variables, never as part of the command it parses, so an apostrophe cannot
+/// break the command and shell syntax in a memory cannot run. Every byte
+/// arrives intact.
+fn watch_exec_command(template: &str, e: &geniuz::db::SignalEntry) -> (String, Vec<(&'static str, String)>) {
+    let uuid_short = &e.memory_uuid[..8.min(e.memory_uuid.len())];
+    let parent_short = e.parent_uuid.as_deref().map(|p| &p[..8.min(p.len())]).unwrap_or("");
+    let content = e.content.as_deref().unwrap_or("");
+    let json = serde_json::json!({
+        "uuid": uuid_short,
+        "gist": &e.gist,
+        "content": content,
+        "created_at": &e.created_at,
+        "parent": parent_short,
+    });
+    let cmd = template
+        .replace("{uuid}", uuid_short)
+        .replace("{created_at}", &e.created_at)
+        .replace("{parent}", parent_short)
+        .replace("{gist}", "${GENIUZ_GIST}")
+        .replace("{content}", "${GENIUZ_CONTENT}")
+        .replace("{json}", "${GENIUZ_JSON}");
+    let vars = vec![
+        ("GENIUZ_GIST", e.gist.clone()),
+        ("GENIUZ_CONTENT", content.to_string()),
+        ("GENIUZ_JSON", json.to_string()),
+    ];
+    (cmd, vars)
+}
+
 fn main() {
     let cli = Cli::from_arg_matches(&Cli::build().get_matches())
         .expect("Failed to parse arguments");
@@ -706,6 +737,10 @@ fn run(cli: Cli) -> Result<String, String> {
         Command::Watch { interval, since, exec, once, json } => {
             let db = get_db()?;
 
+            if let Some(t) = exec.as_deref().filter(|t| ["'{gist}'", "'{content}'", "'{json}'"].iter().any(|p| t.contains(p))) {
+                eprintln!("[watch] Memory text arrives as a shell variable, which single quotes keep from expanding. Use double quotes in: {t}");
+            }
+
             let mut cursor = if let Some(ref uuid_prefix) = since {
                 db.get_signal_timestamp(uuid_prefix)?
                     .ok_or_else(|| format!("Memory not found: {}", uuid_prefix))?
@@ -728,30 +763,11 @@ fn run(cli: Cli) -> Result<String, String> {
 
                     for e in &entries {
                         if let Some(ref cmd_template) = exec {
-                            let uuid_short = &e.memory_uuid[..8.min(e.memory_uuid.len())];
-                            let parent_short = e.parent_uuid.as_deref()
-                                .map(|p| &p[..8.min(p.len())])
-                                .unwrap_or("");
-                            let content = e.content.as_deref().unwrap_or("");
-                            let signal_json = serde_json::json!({
-                                "uuid": uuid_short,
-                                "gist": &e.gist,
-                                "content": content,
-                                "created_at": &e.created_at,
-                                "parent": parent_short,
-                            });
-
-                            let cmd = cmd_template
-                                .replace("{uuid}", uuid_short)
-                                .replace("{gist}", &e.gist)
-                                .replace("{content}", content)
-                                .replace("{created_at}", &e.created_at)
-                                .replace("{parent}", parent_short)
-                                .replace("{json}", &signal_json.to_string());
-
+                            let (cmd, vars) = watch_exec_command(cmd_template, e);
                             match std::process::Command::new("sh")
                                 .arg("-c")
                                 .arg(&cmd)
+                                .envs(vars)
                                 .status()
                             {
                                 Ok(status) => {
@@ -889,5 +905,52 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod watch_exec_tests {
+    use super::watch_exec_command;
+
+    fn run(template: &str, gist: &str, content: &str) -> (String, bool) {
+        let e = geniuz::db::SignalEntry {
+            memory_uuid: "ABCDEF12-0000-0000-0000-000000000000".into(),
+            gist: gist.into(),
+            created_at: "2026-11-02 00:00:00".into(),
+            parent_uuid: None,
+            content: Some(content.into()),
+            score: None,
+        };
+        let (cmd, vars) = watch_exec_command(template, &e);
+        let out = std::process::Command::new("sh").arg("-c").arg(&cmd).envs(vars).output().unwrap();
+        (String::from_utf8_lossy(&out.stdout).trim_end().to_string(), out.status.success())
+    }
+
+    /// A memory's words are data: shell syntax in them does not run, in any
+    /// placeholder, and the bytes arrive intact.
+    #[test]
+    fn shell_syntax_in_a_memory_does_not_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("ran");
+        let attack = format!("x$(touch {0})`touch {0}`\"; touch {0}; \"", marker.display());
+        for template in ["printf %s \"{gist}\"", "printf %s \"{content}\"", "printf %s \"{json}\"", "echo {gist}"] {
+            run(template, &attack, &attack);
+            assert!(!marker.exists(), "memory text ran through: {template}");
+        }
+        let (out, ok) = run("printf %s \"{gist}\"", &attack, "");
+        assert!(ok);
+        assert_eq!(out, attack, "every byte arrives");
+    }
+
+    /// The everyday failure the old pasting caused: an apostrophe or a dollar
+    /// sign in a memory broke or mangled the command.
+    #[test]
+    fn ordinary_punctuation_survives() {
+        assert_eq!(run("printf %s \"{gist}\"", "don't pay $5", "").0, "don't pay $5");
+        let (out, ok) = run("printf %s \"{json}\"", "don't", "it's");
+        assert!(ok);
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["content"], "it's");
+        assert_eq!(run("echo {uuid}", "g", "c").0, "ABCDEF12");
     }
 }

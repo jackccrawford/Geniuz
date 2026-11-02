@@ -177,7 +177,7 @@ pub enum Command {
         #[arg(short, long)]
         since: Option<String>,
 
-        /// Run command for each new memory (supports {uuid}, {gist}, {content}, {created_at}, {parent}, {json} placeholders)
+        /// Run command for each new memory (supports {uuid}, {gist}, {content}, {created_at}, {parent}, {json}; memory text arrives as a shell variable, so use double quotes, not single)
         #[arg(short, long)]
         exec: Option<String>,
 
