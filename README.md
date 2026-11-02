@@ -139,8 +139,8 @@ If you want a configured team of agents living in your private cloud, rememberin
 
 ## Why local
 
-- **Private.** Your data never leaves your machine. No cloud. No account. No telemetry.
-- **Fast.** No network calls. Semantic search runs locally in the binary.
+- **Private.** All your data is stored on your machine. No cloud. No account. No telemetry.
+- **Fast.** Semantic search runs locally in the binary, with no round trip to anyone.
 - **Free.** No API keys. No token costs for memory. No subscription.
 - **Portable.** Your folder is a SQLite file. Copy it, back it up, share it.
 - **Framework-independent.** Switch from Cursor to Claude Code. Your memory comes with you.
@@ -177,7 +177,7 @@ After install, the dashboard runs as a system tray app. Left-click → window; r
 
 *First-launch SmartScreen note: even with a valid signature, brand-new binaries can hit a "rarely downloaded" reputation gate. If you see "Windows protected your PC," click "More info" → "Run anyway." That's per-binary reputation, separate from cert trust.*
 
-### Mac / Linux · one command (developer path)
+### Linux · one command (developer path)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jackccrawford/geniuz/main/install.sh | bash
@@ -244,7 +244,7 @@ Geniuz is a compiled Rust binary backed by SQLite. No cloud. No API key. No acco
                                        ONNX (BERT)
 ```
 
-The model downloads once (~118MB) on first search. Every memory after that is embedded automatically. No setup. No configuration.
+The model downloads once (~118MB), the first time anything is embedded. Every memory after that is embedded automatically. No setup. No configuration.
 
 ---
 
@@ -478,7 +478,7 @@ geniuz remember -c "second"    # 0.04s (model warm)
 
 ## Privacy
 
-Your data stays on your computer. Geniuz stores memories in a local SQLite database. The semantic search model runs locally via ONNX Runtime. No data is sent anywhere. The source code is open. Read every line.
+Your data stays on your computer. Geniuz stores memories in a local SQLite database. The semantic search model runs locally via ONNX Runtime. Geniuz sends your memories nowhere, with one exception you control: if the built-in model fails to load and `GENIUZ_EMBED_URL` points at another machine, text goes there to be embedded. What you recall through an AI tool goes wherever that tool sends it. The source code is open. Read every line.
 
 ---
 

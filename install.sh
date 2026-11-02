@@ -34,6 +34,13 @@ fi
 URL="https://github.com/${REPO}/releases/download/${LATEST}/geniuz-${NAME}.tar.gz"
 SHA_URL="https://github.com/${REPO}/releases/download/${LATEST}/geniuz-${NAME}.tar.gz.sha256"
 
+# Mac releases ship as the app; its menubar installs the geniuz command.
+if [ "$os" = "darwin" ] && ! curl -fsIL "$URL" > /dev/null 2>&1; then
+  echo "Geniuz for Mac is the app: https://github.com/${REPO}/releases/latest/download/Geniuz.dmg" >&2
+  echo "Then use Copy Install Command in its menubar to add the geniuz command." >&2
+  exit 1
+fi
+
 echo "Installing Geniuz ${LATEST} (${NAME})..."
 
 # Download to temp
