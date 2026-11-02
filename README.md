@@ -165,7 +165,6 @@ Wire the CLI into your shell PATH if you want it on the command line:
 sudo ln -sf /Applications/Geniuz.app/Contents/Resources/geniuz /usr/local/bin/geniuz
 ```
 
-Or skip the DMG entirely and use the CLI-first install below. That path installs to `~/.geniuz/bin/` and adds itself to your PATH without sudo. Apple Silicon native; Intel Macs run via Rosetta 2 (universal binary coming).
 
 ### Windows · one click
 

@@ -2,7 +2,7 @@
 
 Geniuz is persistent memory for AI agents. It runs on your machine, it is MIT-licensed, and it is free. This wiki explains how it works. It lives in the repo beside the code, and is also published at [geniuz.life/wiki](https://geniuz.life/wiki/).
 
-It describes version 4.1.1.
+It describes version 4.1.2.
 
 ## The idea in one paragraph
 
