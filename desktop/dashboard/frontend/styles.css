@@ -1,3 +1,17 @@
+/* Fonts ship with the app: opening the dashboard calls no one. */
+@font-face {
+  font-family: "Newsreader";
+  src: url("assets/fonts/Newsreader-VariableFont.ttf") format("truetype");
+  font-weight: 200 800;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Hanken Grotesk";
+  src: url("assets/fonts/HankenGrotesk-VariableFont.ttf") format("truetype");
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 /* ============================================================================
    Geniuz dashboard — Tool register.
 
