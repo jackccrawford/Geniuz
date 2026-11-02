@@ -1,7 +1,7 @@
 // main.js — entry point. Bootstraps the app, mounts sidebar, routes surfaces.
 
 import * as api from './api.js';
-import { sidebar } from './components/sidebar.js';
+import { sidebar, wireCollapse } from './components/sidebar.js';
 import * as recent from './surfaces/recent.js';
 import * as remember from './surfaces/remember.js';
 import * as detail from './surfaces/detail.js';
@@ -16,6 +16,13 @@ import { subscribe, getState, setState, navigate } from './store.js';
 if (window.__TAURI__) {
   document.documentElement.classList.add('is-tauri');
 }
+// A Mac draws our header under its window buttons; other systems keep their
+// own title bar, so nothing here makes room for it.
+if (/Mac/.test(navigator.platform)) {
+  document.documentElement.classList.add('os-mac');
+}
+
+let toggleSidebar = () => {};
 
 const SURFACE_MOUNTS = {
   recent: recent.mount,
@@ -31,7 +38,7 @@ async function bootstrap() {
   // Bootstrap meta first so the sidebar knows the version + counts.
   let version = '—';
   let dataDir = null;
-  let stats = { total_memories: null, conversations: null };
+  let stats = { total_memories: null };
   if (api.isTauri()) {
     try {
       [version, dataDir, stats] = await Promise.all([
@@ -65,6 +72,13 @@ async function bootstrap() {
   mainHost.style.display = 'flex';
   mainHost.style.flexDirection = 'column';
   appShell.appendChild(mainHost);
+
+  // The strip across the top of a Mac window: drags it, and holds the toggle.
+  const topbar = document.createElement('div');
+  topbar.className = 'window-topbar';
+  topbar.setAttribute('data-tauri-drag-region', '');
+  document.querySelector('.window-frame').appendChild(topbar);
+  toggleSidebar = wireCollapse(appShell, topbar);
 
   // Re-render whenever the surface changes, then render it. Subscribe
   // first: a surface that changes state while it mounts would otherwise
@@ -122,6 +136,9 @@ async function wireMenuEvents() {
         break;
       case 'menu_export':
         navigate('data');
+        break;
+      case 'menu_sidebar':
+        toggleSidebar();
         break;
       case 'menu_refresh':
         // Force a re-render of the current surface via state-key bump.

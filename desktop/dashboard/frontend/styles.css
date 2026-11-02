@@ -62,6 +62,8 @@
   --s-6: 32px;
 
   --sidebar-w: 220px;
+  --sidebar-w-collapsed: 76px; /* holds the three Mac window buttons */
+  --topbar-h: 38px;
 
   --bg-window:    rgba(246, 244, 239, 0.90);
   --bg-surface:   rgba(255, 255, 255, 0.04);
@@ -167,7 +169,9 @@ a { color: inherit; text-decoration: none; }
 .sidebar {
   display: flex;
   flex-direction: column;
-  padding: 38px var(--s-2) var(--s-3) var(--s-2);
+  padding: var(--s-3) var(--s-2) var(--s-3) var(--s-2);
+  position: relative;
+  z-index: 5;
   border-right: 1px solid var(--hairline-1);
   background: transparent;
   min-width: 0;
@@ -337,37 +341,6 @@ a { color: inherit; text-decoration: none; }
    Stats strip
    ============================================================================ */
 
-.stats-strip {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--s-5);
-  /* Fixed in the header region now (not inside the scroll body), so it carries
-     its own horizontal padding to align with the header title and the list. */
-  padding: var(--s-2) var(--s-6) var(--s-4) var(--s-6);
-  border-bottom: 1px solid var(--hairline-1);
-  margin-bottom: 0;
-}
-.stats-strip__cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.stats-strip__value {
-  font-family: var(--font-display);
-  font-size: var(--fs-xl);
-  font-weight: 600;
-  color: var(--ink-1);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-  line-height: 1.1;
-}
-.stats-strip__label {
-  font-size: var(--fs-micro);
-  font-weight: 500;
-  color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
 
 /* ============================================================================
    Memory list (dense rows)
@@ -989,7 +962,6 @@ html.os-linux body {
   background: rgb(228, 228, 232);
 }
 html.os-linux .sidebar,
-html.os-linux .stats-strip,
 html.os-linux .data-card,
 html.os-linux .memory-row,
 html.os-linux .memory-row.is-current,
@@ -1122,4 +1094,96 @@ html.os-linux {
   cursor: pointer;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* ============================================================================
+   The header on a Mac, and the sidebar collapsed to icons (Jack, 2026-11-02)
+   ============================================================================ */
+
+.window-topbar { display: none; }
+html.os-mac .window-topbar {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--topbar-h);
+  z-index: 10;
+}
+html.os-mac .sidebar { padding-top: var(--topbar-h); }
+html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
+
+.sidebar-toggle {
+  position: relative;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.sidebar-toggle svg { width: 16px; height: 16px; display: block; }
+.sidebar-toggle:hover { background: var(--bg-elevated); color: var(--ink-1); }
+.sidebar-toggle:focus-visible,
+.sidebar-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Clear of the three window buttons. */
+.sidebar-toggle--header { position: absolute; top: 6px; left: 84px; }
+/* Over the dark sidebar when it is open, over the page when it is not. */
+.app-shell:not(.is-collapsed) ~ .window-topbar .sidebar-toggle { color: rgba(255, 255, 255, 0.72); }
+.app-shell:not(.is-collapsed) ~ .window-topbar .sidebar-toggle:hover { color: #fff; background: rgba(255, 255, 255, 0.12); }
+.sidebar-toggle--brand { margin-left: auto; }
+
+/* Hover labels, for the toggle always and for the icons when collapsed. */
+.sidebar-toggle[data-tip]:hover::after,
+.is-collapsed .sidebar-item[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 20;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: #1F2A2E;
+  color: #F6F4EF;
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  white-space: pre;
+  pointer-events: none;
+}
+.sidebar-toggle[data-tip]:hover::after { top: calc(100% + 6px); left: 0; }
+.is-collapsed .sidebar-item[data-tip]:hover::after {
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.app-shell.is-collapsed { grid-template-columns: var(--sidebar-w-collapsed) 1fr; }
+.is-collapsed .sidebar-brand { justify-content: center; flex-wrap: wrap; padding-left: 0; padding-right: 0; }
+.is-collapsed .sidebar-brand__name,
+.is-collapsed .sidebar-brand__version,
+.is-collapsed .sidebar-item__label,
+.is-collapsed .sidebar-item__count,
+.is-collapsed .sidebar-section__label,
+.is-collapsed .sidebar-footer { display: none; }
+.is-collapsed .sidebar-toggle--brand { margin-left: 0; margin-top: var(--s-2); }
+.is-collapsed .sidebar-item {
+  position: relative;
+  justify-content: center;
+  padding: 9px 0;
+}
+.is-collapsed .sidebar-item__icon { width: 16px; height: 16px; }
+.is-collapsed .sidebar-section + .sidebar-section {
+  border-top: 1px solid var(--hairline-1);
+  padding-top: var(--s-2);
+}
+
+/* A narrow window keeps its reading width by giving up padding. */
+@media (max-width: 720px) {
+  .main-header { padding-left: var(--s-4); padding-right: var(--s-4); }
+  .main-body { padding-left: var(--s-4); padding-right: var(--s-4); }
+  .list-controls { padding-left: var(--s-4); padding-right: var(--s-4); }
 }

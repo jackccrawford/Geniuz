@@ -12,7 +12,7 @@ The ways in.
 | MCP | A stdio server with three tools: `remember`, `recall`, `recall_recent`. | Falls back to keyword search if search by meaning fails or finds nothing. | [`src/mcp.rs`](../src/mcp.rs) |
 | Terminal UI | Browse and compose in a terminal. | Refuses to start without a real terminal. | [`src/tui.rs`](../src/tui.rs) |
 | Dashboard | The desktop app, for browsing, search and settings. | Opens and reveals files only under your home folder. | [`desktop/dashboard`](../desktop/dashboard) |
-| Menubar | Always-on stats on a Mac, and a tray menu on Windows and Linux. | The Mac menubar opens the database read-only. | [`desktop/Geniuz`](../desktop/Geniuz), [`desktop/dashboard`](../desktop/dashboard) |
+| Menubar | Always-on status on a Mac, and a tray menu on Windows and Linux. | The Mac menubar opens the database read-only. | [`desktop/Geniuz`](../desktop/Geniuz), [`desktop/dashboard`](../desktop/dashboard) |
 
 ## Core
 

@@ -40,8 +40,6 @@ struct GeniuzSettings: Codable, Equatable {
 
 class GeniuzService: ObservableObject {
     @Published var memoryCount: Int = 0
-    @Published var addedToday: Int = 0
-    @Published var threadCount: Int = 0
     @Published var recentGists: [String] = []
     @Published var recentMemories: [RecentMemory] = []
     @Published var mcpInstalled: Bool = false
@@ -142,8 +140,6 @@ class GeniuzService: ObservableObject {
             DispatchQueue.main.async {
                 self.stationExists = station.exists
                 self.memoryCount = station.memories
-                self.addedToday = station.addedToday
-                self.threadCount = station.threads
                 self.recentMemories = station.recentMemories
                 self.recentGists = station.recentGists
                 self.mcpInstalled = mcp
@@ -256,6 +252,19 @@ class GeniuzService: ObservableObject {
         let id: String           // memory_uuid
         let gist: String
         let parentUuid: String?  // nil only when the row stored NULL; populated rows match the convention
+        let createdAt: String?   // UTC, `YYYY-MM-DD HH:MM:SS`
+        /// "4 days ago". A stamp a little ahead of this clock reads as now.
+        var when: String? {
+            guard let raw = createdAt else { return nil }
+            let parser = DateFormatter()
+            parser.locale = Locale(identifier: "en_US_POSIX")
+            parser.timeZone = TimeZone(identifier: "UTC")
+            parser.dateFormat = "yyyy-MM-dd HH:mm:ss"
+            guard let date = parser.date(from: raw) else { return nil }
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            return formatter.localizedString(for: min(date, Date()), relativeTo: Date())
+        }
         var isThreadFollowup: Bool {
             // A follow-up has a parent and that parent isn't itself.
             guard let p = parentUuid else { return false }
@@ -266,8 +275,6 @@ class GeniuzService: ObservableObject {
     private struct StationInfo {
         var exists: Bool = false
         var memories: Int = 0
-        var addedToday: Int = 0
-        var threads: Int = 0
         var recentMemories: [RecentMemory] = []
         var recentGists: [String] = []  // legacy, kept so existing call sites compile
     }
@@ -299,34 +306,14 @@ class GeniuzService: ObservableObject {
         }
         sqlite3_finalize(stmt)
 
-        // Added today — created in the last 24h. Tooltips/popover both want this.
-        if sqlite3_prepare_v2(db,
-            "SELECT COUNT(*) FROM memories WHERE datetime(created_at) > datetime('now', '-24 hours')",
-            -1, &stmt, nil) == SQLITE_OK {
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                info.addedToday = Int(sqlite3_column_int(stmt, 0))
-            }
-        }
-        sqlite3_finalize(stmt)
-
-        // Thread count — memories that are roots (uuid = parent_uuid) AND have at least one child.
-        // Equivalent: distinct parent_uuid values where parent_uuid != memory_uuid.
-        if sqlite3_prepare_v2(db,
-            "SELECT COUNT(DISTINCT parent_uuid) FROM memories WHERE parent_uuid IS NOT NULL AND parent_uuid <> memory_uuid",
-            -1, &stmt, nil) == SQLITE_OK {
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                info.threads = Int(sqlite3_column_int(stmt, 0))
-            }
-        }
-        sqlite3_finalize(stmt)
-
         // Recent memories with parent UUID for threading viz. Fetch up to 20 to give
         // the settings UI headroom (recent_memories_count caps display, not fetch).
         let sql = """
             SELECT memory_uuid,
                    COALESCE(json_extract(payload, '$.gist'),
                             substr(json_extract(payload, '$.content'), 1, 100)),
-                   parent_uuid
+                   parent_uuid,
+                   created_at
             FROM memories
             ORDER BY created_at DESC
             LIMIT 20
@@ -336,14 +323,14 @@ class GeniuzService: ObservableObject {
                 let id = sqlite3_column_text(stmt, 0).map { String(cString: $0) } ?? ""
                 let gist = sqlite3_column_text(stmt, 1).map { String(cString: $0) } ?? ""
                 let parent = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
-                info.recentMemories.append(RecentMemory(id: id, gist: gist, parentUuid: parent))
+                let created = sqlite3_column_text(stmt, 3).map { String(cString: $0) }
+                info.recentMemories.append(RecentMemory(id: id, gist: gist, parentUuid: parent, createdAt: created))
                 info.recentGists.append(gist)
             }
         }
         sqlite3_finalize(stmt)
 
-        NSLog("[geniuz-app] station: %d memories, +%d today, %d threads, %d recent",
-              info.memories, info.addedToday, info.threads, info.recentMemories.count)
+        NSLog("[geniuz-app] station: %d memories, %d recent", info.memories, info.recentMemories.count)
         return info
     }
 

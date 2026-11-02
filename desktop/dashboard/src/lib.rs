@@ -30,7 +30,6 @@ fn open_db() -> Result<DatabaseManager, String> {
 struct StationStats {
     total_memories: usize,
     this_week: usize,
-    conversations: usize,
     storage_bytes: u64,
     daily_average_recent: f64,
     last_write_iso: Option<String>,
@@ -127,7 +126,6 @@ fn get_station_stats() -> Result<StationStats, String> {
     let db = open_db()?;
     let total_memories = db.count()?;
     let this_week = db.count_since_days(7)?;
-    let conversations = db.thread_count()?;
     let recent_30 = db.count_since_days(30)?;
     let daily_average_recent = (recent_30 as f64) / 30.0;
     let last_write_iso = db.last_write_timestamp()?;
@@ -136,7 +134,6 @@ fn get_station_stats() -> Result<StationStats, String> {
     Ok(StationStats {
         total_memories,
         this_week,
-        conversations,
         storage_bytes,
         daily_average_recent,
         last_write_iso,
@@ -424,6 +421,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         "View",
         true,
         &[
+            &MenuItem::with_id(app, "menu_sidebar", "Toggle Sidebar", true, Some("CmdOrCtrl+B"))?,
             &MenuItem::with_id(app, "menu_refresh", "Refresh", true, Some("CmdOrCtrl+R"))?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::fullscreen(app, None)?,

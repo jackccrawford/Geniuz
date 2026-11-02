@@ -9,8 +9,6 @@ struct GeniuzMenu: View {
             Divider()
 
             if service.stationExists {
-                statsHero
-                Divider()
                 recentMemoriesList
             } else {
                 emptyState
@@ -55,6 +53,14 @@ struct GeniuzMenu: View {
 
     // MARK: - Header
 
+    /// How much is held, beside the version: the one number a person uses.
+    private var headerDetail: String {
+        let version = "v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0")"
+        guard service.stationExists else { return version }
+        let noun = service.memoryCount == 1 ? "memory" : "memories"
+        return "\(formattedCount(service.memoryCount)) \(noun) · \(version)"
+    }
+
     private var header: some View {
         HStack(spacing: 10) {
             Image("MenuBarIcon")
@@ -72,7 +78,7 @@ struct GeniuzMenu: View {
                         .fill(Color(red: 0.812, green: 0.333, blue: 0.208))
                         .frame(width: 5, height: 5)
                 }
-                Text("v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0")")
+                Text(headerDetail)
                     .font(.custom("HankenGrotesk-Regular", size: 11).weight(.semibold))
                     .foregroundColor(.secondary)
             }
@@ -90,47 +96,6 @@ struct GeniuzMenu: View {
         .padding(.horizontal, 16)
         .padding(.top, 12)
         .padding(.bottom, 10)
-    }
-
-    // MARK: - Stats hero
-
-    private var statsHero: some View {
-        HStack(spacing: 18) {
-            statTile(value: formattedCount(service.memoryCount), label: service.memoryCount == 1 ? "memory" : "memories")
-            divider
-            statTile(value: "+\(service.addedToday)", label: "today")
-            divider
-            statTile(value: "\(service.threadCount)", label: service.threadCount == 1 ? "thread" : "threads")
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color.accentColor.opacity(0.10),
-                    Color.accentColor.opacity(0.04)
-                ],
-                startPoint: .topLeading, endPoint: .bottomTrailing
-            )
-        )
-    }
-
-    private func statTile(value: String, label: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value)
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
-                .foregroundColor(.primary)
-            Text(label)
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private var divider: some View {
-        Rectangle()
-            .fill(Color.secondary.opacity(0.18))
-            .frame(width: 1, height: 28)
     }
 
     // MARK: - Empty state (no station yet)
@@ -227,12 +192,19 @@ struct GeniuzMenu: View {
                     .frame(width: 22, alignment: .leading)
             }
 
-            Text(m.gist)
-                .font(.system(size: 12))
-                .foregroundColor(m.isThreadFollowup ? .secondary : .primary)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(m.gist)
+                    .font(.system(size: 12))
+                    .foregroundColor(m.isThreadFollowup ? .secondary : .primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let when = m.when {
+                    Text(when)
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.top, 1)
 
             Spacer(minLength: 0)
         }

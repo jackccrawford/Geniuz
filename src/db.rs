@@ -660,29 +660,6 @@ impl DatabaseManager {
         Ok(c as usize)
     }
 
-    /// Count of distinct conversation threads. A thread is everything sharing
-    /// the same root via parent_uuid, resolved recursively through
-    /// `memory_chains.root_uuid` — not just the immediate parent, which
-    /// over-counts threads with depth 2 or more.
-    ///
-    /// Known limit: `memory_chains` anchors on memories that are their own
-    /// root and recurses by joining a parent already in the chain, so a
-    /// memory whose parent_uuid names a UUID absent from this database is in
-    /// neither branch and is counted in no thread. Nothing in this project
-    /// creates such an orphan — `resolve_uuid` refuses an unknown prefix —
-    /// but the four-column contract deliberately lets a parent live outside
-    /// the local store, so a foreign writer may produce one. `count()` still
-    /// includes them. Same applies to descendants past the view's depth cap.
-    pub fn thread_count(&self) -> Result<usize, String> {
-        let conn = self.conn()?;
-        let c: i64 = conn.query_row(
-            "SELECT COUNT(DISTINCT root_uuid) FROM memory_chains",
-            [],
-            |r| r.get(0),
-        ).map_err(|e| format!("Thread count failed: {}", e))?;
-        Ok(c as usize)
-    }
-
     /// Count of memories created in the last `days` days.
     pub fn count_since_days(&self, days: u32) -> Result<usize, String> {
         let conn = self.conn()?;
@@ -1140,7 +1117,6 @@ mod tests {
     fn count_is_zero_on_empty_db() {
         let (db, _dir) = fresh_db();
         assert_eq!(db.count().unwrap(), 0);
-        assert_eq!(db.thread_count().unwrap(), 0);
         assert_eq!(db.embedding_count().unwrap(), 0);
     }
 
@@ -1312,7 +1288,6 @@ mod tests {
         }
         assert_eq!(db.count().unwrap(), 5);
         // All root memories — distinct threads.
-        assert_eq!(db.thread_count().unwrap(), 5);
     }
 
     #[test]
@@ -1644,18 +1619,6 @@ mod tests {
     }
 
     #[test]
-    fn thread_count_distinguishes_roots_from_descendants() {
-        let (db, _dir) = fresh_db();
-        let root_a = insert(&db, "thread A root", Some("A"), None);
-        let _child_a = insert(&db, "A reply", None, Some(&root_a));
-        let _root_b = insert(&db, "thread B root", Some("B"), None);
-        // Two roots → two threads, regardless of descendants.
-        assert_eq!(db.thread_count().unwrap(), 2);
-        // Total count is 3 (two roots + one child).
-        assert_eq!(db.count().unwrap(), 3);
-    }
-
-    #[test]
     fn insert_or_replace_on_existing_memory_uuid_is_blocked() {
         let (db, _dir) = fresh_db();
         let short = insert(&db, "original content", Some("original"), None);
@@ -1697,18 +1660,6 @@ mod tests {
             rusqlite::params![&entry.memory_uuid, r#"{"content":"replaced","gist":"replaced"}"#],
         ).expect_err("REPLACE guard should be active after reopen");
         assert!(err.to_string().contains("immutable"));
-    }
-
-    #[test]
-    fn thread_count_resolves_depth_two_chains_to_one_root() {
-        let (db, _dir) = fresh_db();
-        // A -> B -> C: a naive "immediate parent" count sees 2 distinct
-        // parents (A and B); the real answer is 1 thread (root A).
-        let a = insert(&db, "A", Some("A"), None);
-        let b = insert(&db, "B", Some("B"), Some(&a));
-        let _c = insert(&db, "C", Some("C"), Some(&b));
-        assert_eq!(db.thread_count().unwrap(), 1);
-        assert_eq!(db.count().unwrap(), 3);
     }
 
     #[test]

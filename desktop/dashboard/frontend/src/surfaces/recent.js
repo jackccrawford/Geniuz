@@ -1,6 +1,6 @@
 // recent.js — home surface in Tool register.
 //
-// Stats strip mirrors the menubar popover language (Memories · Week · Threads).
+// The header carries the two numbers a person uses: how many, and how lately.
 // Memories render as dense rows grouped by Today / Yesterday / Earlier this
 // week / Older. Click a row to open detail.
 //
@@ -26,7 +26,7 @@ export async function mount(container) {
     container.innerHTML = `
       <main class="main">
         <div class="surface-error">
-          <h2>Couldn't read your station.</h2>
+          <h2>Couldn't read your memory.</h2>
           <p>${escapeHtml(e?.message || String(e))}</p>
           <p>Expected file: <code>~/.geniuz/memory.db</code></p>
         </div>
@@ -45,30 +45,9 @@ export async function mount(container) {
   header.className = 'main-header';
   header.innerHTML = `
     <h1 class="main-header__title">Your memory</h1>
-    <p class="main-header__sub">Everything you've remembered.</p>
+    <p class="main-header__sub">${fmt.number(stats.total_memories)} ${stats.total_memories === 1 ? 'memory' : 'memories'} · ${fmt.number(stats.this_week)} this week</p>
   `;
   root.appendChild(header);
-
-  // Stats strip — fixed in the header region (mirrors the menubar popover) so
-  // it stays put while the day-grouped list scrolls beneath it, instead of
-  // scrolling away with the list.
-  const strip = document.createElement('div');
-  strip.className = 'stats-strip';
-  strip.innerHTML = `
-    <div class="stats-strip__cell">
-      <div class="stats-strip__value">${fmt.number(stats.total_memories)}</div>
-      <div class="stats-strip__label">Memories</div>
-    </div>
-    <div class="stats-strip__cell">
-      <div class="stats-strip__value">${fmt.number(stats.this_week)}</div>
-      <div class="stats-strip__label">This week</div>
-    </div>
-    <div class="stats-strip__cell">
-      <div class="stats-strip__value">${fmt.number(stats.conversations)}</div>
-      <div class="stats-strip__label">Threads</div>
-    </div>
-  `;
-  root.appendChild(strip);
 
   // Body — scrolls beneath the fixed header + stats.
   const body = document.createElement('div');

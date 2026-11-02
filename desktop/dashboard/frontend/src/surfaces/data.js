@@ -48,12 +48,10 @@ export async function mount(container) {
   // ---- Card 1: Where your memory lives -------------------------------------
   const [storageNum, storageUnit] = fmt.bytes(stats?.storage_bytes);
   const memCount = fmt.number(stats?.total_memories);
-  const threadCount = fmt.number(stats?.conversations);
   const lastWrite = stats?.last_write_iso ? fmt.ago(stats.last_write_iso) : null;
 
   const inlineStats = [
     `${memCount} memories`,
-    `${threadCount} conversations`,
     `${storageNum} ${storageUnit} on disk`,
     lastWrite ? `last write ${lastWrite}` : null,
   ].filter(Boolean).join(' · ');
@@ -63,13 +61,12 @@ export async function mount(container) {
   locCard.innerHTML = `
     <h2 class="data-card__title">Where your memory lives</h2>
     <div class="data-card__body">
-      <p>Your memory is on this Mac. No cloud. No account. No telemetry.
-      Geniuz never sends it anywhere.</p>
+      <p>Your memory is on this computer. No cloud. No account. No telemetry.</p>
       <p><span class="data-card__path">${escapeHtml(dataDir || '(unknown)')}</span></p>
       <p style="color:var(--ink-3);font-size:var(--fs-micro);">${escapeHtml(inlineStats)}</p>
     </div>
     <div class="data-card__actions">
-      <button type="button" class="btn" data-action="reveal">Reveal in Finder</button>
+      <button type="button" class="btn" data-action="reveal">${document.documentElement.classList.contains('os-mac') ? 'Reveal in Finder' : 'Open folder'}</button>
       <button type="button" class="btn btn--ghost" data-action="copy">Copy path</button>
       <span class="data-card__feedback" style="font-size:var(--fs-micro);color:var(--ink-3);align-self:center;"></span>
     </div>

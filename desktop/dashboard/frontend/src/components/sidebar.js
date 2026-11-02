@@ -5,6 +5,82 @@
 import { navigate, subscribe, getState } from '../store.js';
 import * as fmt from '../format.js';
 
+// Collapsing (Jack, 2026-11-02). Below this width the sidebar collapses to its
+// icons on its own, so the window can narrow further. That automatic collapse
+// never changes what the person chose: widen again and their choice returns.
+const NARROW_BELOW = 900;
+const PREF_KEY = 'geniuz.sidebarCollapsed';
+
+function readPref() {
+  try { return localStorage.getItem(PREF_KEY) === '1'; } catch { return false; }
+}
+function writePref(on) {
+  try { localStorage.setItem(PREF_KEY, on ? '1' : '0'); } catch { /* still works this session */ }
+}
+
+const isMac = () => document.documentElement.classList.contains('os-mac');
+const shortcutLabel = () => (isMac() ? '⌘B' : 'Ctrl+B');
+
+/**
+ * The toggle, and the state behind it. Wide: it sets and saves the choice.
+ * Narrow: it opens the sidebar for now, without touching the saved choice.
+ */
+export function wireCollapse(shell, topbar) {
+  let pref = readPref();
+  let narrow = window.innerWidth < NARROW_BELOW;
+  let openedWhileNarrow = false;
+
+  const toggles = [];
+  const collapsed = () => (narrow ? !openedWhileNarrow : pref);
+  const apply = () => {
+    const on = collapsed();
+    shell.classList.toggle('is-collapsed', on);
+    const word = on ? 'Expand sidebar' : 'Collapse sidebar';
+    for (const t of toggles) {
+      t.dataset.tip = `${word}  ${shortcutLabel()}`;
+      t.setAttribute('aria-label', word);
+      t.setAttribute('aria-expanded', String(!on));
+    }
+  };
+  const toggle = () => {
+    if (narrow) {
+      openedWhileNarrow = !openedWhileNarrow;
+    } else {
+      pref = !pref;
+      writePref(pref);
+    }
+    apply();
+  };
+
+  const makeToggle = (where, extraClass) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `sidebar-toggle ${extraClass}`;
+    b.innerHTML = ICONS.panel;
+    b.addEventListener('click', toggle);
+    toggles.push(b);
+    where.appendChild(b);
+  };
+  // On a Mac the toggle sits in the header beside the window buttons. Windows
+  // and Linux keep their own title bar, so it heads the sidebar instead.
+  if (isMac()) {
+    makeToggle(topbar, 'sidebar-toggle--header');
+  } else {
+    makeToggle(shell.querySelector('.sidebar-brand'), 'sidebar-toggle--brand');
+  }
+
+  window.addEventListener('resize', () => {
+    const nowNarrow = window.innerWidth < NARROW_BELOW;
+    if (nowNarrow !== narrow) {
+      narrow = nowNarrow;
+      openedWhileNarrow = false;
+      apply();
+    }
+  });
+  apply();
+  return toggle;
+}
+
 const NAV_ITEMS = [
   {
     surfaces: [
@@ -24,6 +100,7 @@ const NAV_ITEMS = [
 ];
 
 const ICONS = {
+  panel:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M9 4.5v15"/></svg>',
   plus:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
   clock:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
   search:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>',
@@ -66,6 +143,8 @@ export function sidebar({ version, stats }) {
       btn.type = 'button';
       btn.className = 'sidebar-item';
       btn.dataset.surface = item.id;
+      btn.dataset.tip = item.label;
+      btn.setAttribute('aria-label', item.label);
       const count = item.count ? item.count(stats || {}) : null;
       btn.innerHTML = `
         <span class="sidebar-item__icon">${ICONS[item.icon] || ''}</span>

@@ -15,10 +15,6 @@ export function folderPanel({ stats, version }) {
         <span class="kv-val">${fmt.number(stats.total_memories)} memories</span>
       </div>
       <div class="kv-row">
-        <span class="kv-key">Conversations</span>
-        <span class="kv-val">${fmt.number(stats.conversations)}</span>
-      </div>
-      <div class="kv-row">
         <span class="kv-key">All searchable</span>
         <span class="kv-val" style="color:var(--color-good);">yes</span>
       </div>

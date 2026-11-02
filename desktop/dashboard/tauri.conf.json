@@ -11,16 +11,17 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Geniuz — Station Dashboard",
+        "title": "Geniuz",
         "width": 1280,
         "height": 820,
-        "minWidth": 900,
+        "minWidth": 480,
         "minHeight": 600,
         "resizable": true,
         "fullscreen": false,
         "transparent": true,
         "decorations": true,
-        "titleBarStyle": "Visible"
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
