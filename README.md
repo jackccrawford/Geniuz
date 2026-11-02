@@ -28,6 +28,8 @@ Geniuz fixes that. One install, local, private, searchable by meaning. The conte
 >
 > **Note:** Screenshots in this README are from a pre-2.0.5 build and will refresh with the next release. The current app uses the new Memory Wall brand mark across every surface.
 
+**[Read the wiki](wiki/README.md)** for how Geniuz works, with a map of its parts and the reasons behind its design.
+
 ## Three surfaces, one memory
 
 Geniuz is one Rust core with several ways to reach it. Pick what fits the moment.

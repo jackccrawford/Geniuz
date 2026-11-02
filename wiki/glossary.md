@@ -1,0 +1,17 @@
+# Glossary
+
+| Term | Meaning |
+|---|---|
+| Memory | One entry that can never be changed: a gist, content, and optionally a parent. |
+| Gist | The short line you find a memory by. |
+| Content | The full detail of a memory. |
+| Thread | Memories linked by parent, such as a problem and its solution. |
+| Parent | The earlier memory that a memory replies to. |
+| Station | The older name for a memory store. It survives in `GENIUZ_STATION` and in `station.db`, which Geniuz still reads. |
+| Embedding | Numbers representing a memory's meaning, used to search by meaning. |
+| Backfill | Embedding memories that do not have one yet. |
+| Capture | Loading existing files into memory in bulk. |
+| Recall | Searching your memories, by meaning or exactly. |
+| Harvest | What a recall's results point onward to, read from those memories. |
+| MCP | Model Context Protocol, a standard way for AI tools to call other programs. |
+| Embed helper | `geniuz-embed`, which keeps the model loaded between calls. |
