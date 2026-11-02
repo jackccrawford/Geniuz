@@ -138,34 +138,6 @@ export async function mount(container) {
       }),
     ]));
 
-    // Updates
-    const updateRows = [
-      row({
-        title: 'Check for updates automatically',
-        help: 'Geniuz only checks; it never installs without your click.',
-        control: toggle({
-          checked: !!edited.autoupdate_enabled,
-          onChange: (v) => update({ autoupdate_enabled: v }),
-        }),
-      }),
-    ];
-    if (edited.autoupdate_enabled) {
-      updateRows.push(row({
-        title: 'Check frequency',
-        help: '',
-        control: select({
-          value: edited.update_check_frequency || 'weekly',
-          options: [
-            { value: 'daily',  label: 'Daily' },
-            { value: 'weekly', label: 'Weekly' },
-            { value: 'manual', label: 'Manual' },
-          ],
-          onChange: (v) => update({ update_check_frequency: v }),
-        }),
-      }));
-    }
-    shell.appendChild(section('Updates', updateRows));
-
     // Display
     const countInput = document.createElement('input');
     countInput.type = 'number';

@@ -362,13 +362,6 @@ struct GeniuzSettingsView: View {
         Form {
             Section("General") {
                 Toggle("Launch at login", isOn: launchAtLoginBinding)
-                Toggle("Check for updates automatically", isOn: autoupdateBinding)
-                Picker("Update frequency", selection: frequencyBinding) {
-                    Text("Daily").tag("daily")
-                    Text("Weekly").tag("weekly")
-                    Text("Manually only").tag("manual")
-                }
-                .disabled(!service.settings.autoupdateEnabled)
             }
 
             Section("Display") {
@@ -412,20 +405,6 @@ struct GeniuzSettingsView: View {
         Binding(
             get: { service.settings.launchAtLogin },
             set: { v in service.updateSettings { $0.launchAtLogin = v } }
-        )
-    }
-
-    private var autoupdateBinding: Binding<Bool> {
-        Binding(
-            get: { service.settings.autoupdateEnabled },
-            set: { v in service.updateSettings { $0.autoupdateEnabled = v } }
-        )
-    }
-
-    private var frequencyBinding: Binding<String> {
-        Binding(
-            get: { service.settings.updateCheckFrequency },
-            set: { v in service.updateSettings { $0.updateCheckFrequency = v } }
         )
     }
 

@@ -168,10 +168,8 @@ impl Settings {
     /// helpful for debugging.
     pub fn list(&self) -> String {
         format!(
-            "launch_at_login = {}\nautoupdate_enabled = {}\nupdate_check_frequency = {}\nrecent_memories_count = {}",
+            "launch_at_login = {}\nrecent_memories_count = {}",
             self.launch_at_login,
-            self.autoupdate_enabled,
-            self.update_check_frequency.as_str(),
             self.recent_memories_count,
         )
     }
