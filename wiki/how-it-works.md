@@ -41,11 +41,14 @@ Search by meaning runs locally through ONNX Runtime, using a BERT sentence model
 
 Geniuz can also embed through Ollama, and tries it if the built-in model fails. See [Using it](using-it.md#settings).
 
-## What leaves your machine
+## Your data stays on your machine
 
-Your memories stay in a file on your computer. There is no account, no cloud and no telemetry. Geniuz does reach the network in these cases:
+When Geniuz runs, it stores all your data locally, in a file on your computer. There is no account, no cloud and no telemetry.
+
+For completeness, Geniuz reaches the network in a few small ways, and none of them sends your memories:
 
 - **Hugging Face:** to download the model, once.
 - **GitHub:** when you run the install script or download a release.
-- **Google Fonts:** the dashboard page loads its fonts from Google, so Google can see your IP address when it opens. No memory text is included.
-- **An embedding service, if you choose one:** with `GENIUZ_EMBED_URL` set, memory text goes to that address to be embedded. It is local by default.
+- **Google Fonts:** the dashboard loads its fonts from Google.
+
+The one way memory text can leave is if you choose it: with `GENIUZ_EMBED_URL` set to another machine, text goes there to be embedded. It is local by default.
