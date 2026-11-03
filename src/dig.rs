@@ -145,7 +145,7 @@ pub fn names_in(names: &[String], text: &str) -> usize {
 pub struct Hit {
     pub memory_uuid: String,
     pub created_at: String,
-    /// The chapter (Geniuz Team turns); `None` in Geniuz Free.
+    /// The chapter (Geniuz Team turns); `None` in Geniuz Community Edition.
     pub chapter: Option<i64>,
     pub line: String,
 }

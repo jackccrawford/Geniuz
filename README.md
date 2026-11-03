@@ -127,13 +127,13 @@ Use "geniuz [command] --help" for more information.
 
 ---
 
-## Geniuz Free vs Geniuz Team
+## Geniuz Community Edition and Geniuz Team
 
-This repository is **Geniuz Free**: MIT-licensed, single-station memory for any AI chassis. Install it, bring your own AI, get memory that survives across conversations.
+This repository is **Geniuz Community Edition**: open source, MIT-licensed, single-station memory for any AI chassis. Install it, bring your own AI, get memory that survives across conversations. Make a PR if you like, fork if you like. We maintain it with bug fixes.
 
 **[Geniuz Team](https://github.com/mvara-ai)** is the paid tier from mVara: unlimited continuity, perpetual agents that live in your environment, and a team chassis that coordinates around your customers' reality. Geniuz Team is built on the same substrate as Geniuz Free.
 
-If you want memory for yourself or a developer team using existing AI tools, Geniuz Free is what you want.
+If you want memory for yourself or a developer team using existing AI tools, Geniuz Community Edition is what you want.
 
 If you want a configured team of agents living in your private cloud, remembering your work, and coordinating around your customers, that's Geniuz Team. Contact mVara for pilot inquiries.
 
@@ -375,7 +375,7 @@ When you need to remember something:
 
 ## Architecture
 
-Geniuz Free exposes four user surfaces plus the MCP server for agents:
+Geniuz Community Edition exposes four user surfaces plus the MCP server for agents:
 
 - **Dashboard** (Tauri) — for browse, search, compose, settings. Cross-platform.
 - **TUI** (`geniuz tui`) — same for terminal users and agents that prefer ratatui over GUI.
@@ -387,7 +387,7 @@ All surfaces go through one library: `db::DatabaseManager`. Same write path, sam
 
 **The SQLite file (`memory.db`) is not a public interface.** Schema may change without notice. Invariants (memory immutability enforced by triggers, every-memory-has-an-embedding enforced by the library's write transaction) hold at the interface boundary, not at the file boundary. If you want programmatic access, go through MCP or the CLI.
 
-There is no HTTP server in Geniuz Free. Procedural software speaks MCP. This keeps the storage layer free to evolve and the invariants centralized in one place.
+There is no HTTP server in Geniuz Community Edition. Procedural software speaks MCP. This keeps the storage layer free to evolve and the invariants centralized in one place.
 
 ---
 

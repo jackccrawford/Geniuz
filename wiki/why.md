@@ -8,7 +8,7 @@ The cost is that a mistake stays on the record. In return, the history is hard t
 
 ## No server
 
-"There is no HTTP server in Geniuz Free", says the [README](../README.md#architecture). There is nothing to host, keep running or secure, and tools reach Geniuz by running it or through MCP. That also leaves the storage free to change, which is why the SQLite file is not a public interface.
+"There is no HTTP server in Geniuz Community Edition", says the [README](../README.md#architecture). There is nothing to host, keep running or secure, and tools reach Geniuz by running it or through MCP. That also leaves the storage free to change, which is why the SQLite file is not a public interface.
 
 ## Local by default
 

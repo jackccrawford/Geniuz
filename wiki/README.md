@@ -16,6 +16,6 @@ Your AI starts every conversation from zero. Geniuz gives it a place to keep wha
 - [Why it is built this way](why.md): the design decisions.
 - [Glossary](glossary.md): the words Geniuz uses.
 
-## Free and Team
+## Community Edition and Team
 
-This repository is Geniuz Free: one memory store for any AI tool. Geniuz Team is a separate commercial product from [mVara](https://github.com/mvara-ai), available by pilot. If you want memory for yourself or a developer team using the AI tools you already have, Geniuz Free is what you want.
+This repository is Geniuz Community Edition: open source, one memory store for any AI tool. Make a PR if you like, fork if you like. We maintain it with bug fixes. Geniuz Team is a separate commercial product from [mVara](https://github.com/mvara-ai), available by pilot. If you want memory for yourself or a developer team using the AI tools you already have, Geniuz Community Edition is what you want.

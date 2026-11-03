@@ -1,4 +1,4 @@
-; Geniuz Free for Windows — Inno Setup installer script
+; Geniuz Community Edition for Windows — Inno Setup installer script
 ;
 ; Per-user install only. Memory is per-user by design (your memories aren't
 ; your colleague's memories), and per-user install sidesteps the all-users

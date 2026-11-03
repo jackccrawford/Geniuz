@@ -1,6 +1,8 @@
 # Contributing to Geniuz
 
-Thanks for your interest in contributing to Geniuz, the memory and configuration substrate for agent-native work.
+Thanks for your interest in contributing to Geniuz Community Edition, the memory and configuration substrate for agent-native work.
+
+It is open source under the MIT license. Make a PR if you like, fork if you like. We maintain it with bug fixes, so a new feature may well belong in your own fork, and that is a good outcome. If you tailor it, the [schema](schema/schema.sql) is the part worth keeping recognizable.
 
 ## How to contribute
 
@@ -15,7 +17,7 @@ Open an issue at https://github.com/jackccrawford/Geniuz/issues. Include:
 
 ### Suggesting changes
 
-Open an issue describing the change before opening a PR. Geniuz is a small substrate by design. Feature additions are evaluated against whether they keep the substrate small or make it bigger. Most ideas are better as external tooling that uses Geniuz than as features inside it.
+An issue first helps for anything large. Geniuz is a small substrate by design. Feature additions are evaluated against whether they keep the substrate small or make it bigger. Most ideas are better as external tooling that uses Geniuz than as features inside it.
 
 ### Submitting code
 
