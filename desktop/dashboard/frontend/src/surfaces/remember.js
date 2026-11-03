@@ -15,7 +15,7 @@ export async function mount(container) {
   const header = document.createElement('header');
   header.className = 'main-header';
   header.innerHTML = `
-    <h1 class="main-header__title">Remember</h1>
+    <h1 class="main-header__title">Keep</h1>
     <p class="main-header__sub">Save what matters. Gist is a short shelf-label for retrieval. Content is the body.</p>
   `;
   root.appendChild(header);
@@ -49,7 +49,7 @@ export async function mount(container) {
     </label>
     <div class="remember-actions">
       <button type="button" class="remember-actions__cancel" data-action="cancel">Cancel</button>
-      <button type="submit" class="remember-actions__submit" disabled>Remember</button>
+      <button type="submit" class="remember-actions__submit" disabled>Keep</button>
     </div>
     <div class="remember-status" aria-live="polite"></div>
   `;
@@ -85,7 +85,7 @@ export async function mount(container) {
     status.textContent = 'Saving…';
     try {
       const shortUuid = await api.rememberMemory(gist || null, content);
-      status.textContent = `Remembered · ${shortUuid}`;
+      status.textContent = `Kept · ${shortUuid}`;
       // Navigate to Recent and select the new memory
       setTimeout(() => navigate('recent'), 300);
     } catch (err) {

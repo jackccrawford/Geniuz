@@ -6,20 +6,22 @@
 // and query logic, used by the CLI, the MCP server, and this dashboard alike.
 
 use geniuz::db::{DatabaseManager, SignalEntry};
+use geniuz::folders::{Folder, Registry};
 use geniuz::settings::Settings;
 use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
 
-fn db_path() -> String {
-    geniuz::data_dir()
-        .join("memory.db")
-        .to_string_lossy()
-        .into_owned()
+/// The folder in use, shared with the CLI and MCP through the same `current`
+/// file. Resolved every time, because any of them can change it or move it.
+fn db_path() -> Result<String, String> {
+    Registry::from_env()
+        .resolve(None, None, None)
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 fn open_db() -> Result<DatabaseManager, String> {
-    DatabaseManager::new(&db_path())
+    DatabaseManager::new(&db_path()?)
 }
 
 // -------------------------------------------------------------------------
@@ -129,7 +131,7 @@ fn get_station_stats() -> Result<StationStats, String> {
     let recent_30 = db.count_since_days(30)?;
     let daily_average_recent = (recent_30 as f64) / 30.0;
     let last_write_iso = db.last_write_timestamp()?;
-    let storage_bytes = std::fs::metadata(db_path()).map(|m| m.len()).unwrap_or(0);
+    let storage_bytes = std::fs::metadata(db_path()?).map(|m| m.len()).unwrap_or(0);
 
     Ok(StationStats {
         total_memories,
@@ -306,9 +308,115 @@ fn update_settings(patch: SettingsPatch) -> Result<Settings, String> {
 
 #[tauri::command]
 fn export_memory_db_to(target_path: String) -> Result<u64, String> {
-    let source = db_path();
-    std::fs::copy(&source, &target_path)
-        .map_err(|e| format!("Copy failed: {}", e))
+    let source = db_path()?;
+    geniuz::folders::backup_to(std::path::Path::new(&source), std::path::Path::new(&target_path))
+}
+
+#[derive(Serialize)]
+struct FolderRow {
+    id: String,
+    uuid: String,
+    name: String,
+    description: String,
+    memories: i64,
+    last_written: Option<String>,
+    location: String,
+    current: bool,
+    /// The first folder lives beside the others, so it stays where it is.
+    fixed: bool,
+}
+
+#[derive(Serialize)]
+struct FolderList {
+    folders: Vec<FolderRow>,
+    archived: Vec<FolderRow>,
+    blocked: usize,
+    unavailable: usize,
+}
+
+fn folder_row(f: &Folder, using: &Option<std::path::PathBuf>) -> FolderRow {
+    let canonical = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let (memories, last_written) = f.stats().unwrap_or((0, None));
+    let dir = f.db_path.parent().unwrap_or(&f.db_path);
+    FolderRow {
+        id: f.short_id(),
+        uuid: f.uuid.clone(),
+        name: f.name.clone(),
+        description: f.description.clone(),
+        memories,
+        last_written,
+        location: dir.to_string_lossy().into_owned(),
+        current: using.as_deref() == Some(canonical(&f.db_path).as_path()),
+        fixed: canonical(dir) == canonical(&geniuz::data_dir()),
+    }
+}
+
+#[tauri::command]
+fn list_folders() -> FolderList {
+    let reg = Registry::from_env();
+    let scan = reg.scan();
+    let using = reg
+        .resolve(None, None, None)
+        .ok()
+        .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+    FolderList {
+        folders: scan.folders.iter().map(|f| folder_row(f, &using)).collect(),
+        archived: reg.archived().iter().map(|f| folder_row(f, &None)).collect(),
+        blocked: scan.blocked.len(),
+        unavailable: scan.unavailable.len(),
+    }
+}
+
+#[tauri::command]
+fn use_folder(uuid: String) -> Result<(), String> {
+    Registry::from_env().use_folder(&uuid).map(|_| ())
+}
+
+/// A new folder becomes the one in use: making one means you're about to use it.
+#[tauri::command]
+fn create_folder(name: String, description: String) -> Result<(), String> {
+    let reg = Registry::from_env();
+    let f = reg.create(&name, &description, None)?;
+    reg.use_folder(&f.uuid).map(|_| ())
+}
+
+#[tauri::command]
+fn update_folder(uuid: String, name: String, description: String) -> Result<(), String> {
+    let reg = Registry::from_env();
+    let f = reg.find(&uuid)?;
+    if f.name != name.trim() {
+        reg.rename(&uuid, &name)?;
+    }
+    if f.description != description.trim() {
+        reg.describe(&uuid, &description)?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn add_folders(path: String) -> Result<usize, String> {
+    Registry::from_env()
+        .add(std::path::Path::new(&path))
+        .map(|found| found.len())
+}
+
+#[tauri::command]
+fn move_folder(uuid: String, to: String) -> Result<Option<String>, String> {
+    Registry::from_env()
+        .relocate(&uuid, std::path::Path::new(&to))
+        .map(|m| m.left_behind.map(|p| p.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+fn archive_folder(uuid: String) -> Result<String, String> {
+    Registry::from_env()
+        .archive(&uuid)
+        .map(|p| p.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn restore_folder(uuid: String) -> Result<(), String> {
+    Registry::from_env().restore(&uuid).map(|_| ())
 }
 
 #[tauri::command]
@@ -503,6 +611,14 @@ pub fn run() {
             update_settings,
             export_memory_db_to,
             get_data_dir,
+            list_folders,
+            use_folder,
+            create_folder,
+            update_folder,
+            add_folders,
+            move_folder,
+            archive_folder,
+            restore_folder,
         ])
         .setup(|app| {
             let handle = app.handle();

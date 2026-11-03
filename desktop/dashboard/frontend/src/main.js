@@ -37,24 +37,27 @@ async function bootstrap() {
   let version = '—';
   let dataDir = null;
   let stats = { total_memories: null };
+  let folders = null;
   if (api.isTauri()) {
     try {
-      [version, dataDir, stats] = await Promise.all([
+      [version, dataDir, folders] = await Promise.all([
         api.getAppVersion(),
         api.getDataDir(),
-        api.getStationStats(),
+        api.listFolders(),
       ]);
+      stats = await api.getStationStats();
     } catch (e) {
       console.error('[geniuz] bootstrap failed:', e);
     }
   }
-  setState({ appVersion: version, dataDir });
+  setState({ appVersion: version, dataDir, folders });
 
   // Sidebar
   const appShell = document.getElementById('app-shell');
   appShell.innerHTML = '';
   const aside = sidebar({
     version,
+    folders,
     stats: {
       totalMemories: stats.total_memories ?? null,
       storageBytes: stats.storage_bytes ?? null,

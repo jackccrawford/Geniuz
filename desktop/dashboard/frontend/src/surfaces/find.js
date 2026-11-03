@@ -296,7 +296,7 @@ export async function mount(container) {
           const chip = document.createElement(here ? 'button' : 'span');
           chip.className = 'find-next__chip find-next__chip--mono' + (here ? '' : ' find-next__chip--elsewhere');
           chip.textContent = p;
-          if (!here) chip.title = 'Not in this store — it may be on another station';
+          if (!here) chip.title = 'Not in this folder — it may be in another one';
           if (here) {
             chip.type = 'button';
             chip.title = 'Open this memory';

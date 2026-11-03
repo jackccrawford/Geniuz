@@ -83,7 +83,7 @@ export function renderText(content) {
   s = s.replace(/`([^`\n]+)`/g, (_, code) => hold(`<code>${code}</code>`));
   s = s.replace(/\bhttps?:\/\/[^\s<]+[^\s<.,;:!?)\]'"&]/g, (url) =>
     hold(`<a class="slink" href="#" data-href="${url}" title="${url}">${url}</a>`));
-  s = s.replace(/\b([0-9A-F]{8}):([0-9A-F]{8})\b/g, (m) => hold(`<span class="sptr" title="a memory on a station">${m}</span>`));
+  s = s.replace(/\b([0-9A-F]{8}):([0-9A-F]{8})\b/g, (m) => hold(`<span class="sptr" title="a memory in a folder">${m}</span>`));
   s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
   s = s.replace(/\n/g, '<br>');
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => keep[+i]);

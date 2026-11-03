@@ -4,6 +4,8 @@
 
 import { navigate, subscribe, getState } from '../store.js';
 import * as fmt from '../format.js';
+import * as api from '../api.js';
+import { openFolderDialog, openArchivedDialog } from './folderDialog.js';
 
 // Collapsing (Jack, 2026-11-02). Below this width the sidebar collapses to its
 // icons on its own, so the window can narrow further. That automatic collapse
@@ -84,8 +86,7 @@ export function wireCollapse(shell, topbar) {
 const NAV_ITEMS = [
   {
     surfaces: [
-      { id: 'recent',   label: 'Memories', icon: 'book',     count: (s) => s.totalMemories },
-      { id: 'remember', label: 'Remember', icon: 'plus' },
+      { id: 'remember', label: 'Keep',     icon: 'plus' },
       { id: 'find',     label: 'Find',     icon: 'search' },
     ],
   },
@@ -100,6 +101,7 @@ const NAV_ITEMS = [
 ];
 
 const ICONS = {
+  archive:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/></svg>',
   panel:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M9 4.5v15"/></svg>',
   plus:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
   book:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
@@ -112,7 +114,86 @@ const ICONS = {
   wall:     '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="geniuz-mark-grad" cx="28%" cy="18%" r="120%"><stop offset="0%" stop-color="#1E7D8C"/><stop offset="58%" stop-color="#134E5A"/><stop offset="100%" stop-color="#0E3540"/></radialGradient></defs><rect width="24" height="24" rx="5.5" fill="url(#geniuz-mark-grad)"/><rect x="3.97" y="3.97" width="4.73" height="3.31" rx="0.93" fill="#2F94A6"/><rect x="9.63" y="3.97" width="4.73" height="3.31" rx="0.93" fill="#2F94A6"/><rect x="15.30" y="3.97" width="4.73" height="3.31" rx="0.93" fill="#1A6E7C"/><rect x="3.97" y="8.22" width="4.73" height="3.31" rx="0.93" fill="#2F94A6"/><rect x="9.63" y="8.22" width="4.73" height="3.31" rx="0.93" fill="#F2EADA"/><rect x="15.30" y="8.22" width="4.73" height="3.31" rx="0.93" fill="#F2EADA"/><rect x="3.97" y="12.47" width="4.73" height="3.31" rx="0.93" fill="#1A6E7C"/><rect x="9.63" y="12.47" width="4.73" height="3.31" rx="0.93" fill="#F2EADA"/><rect x="15.30" y="12.47" width="4.73" height="3.31" rx="0.93" fill="#E0A43B"/><rect x="3.97" y="16.72" width="4.73" height="3.31" rx="0.93" fill="#1A6E7C"/><rect x="9.63" y="16.72" width="4.73" height="3.31" rx="0.93" fill="#1A6E7C"/><rect x="15.30" y="16.72" width="4.73" height="3.31" rx="0.93" fill="#1A6E7C"/></svg>',
 };
 
-export function sidebar({ version, stats }) {
+// Folders replace the Memories row. Choosing one reloads the app, so nothing on
+// screen can still be showing the last folder's memories.
+function foldersSection(list, buttons) {
+  const sec = document.createElement('div');
+  sec.className = 'sidebar-section sidebar-section--folders';
+
+  const label = document.createElement('div');
+  label.className = 'sidebar-section__label sidebar-folders__label';
+  label.innerHTML = `<span>Folders</span>`;
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'sidebar-folders__add';
+  add.setAttribute('aria-label', 'New folder');
+  add.title = 'New folder';
+  add.innerHTML = ICONS.plus;
+  add.addEventListener('click', () => openFolderDialog());
+  label.appendChild(add);
+  sec.appendChild(label);
+
+  const rows = document.createElement('div');
+  rows.className = 'sidebar-folders';
+  for (const f of list?.folders || []) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `sidebar-item sidebar-folder${f.current ? ' is-current' : ''}`;
+    btn.dataset.tip = f.name;
+    btn.title = f.description ? f.description.split('\n')[0] : '';
+    btn.setAttribute('aria-label', f.name);
+    const name = document.createElement('span');
+    name.className = 'sidebar-item__label';
+    name.textContent = f.name;
+    btn.innerHTML = `<span class="sidebar-item__icon">${ICONS.book}</span>`;
+    btn.appendChild(name);
+    const count = document.createElement('span');
+    count.className = 'sidebar-item__count';
+    count.textContent = f.memories;
+    btn.appendChild(count);
+    if (f.current) {
+      btn.dataset.surface = 'recent';
+      btn.addEventListener('click', () => navigate('recent'));
+      buttons.push(btn);
+    } else {
+      btn.addEventListener('click', async () => {
+        try {
+          await api.useFolder(f.uuid);
+          location.reload();
+        } catch (e) {
+          console.error('[geniuz] switching folder failed:', e);
+        }
+      });
+    }
+    rows.appendChild(btn);
+  }
+  sec.appendChild(rows);
+
+  const archived = list?.archived || [];
+  if (archived.length) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'sidebar-item sidebar-folders__archived';
+    row.innerHTML = `<span class="sidebar-item__icon">${ICONS.archive}</span>
+      <span class="sidebar-item__label">Archived</span>
+      <span class="sidebar-item__count">${archived.length}</span>`;
+    row.addEventListener('click', () => openArchivedDialog(archived));
+    sec.appendChild(row);
+  }
+
+  const notes = [];
+  if (list?.blocked) notes.push(`${list.blocked} blocked as ${list.blocked === 1 ? 'a copy' : 'copies'}`);
+  if (list?.unavailable) notes.push(`${list.unavailable} out of reach`);
+  if (notes.length) {
+    const note = document.createElement('div');
+    note.className = 'sidebar-folders__note';
+    note.textContent = notes.join(' · ');
+    sec.appendChild(note);
+  }
+  return sec;
+}
+
+export function sidebar({ version, stats, folders }) {
   const aside = document.createElement('aside');
   aside.className = 'sidebar';
 
@@ -128,6 +209,8 @@ export function sidebar({ version, stats }) {
   // Track all rendered button elements so we can update active state on
   // store changes without re-rendering the DOM.
   const buttons = [];
+
+  aside.appendChild(foldersSection(folders, buttons));
 
   for (const section of NAV_ITEMS) {
     const sec = document.createElement('div');

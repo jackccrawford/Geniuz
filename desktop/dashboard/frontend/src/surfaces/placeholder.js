@@ -12,7 +12,7 @@ const COPY = {
 
 const GENERIC = {
   title: 'Not available',
-  body: 'This screen is not implemented in this build. Use Recent, Remember, or Find from the sidebar.',
+  body: 'This screen is not implemented in this build. Use Keep or Find from the sidebar.',
 };
 
 export async function mount(container, surfaceId) {

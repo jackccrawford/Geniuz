@@ -1116,3 +1116,47 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
   .main-body { padding-left: var(--s-4); padding-right: var(--s-4); }
   .list-controls { padding-left: var(--s-4); padding-right: var(--s-4); }
 }
+
+
+/* Folders (v5). The list scrolls by itself, so a long one leaves the rest of the
+   sidebar in reach. Collapsed, only the folder in use shows, as the open book. */
+.sidebar-section--folders { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
+.sidebar-folders { overflow-y: auto; max-height: 38vh; display: flex; flex-direction: column; gap: 1px; }
+.sidebar-folders__label { display: flex; align-items: center; justify-content: space-between; }
+.sidebar-folders__add {
+  display: grid; place-items: center; width: 18px; height: 18px; padding: 0;
+  border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer;
+}
+.sidebar-folders__add svg { width: 12px; height: 12px; }
+.sidebar-folders__add:hover { background: rgba(250, 244, 232, 0.12); }
+.sidebar-folders__note { padding: 6px 8px 0; font-size: 11px; opacity: 0.7; }
+.is-collapsed .sidebar-folder:not(.is-current),
+.is-collapsed .sidebar-folders__add,
+.is-collapsed .sidebar-folders__note { display: none; }
+
+.main-header__titles { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.main-header__titles .main-header__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-edit {
+  flex: none; padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--muted, inherit); font: inherit; font-size: 13px; text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.folder-description {
+  margin: 4px 0 0; max-width: 65ch; font-size: 14px; line-height: 1.45;
+  white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.folder-form { display: flex; flex-direction: column; gap: 14px; }
+.folder-form__title { margin: 0; font-size: 20px; }
+.folder-form__description { min-height: 110px; }
+.folder-form__where { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.folder-form__actions { flex-wrap: wrap; }
+.folder-form__spacer { flex: 1; }
+
+.sidebar-folders__archived { margin-top: 2px; opacity: 0.72; }
+.sidebar-folders__archived:hover { opacity: 1; }
+.is-collapsed .sidebar-folders__archived { display: none; }
+.archived-list { display: flex; flex-direction: column; gap: 10px; max-height: 50vh; overflow-y: auto; }
+.archived-row { display: flex; align-items: center; gap: 16px; }
+.archived-row__text { flex: 1; min-width: 0; }
+.archived-row__name { font-weight: 600; overflow-wrap: anywhere; }
+.archived-row__meta { font-size: 13px; opacity: 0.72; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

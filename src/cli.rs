@@ -243,6 +243,10 @@ pub enum Command {
 pub enum FolderCommand {
     /// List your folders. The one in use is marked with *
     List {
+        /// List archived folders instead
+        #[arg(long)]
+        archived: bool,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -318,6 +322,12 @@ pub enum FolderCommand {
 
     /// Retire a folder: hide it and keep it. Nothing is deleted
     Archive {
+        /// Name or 8-character ID
+        name: String,
+    },
+
+    /// Bring an archived folder back
+    Restore {
         /// Name or 8-character ID
         name: String,
     },

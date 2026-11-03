@@ -13,6 +13,7 @@ import * as fmt from '../format.js';
 import { navigate, getState, setState } from '../store.js';
 import * as su from '../stream-ui.js';
 import { openMemory } from '../components/memoryModal.js';
+import { openFolderDialog } from '../components/folderDialog.js';
 
 export async function mount(container) {
   container.innerHTML = `<div class="surface-loading">Loading your memory…</div>`;
@@ -29,7 +30,6 @@ export async function mount(container) {
         <div class="surface-error">
           <h2>Couldn't read your memory.</h2>
           <p>${escapeHtml(e?.message || String(e))}</p>
-          <p>Expected file: <code>~/.geniuz/memory.db</code></p>
         </div>
       </main>
     `;
@@ -40,14 +40,20 @@ export async function mount(container) {
   root.className = 'main';
 
   const direction = getState().sortDirection || 'desc';
+  const folder = (getState().folders?.folders || []).find((f) => f.current);
 
   // Header
   const header = document.createElement('header');
   header.className = 'main-header';
   header.innerHTML = `
-    <h1 class="main-header__title">Your memory</h1>
+    <div class="main-header__titles">
+      <h1 class="main-header__title">${escapeHtml(folder?.name || 'Your memory')}</h1>
+      ${folder ? '<button type="button" class="folder-edit" data-action="edit-folder">Edit</button>' : ''}
+    </div>
+    ${folder?.description ? `<p class="folder-description">${escapeHtml(folder.description)}</p>` : ''}
     <p class="main-header__sub">${fmt.number(stats.total_memories)} ${stats.total_memories === 1 ? 'memory' : 'memories'} · ${fmt.number(stats.this_week)} this week</p>
   `;
+  header.querySelector('[data-action="edit-folder"]')?.addEventListener('click', () => openFolderDialog(folder));
   root.appendChild(header);
 
   // Body — scrolls beneath the fixed header + stats.
@@ -61,7 +67,7 @@ export async function mount(container) {
     empty.className = 'surface-empty';
     empty.innerHTML = `
       <p>No memories yet.</p>
-      <p>Click <button type="button" class="surface-empty__link" data-action="go-remember">Remember</button> in the sidebar to save your first one.</p>
+      <p>Click <button type="button" class="surface-empty__link" data-action="go-remember">Keep</button> in the sidebar to save your first one.</p>
     `;
     const goBtn = empty.querySelector('[data-action="go-remember"]');
     if (goBtn) goBtn.addEventListener('click', () => navigate('remember'));

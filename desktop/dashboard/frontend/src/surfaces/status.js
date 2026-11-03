@@ -8,7 +8,7 @@ import * as api from '../api.js';
 import * as fmt from '../format.js';
 
 export async function mount(container) {
-  container.innerHTML = `<div class="surface-loading">Reading station status…</div>`;
+  container.innerHTML = `<div class="surface-loading">Reading status…</div>`;
 
   let status;
   try {
@@ -22,7 +22,7 @@ export async function mount(container) {
         </header>
         <div class="main-body">
           <div class="surface-error">
-            <h2>Couldn't read station status.</h2>
+            <h2>Couldn't read status.</h2>
             <p>${escapeHtml(e?.message || String(e))}</p>
             <p>Expected file: <code>~/.geniuz/memory.db</code></p>
           </div>

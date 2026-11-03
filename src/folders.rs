@@ -36,6 +36,7 @@ const LEGACY_DB_FILE: &str = "station.db";
 const ADDED_FILE: &str = "added-folders";
 const CURRENT_FILE: &str = "current";
 const ARCHIVE_DIR: &str = "archive";
+const MOVED_MARK: &str = ".moved-";
 const DOTFILE: &str = ".geniuz-folder";
 const DEFAULT_NAME: &str = "My memory";
 const MAX_NAME: usize = 60;
@@ -418,8 +419,7 @@ impl Registry {
     }
 
     /// Retire a folder by moving it into `archive/` beside itself, one level
-    /// below where Geniuz reads. Nothing is deleted. To bring one back, add
-    /// its directory or move it out again.
+    /// below where Geniuz reads. Nothing is deleted, and `restore` brings it back.
     pub fn archive(&self, query: &str) -> Result<PathBuf, String> {
         let folder = self.find(query)?;
         let dir = folder
@@ -453,6 +453,70 @@ impl Registry {
             let _ = std::fs::rename(self.current_path(), self.home.join("current.archived"));
         }
         Ok(target)
+    }
+
+    /// Folders that were archived and can be restored, in every place Geniuz
+    /// reads. A `.moved-` directory is the original of a folder that moved to
+    /// another drive, not an archived folder: it duplicates one in use.
+    pub fn archived(&self) -> Vec<Folder> {
+        let mut roots = vec![self.home.clone()];
+        roots.extend(self.added());
+        let mut out = Vec::new();
+        for root in roots {
+            let Ok(entries) = std::fs::read_dir(root.join(ARCHIVE_DIR)) else { continue };
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().contains(MOVED_MARK) {
+                    continue;
+                }
+                let db = entry.path().join(DB_FILE);
+                if let Some(folder) = read_identity(&db) {
+                    out.push(folder);
+                }
+            }
+        }
+        out.sort_by_key(|f| f.name.to_lowercase());
+        out
+    }
+
+    /// Bring an archived folder back to where it was. Refused if that would
+    /// duplicate a folder in use, by UUID or by name.
+    pub fn restore(&self, query: &str) -> Result<Folder, String> {
+        let q = query.trim().to_lowercase();
+        let archived = self.archived();
+        let folder = archived
+            .iter()
+            .find(|f| {
+                f.name.to_lowercase() == q
+                    || f.uuid.to_lowercase() == q
+                    || (q.len() == SHORT_ID && f.uuid.to_lowercase().starts_with(&q))
+            })
+            .ok_or_else(|| format!("No archived folder called \"{}\".", query))?;
+
+        let scan = self.scan();
+        if let Some(other) = scan.folders.iter().find(|f| f.uuid.eq_ignore_ascii_case(&folder.uuid)) {
+            return Err(format!(
+                "Not restored. The same folder is in use at {}.",
+                other.db_path.display()
+            ));
+        }
+        if scan.folders.iter().any(|f| f.name.eq_ignore_ascii_case(&folder.name)) {
+            return Err(format!(
+                "Not restored. There's already a folder called \"{}\". Rename that one first.",
+                folder.name
+            ));
+        }
+
+        let dir = folder.db_path.parent().ok_or("That folder has no parent directory.")?;
+        let root = dir
+            .parent()
+            .and_then(Path::parent)
+            .ok_or("That folder has no parent directory.")?;
+        let target = root.join(dir.file_name().unwrap_or_default());
+        if target.exists() {
+            return Err(format!("{} already exists.", target.display()));
+        }
+        std::fs::rename(dir, &target).map_err(|e| format!("Couldn't move {}: {}", dir.display(), e))?;
+        self.find(&folder.uuid)
     }
 
     /// Move a folder to another directory, keeping every UUID. Writers are held
@@ -544,6 +608,17 @@ impl Registry {
         let body: String = dirs.iter().map(|d| format!("{}\n", d.display())).collect();
         write_atomic(&self.added_path(), &body)
     }
+}
+
+/// Write a complete backup of a live database to one file: flush the `-wal`
+/// file and hold off writers first, since a plain copy can miss what is in it.
+/// The backup is a file to keep, not a folder to use: it carries the same UUIDs,
+/// so `add` refuses it while the original is present.
+pub fn backup_to(db: &Path, target: &Path) -> Result<u64, String> {
+    let lock = quiesce(db)?;
+    let bytes = std::fs::copy(db, target).map_err(|e| format!("Copy failed: {}", e))?;
+    drop(lock);
+    Ok(bytes)
 }
 
 /// Split an address like `13625F6B:3487B9B0` into folder and memory.
@@ -848,7 +923,7 @@ fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: Connection) 
     std::fs::create_dir_all(&archive)
         .map_err(|e| format!("Couldn't create {}: {}", archive.display(), e))?;
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
-    let retired = archive.join(format!("{}.moved-{}", folder.uuid, stamp));
+    let retired = archive.join(format!("{}{}{}", folder.uuid, MOVED_MARK, stamp));
     if std::fs::rename(dir, &retired).is_err() {
         // Windows again: release the file, then move the directory.
         drop(lock);
@@ -1280,6 +1355,25 @@ mod tests {
     }
 
     #[test]
+    fn a_backup_holds_writes_still_in_the_wal() {
+        let tmp = TempDir::new().unwrap();
+        let db = tmp.path().join(DB_FILE);
+        crate::db::DatabaseManager::new(&db.to_string_lossy()).unwrap();
+        let held = Connection::open(&db).unwrap();
+        held.execute_batch("PRAGMA wal_autocheckpoint=0;").unwrap();
+        held.execute("INSERT INTO memories (memory_uuid, payload) VALUES (?1, '{}')", [M1]).unwrap();
+
+        let target = tmp.path().join("backup.db");
+        backup_to(&db, &target).unwrap();
+        drop(held);
+        let count: i64 = Connection::open(&target)
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
     fn addresses_are_two_eight_character_ids() {
         assert_eq!(
             parse_address("13625f6b:3487B9B0"),
@@ -1431,6 +1525,60 @@ mod tests {
         assert!(!f.db_path.exists());
         assert!(reg.find("Scratch").is_err());
         assert_eq!(reg.resolve(None, None, None).unwrap().parent().unwrap(), reg.home);
+    }
+
+    #[test]
+    fn an_archived_folder_can_be_seen_and_restored_unchanged() {
+        let (_tmp, reg) = setup();
+        let f = reg.create("Scratch", "note", None).unwrap();
+        assert!(reg.archived().is_empty());
+
+        reg.archive("Scratch").unwrap();
+        let archived = reg.archived();
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].uuid, f.uuid);
+        assert!(reg.find("Scratch").is_err());
+
+        let back = reg.restore("scratch").unwrap();
+        assert_eq!(back.uuid, f.uuid);
+        assert_eq!(back.db_path, f.db_path);
+        assert_eq!(back.description, "note");
+        assert!(reg.archived().is_empty());
+    }
+
+    #[test]
+    fn restoring_is_refused_if_the_name_has_been_taken() {
+        let (_tmp, reg) = setup();
+        reg.create("Scratch", "", None).unwrap();
+        reg.archive("Scratch").unwrap();
+        reg.create("scratch", "", None).unwrap();
+
+        assert!(reg.restore("Scratch").unwrap_err().contains("already a folder"));
+        assert_eq!(reg.archived().len(), 1);
+    }
+
+    #[test]
+    fn restoring_is_refused_if_a_copy_is_in_use() {
+        let (tmp, reg) = setup();
+        let f = reg.create("Work", "", None).unwrap();
+        let elsewhere = tmp.path().join("elsewhere");
+        copy_dir(f.db_path.parent().unwrap(), &elsewhere.join("copy"));
+        reg.archive("Work").unwrap();
+        reg.add(&elsewhere).unwrap();
+
+        assert!(reg.restore(&f.uuid).unwrap_err().contains("in use"));
+        assert_eq!(reg.archived().len(), 1);
+    }
+
+    #[test]
+    fn the_original_left_by_a_move_across_drives_is_not_offered_for_restore() {
+        let (tmp, reg) = setup();
+        let f = reg.create("Work", "", None).unwrap();
+        let dest = tmp.path().join("drive");
+        std::fs::create_dir_all(&dest).unwrap();
+        let dir = f.db_path.parent().unwrap().to_path_buf();
+        copy_then_retire(&dir, &dest, &f, quiesce(&f.db_path).unwrap()).unwrap();
+        assert!(reg.archived().is_empty());
     }
 
     #[test]

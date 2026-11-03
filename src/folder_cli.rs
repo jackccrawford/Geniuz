@@ -9,7 +9,8 @@ const CLIPPED: usize = 90;
 pub fn run(cmd: FolderCommand) -> Result<String, String> {
     let reg = Registry::from_env();
     match cmd {
-        FolderCommand::List { json } => list(&reg, json),
+        FolderCommand::List { archived: true, json } => list_archived(&reg, json),
+        FolderCommand::List { archived: false, json } => list(&reg, json),
         FolderCommand::Show { name, json } => show(&reg, name.as_deref(), json),
         FolderCommand::Create { name, description, at } => {
             let f = reg.create(&name, &description, at.as_deref())?;
@@ -50,7 +51,15 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
         }
         FolderCommand::Archive { name } => {
             let to = reg.archive(&name)?;
-            Ok(format!("Archived. Nothing was deleted; it's at {}.", to.display()))
+            Ok(format!(
+                "Archived. Nothing was deleted; it's at {}.\nBring it back with: geniuz folder restore \"{}\"",
+                to.display(),
+                name
+            ))
+        }
+        FolderCommand::Restore { name } => {
+            let f = reg.restore(&name)?;
+            Ok(format!("Restored {}.", f.name))
         }
     }
 }
@@ -88,6 +97,25 @@ fn list(reg: &Registry, json: bool) -> Result<String, String> {
     for dir in &scan.unavailable {
         lines.push(format!("? Can't reach {} right now.", dir.display()));
     }
+    Ok(lines.join("\n"))
+}
+
+fn list_archived(reg: &Registry, json: bool) -> Result<String, String> {
+    let archived = reg.archived();
+    if json {
+        let rows: Vec<_> = archived.iter().map(|f| folder_json(f, false)).collect();
+        return serde_json::to_string_pretty(&rows).map_err(|e| e.to_string());
+    }
+    if archived.is_empty() {
+        return Ok("No archived folders.".to_string());
+    }
+    let lines: Vec<_> = archived
+        .iter()
+        .map(|f| {
+            let (count, _) = f.stats().unwrap_or((0, None));
+            format!("{} | {} | {} — {}", f.short_id(), f.name, memories(count), clip(&f.description))
+        })
+        .collect();
     Ok(lines.join("\n"))
 }
 

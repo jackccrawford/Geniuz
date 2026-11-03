@@ -16,6 +16,38 @@ export function getAppVersion() {
   return invoke('get_app_version');
 }
 
+export function listFolders() {
+  return invoke('list_folders');
+}
+
+export function useFolder(uuid) {
+  return invoke('use_folder', { uuid });
+}
+
+export function createFolder(name, description) {
+  return invoke('create_folder', { name, description });
+}
+
+export function updateFolder(uuid, name, description) {
+  return invoke('update_folder', { uuid, name, description });
+}
+
+export function addFolders(path) {
+  return invoke('add_folders', { path });
+}
+
+export function moveFolder(uuid, to) {
+  return invoke('move_folder', { uuid, to });
+}
+
+export function archiveFolder(uuid) {
+  return invoke('archive_folder', { uuid });
+}
+
+export function restoreFolder(uuid) {
+  return invoke('restore_folder', { uuid });
+}
+
 export function getStationStats() {
   return invoke('get_station_stats');
 }
