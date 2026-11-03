@@ -326,6 +326,18 @@ pub enum FolderCommand {
         name: String,
     },
 
+    /// Keep a folder at the top of every list
+    Pin {
+        /// Name or 8-character ID
+        name: String,
+    },
+
+    /// Stop keeping a folder at the top
+    Unpin {
+        /// Name or 8-character ID
+        name: String,
+    },
+
     /// Bring an archived folder back
     Restore {
         /// Name or 8-character ID

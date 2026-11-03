@@ -188,6 +188,20 @@ export async function mount(container) {
       });
     }
     paint();
+    if (allFolders.length > 10) {
+      const narrow = document.createElement('input');
+      narrow.type = 'search';
+      narrow.className = 'find-folders__filter';
+      narrow.placeholder = 'Filter folders';
+      narrow.setAttribute('aria-label', 'Filter folders');
+      narrow.addEventListener('input', () => {
+        const q = narrow.value.trim().toLowerCase();
+        for (const { btn, id } of chips) {
+          btn.hidden = !!id && !!q && !btn.textContent.toLowerCase().includes(q);
+        }
+      });
+      picker.insertBefore(narrow, label.nextSibling);
+    }
     body.appendChild(picker);
   }
 

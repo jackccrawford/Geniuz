@@ -52,6 +52,26 @@ export function restoreFolder(uuid) {
   return invoke('restore_folder', { uuid });
 }
 
+export function pinFolder(uuid, on) {
+  return invoke('pin_folder', { uuid, on });
+}
+
+export function resolveAddress(address) {
+  return invoke('resolve_address', { address });
+}
+
+export function getShortcuts() {
+  return invoke('get_shortcuts');
+}
+
+export function setShortcut(id, keys) {
+  return invoke('set_shortcut', { id, keys });
+}
+
+export function refreshMenu(shortcuts = true) {
+  return invoke('refresh_menu', { shortcuts });
+}
+
 export function getStationStats() {
   return invoke('get_station_stats');
 }

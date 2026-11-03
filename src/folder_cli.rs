@@ -57,6 +57,14 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
                 name
             ))
         }
+        FolderCommand::Pin { name } => {
+            let f = reg.set_pinned(&name, true)?;
+            Ok(format!("Pinned {}.", f.name))
+        }
+        FolderCommand::Unpin { name } => {
+            let f = reg.set_pinned(&name, false)?;
+            Ok(format!("Unpinned {}.", f.name))
+        }
         FolderCommand::Restore { name } => {
             let f = reg.restore(&name)?;
             Ok(format!("Restored {}.", f.name))

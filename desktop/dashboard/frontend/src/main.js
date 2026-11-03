@@ -11,6 +11,8 @@ import * as settings from './surfaces/settings.js';
 import * as dataSurface from './surfaces/data.js';
 import * as placeholder from './surfaces/placeholder.js';
 import { subscribe, getState, setState, navigate } from './store.js';
+import { openMemory } from './components/memoryModal.js';
+import { openFolderDialog } from './components/folderDialog.js';
 
 // Tag the document so CSS can target Tauri-specific rules.
 if (window.__TAURI__) {
@@ -53,6 +55,8 @@ async function bootstrap() {
     }
   }
   setState({ appVersion: version, dataDir, folders });
+  // The menu lists folders, so it follows whatever this load found.
+  if (api.isTauri()) api.refreshMenu(true).catch((e) => console.error('[geniuz] menu:', e));
 
   // Sidebar
   const appShell = document.getElementById('app-shell');
@@ -121,6 +125,15 @@ async function wireMenuEvents() {
 
   const handleNav = async (id) => {
     switch (id) {
+      case 'menu_keep':
+        navigate('remember');
+        break;
+      case 'menu_new_folder':
+        openFolderDialog();
+        break;
+      case 'menu_archived':
+        navigate('archived');
+        break;
       case 'menu_recent':
       case 'tray_recent':
         navigate('recent');
@@ -150,6 +163,12 @@ async function wireMenuEvents() {
       // menu_about and menu_website are handled in Rust (src/lib.rs
       // on_menu_event) and never reach the frontend.
       default:
+        if (id.startsWith('menu_folder:')) {
+          api.useFolder(id.slice('menu_folder:'.length))
+            .then(() => location.reload())
+            .catch((e) => console.error('[geniuz] switching folder failed:', e));
+          break;
+        }
         console.warn('[geniuz] unhandled nav event:', id);
     }
   };
@@ -172,6 +191,25 @@ window.addEventListener('focus', async () => {
     console.error('[geniuz] checking the folder failed:', e);
   }
 });
+
+// An address in any memory's text opens that memory, whichever folder it's in.
+document.addEventListener('click', async (ev) => {
+  const chip = ev.target.closest?.('.sptr');
+  if (!chip) return;
+  ev.stopPropagation();
+  ev.preventDefault();
+  try {
+    const target = await api.resolveAddress(chip.textContent.trim());
+    if (target) {
+      openMemory(target.uuid, { folder: target.folder });
+    } else {
+      chip.classList.add('is-missing');
+      chip.title = 'No memory at this address in your folders';
+    }
+  } catch (e) {
+    console.error('[geniuz] opening an address failed:', e);
+  }
+}, true);
 
 bootstrap();
 wireMenuEvents();

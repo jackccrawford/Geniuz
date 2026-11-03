@@ -168,6 +168,8 @@ export async function mount(container) {
       ]));
     }
 
+    shell.appendChild(shortcutsSection());
+
     // About
     const aboutSection = document.createElement('section');
     aboutSection.className = 'settings-section';
@@ -204,6 +206,106 @@ export async function mount(container) {
 }
 
 // ---- inline helpers --------------------------------------------------------
+
+// ---- Keyboard shortcuts ----------------------------------------------------
+// These save as soon as they're set, and appear in the menu at once. They have
+// nothing to do with the Save bar above, which is for the shared settings file.
+
+function pretty(keys) {
+  if (!keys) return 'None';
+  const mac = /Mac/.test(navigator.platform);
+  return keys
+    .replace('CmdOrCtrl', mac ? '⌘' : 'Ctrl')
+    .replace('Shift', mac ? '⇧' : 'Shift')
+    .replace('Alt', mac ? '⌥' : 'Alt')
+    .replace('Comma', ',')
+    .split('+')
+    .join(mac ? '' : '+');
+}
+
+function keysFromEvent(e) {
+  if (['Meta', 'Control', 'Shift', 'Alt'].includes(e.key)) return null;
+  const parts = [];
+  if (e.metaKey || e.ctrlKey) parts.push('CmdOrCtrl');
+  if (e.altKey) parts.push('Alt');
+  if (e.shiftKey) parts.push('Shift');
+  if (!parts.length) return null; // a plain letter would fire while typing
+  const code = e.code.replace(/^Key/, '').replace(/^Digit/, '');
+  parts.push(code === 'Comma' ? ',' : code);
+  return parts.join('+');
+}
+
+function shortcutsSection() {
+  const sec = document.createElement('section');
+  sec.className = 'settings-section';
+  sec.innerHTML = '<div class="settings-section__label">Keyboard shortcuts</div>';
+  const list = document.createElement('div');
+  sec.appendChild(list);
+  const note = document.createElement('div');
+  note.className = 'settings-row__help shortcut-note';
+  note.textContent = '⌘1 to ⌘9 switch to your first nine folders, in sidebar order.'.replace('⌘1', /Mac/.test(navigator.platform) ? '⌘1' : 'Ctrl+1').replace('⌘9', /Mac/.test(navigator.platform) ? '⌘9' : 'Ctrl+9');
+  sec.appendChild(note);
+  const status = document.createElement('div');
+  status.className = 'shortcut-status';
+  status.setAttribute('aria-live', 'polite');
+  sec.appendChild(status);
+
+  const draw = async () => {
+    const rows = await api.getShortcuts();
+    list.innerHTML = '';
+    for (const s of rows) {
+      const keysBtn = document.createElement('button');
+      keysBtn.type = 'button';
+      keysBtn.className = 'btn btn--ghost shortcut-keys';
+      keysBtn.textContent = pretty(s.keys);
+      keysBtn.title = 'Click, then press the new keys. Delete clears it, Esc cancels.';
+      keysBtn.addEventListener('click', () => record(s, keysBtn));
+      const wrap = document.createElement('div');
+      wrap.className = 'shortcut-control';
+      wrap.appendChild(keysBtn);
+      if (s.keys !== s.default_keys) {
+        const reset = document.createElement('button');
+        reset.type = 'button';
+        reset.className = 'shortcut-reset';
+        reset.textContent = 'Reset';
+        reset.addEventListener('click', () => save(s, s.default_keys));
+        wrap.appendChild(reset);
+      }
+      list.appendChild(row({ title: s.label, control: wrap }));
+    }
+  };
+
+  const save = async (s, keys) => {
+    try {
+      await api.setShortcut(s.id, keys);
+      status.textContent = '';
+    } catch (e) {
+      status.textContent = e?.message || String(e);
+    }
+    await api.refreshMenu(true).catch(() => {});
+    await draw();
+  };
+
+  // The menu would act on these keys first, so it goes without shortcuts meanwhile.
+  const record = async (s, btn) => {
+    btn.textContent = 'Press keys…';
+    btn.classList.add('is-recording');
+    await api.refreshMenu(false).catch(() => {});
+    const onKey = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'Escape') { finish(); api.refreshMenu(true).catch(() => {}); draw(); return; }
+      if (e.key === 'Backspace' || e.key === 'Delete') { finish(); save(s, ''); return; }
+      const keys = keysFromEvent(e);
+      if (keys) { finish(); save(s, keys); }
+    };
+    const finish = () => window.removeEventListener('keydown', onKey, true);
+    window.addEventListener('keydown', onKey, true);
+  };
+
+  draw().catch((e) => { status.textContent = e?.message || String(e); });
+  return sec;
+}
 
 function section(label, rows) {
   const sec = document.createElement('section');

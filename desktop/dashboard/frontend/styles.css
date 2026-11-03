@@ -1188,3 +1188,43 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   border: 1px solid var(--hairline-2); border-radius: 999px;
 }
+
+/* v5: filter, pins, addresses, the empty folder, shortcuts. */
+.sidebar-folders__filter, .find-folders__filter {
+  font: inherit; font-size: 13px; padding: 4px 8px; border-radius: 5px;
+}
+.sidebar-folders__filter {
+  margin: 0 var(--s-2) 6px; color: inherit; background: rgba(250, 244, 232, 0.08);
+  border: 1px solid rgba(250, 244, 232, 0.16);
+}
+.sidebar-folders__filter::placeholder { color: rgba(250, 244, 232, 0.5); }
+.is-collapsed .sidebar-folders__filter { display: none; }
+.find-folders__filter { width: 140px; color: var(--ink-1); background: transparent; border: 1px solid var(--hairline-2); }
+.sidebar-folder[hidden], .find-folder[hidden] { display: none; }
+.sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned) { margin-top: 6px; position: relative; }
+.sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned)::before {
+  content: ''; position: absolute; left: 8px; right: 8px; top: -4px; height: 1px; background: rgba(250, 244, 232, 0.16);
+}
+.is-collapsed .sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned)::before { display: none; }
+.sptr { cursor: pointer; }
+.sptr:hover { text-decoration: underline; }
+.sptr.is-missing { opacity: 0.6; cursor: default; text-decoration: none; }
+.folder-welcome__title { font-size: 18px; font-weight: 600; color: var(--ink-1); }
+.folder-welcome__actions { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; margin-top: 14px; }
+.shortcut-control { display: flex; align-items: center; gap: 8px; }
+.shortcut-keys { min-width: 96px; font-variant-numeric: tabular-nums; }
+.shortcut-keys.is-recording { outline: 2px solid #2F94A6; }
+.shortcut-reset { padding: 0; border: 0; background: none; font: inherit; font-size: 12px; cursor: pointer; color: var(--ink-3); text-decoration: underline; }
+.shortcut-note { padding: 8px 0 0; }
+.shortcut-status { min-height: 18px; font-size: 13px; color: var(--status-bad, #b3402a); padding-top: 4px; }
+
+.sidebar-folder__pin {
+  flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px;
+  opacity: 0; cursor: pointer; color: inherit;
+}
+.sidebar-folder__pin svg { width: 13px; height: 13px; }
+.sidebar-folder:hover .sidebar-folder__pin { opacity: 0.7; }
+.sidebar-folder__pin.is-on { opacity: 1; }
+.sidebar-folder__pin.is-on svg { fill: currentColor; }
+.sidebar-folder__pin:hover { opacity: 1; background: rgba(250, 244, 232, 0.14); }
+.is-collapsed .sidebar-folder__pin { display: none; }

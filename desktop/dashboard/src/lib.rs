@@ -442,6 +442,7 @@ struct FolderRow {
     current: bool,
     /// The first folder lives beside the others, so it stays where it is.
     fixed: bool,
+    pinned: bool,
 }
 
 #[derive(Serialize)]
@@ -452,7 +453,7 @@ struct FolderList {
     unavailable: usize,
 }
 
-fn folder_row(f: &Folder, current: Option<&str>) -> FolderRow {
+fn folder_row(f: &Folder, current: Option<&str>, pinned: bool) -> FolderRow {
     let canonical = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let (memories, last_written) = f.stats().unwrap_or((0, None));
     let dir = f.db_path.parent().unwrap_or(&f.db_path);
@@ -466,6 +467,7 @@ fn folder_row(f: &Folder, current: Option<&str>) -> FolderRow {
         location: dir.to_string_lossy().into_owned(),
         current: current.is_some_and(|c| c.eq_ignore_ascii_case(&f.uuid)),
         fixed: canonical(dir) == canonical(&geniuz::data_dir()),
+        pinned,
     }
 }
 
@@ -485,9 +487,14 @@ fn list_folders() -> FolderList {
 /// The list, with `current` marking exactly this folder.
 fn folder_list(reg: &Registry, current: Option<&str>) -> FolderList {
     let scan = reg.scan();
+    let pins = reg.pinned();
     FolderList {
-        folders: scan.folders.iter().map(|f| folder_row(f, current)).collect(),
-        archived: reg.archived().iter().map(|f| folder_row(f, None)).collect(),
+        folders: scan
+            .folders
+            .iter()
+            .map(|f| folder_row(f, current, pins.iter().any(|p| p.eq_ignore_ascii_case(&f.uuid))))
+            .collect(),
+        archived: reg.archived().iter().map(|f| folder_row(f, None, false)).collect(),
         blocked: scan.blocked.len(),
         unavailable: scan.unavailable.len() + scan.pending_moves.len(),
     }
@@ -567,6 +574,126 @@ fn archive_folder(uuid: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn pin_folder(uuid: String, on: bool) -> Result<(), String> {
+    Registry::from_env().set_pinned(&uuid, on).map(|_| ())
+}
+
+/// Where an address points, so a click on one can open it from anywhere.
+#[tauri::command]
+fn resolve_address(address: String) -> Option<PointerTarget> {
+    let (folder, memory) = geniuz::folders::parse_address(&address)?;
+    let f = Registry::from_env().find(&folder).ok()?;
+    let db = DatabaseManager::open_existing(&f.db_path.to_string_lossy()).ok()?;
+    let here = db.get_by_uuid_prefix(&memory).ok().flatten()?;
+    Some(PointerTarget { folder: f.uuid, uuid: here.memory_uuid })
+}
+
+// ---- Keyboard shortcuts ----
+//
+// Their own file, not settings.json: the menubar app rewrites that file from a
+// fixed list of fields, so anything else in it would be lost.
+
+/// Every action with a shortcut: menu ID, what it's called, and its default.
+const SHORTCUTS: [(&str, &str, &str); 9] = [
+    ("menu_keep", "Keep", "CmdOrCtrl+N"),
+    ("menu_find", "Find", "CmdOrCtrl+K"),
+    ("menu_recent", "Memories", "CmdOrCtrl+0"),
+    ("menu_new_folder", "New folder", "CmdOrCtrl+Shift+N"),
+    ("menu_sidebar", "Toggle sidebar", "CmdOrCtrl+B"),
+    ("menu_status", "Status", "CmdOrCtrl+Shift+S"),
+    ("menu_settings", "Settings", "CmdOrCtrl+,"),
+    ("menu_export", "Export this folder", "CmdOrCtrl+Shift+E"),
+    ("menu_refresh", "Refresh", "CmdOrCtrl+R"),
+];
+
+fn shortcuts_path() -> std::path::PathBuf {
+    geniuz::data_dir().join("shortcuts.json")
+}
+
+fn saved_shortcuts() -> std::collections::HashMap<String, String> {
+    std::fs::read_to_string(shortcuts_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+/// The keys for this action, or none if the person cleared them.
+fn shortcut_for(saved: &std::collections::HashMap<String, String>, id: &str) -> Option<String> {
+    let default = SHORTCUTS.iter().find(|s| s.0 == id).map(|s| s.2.to_string());
+    match saved.get(id) {
+        Some(keys) if keys.is_empty() => None,
+        Some(keys) => Some(keys.clone()),
+        None => default,
+    }
+}
+
+#[derive(Serialize)]
+struct ShortcutRow {
+    id: String,
+    label: String,
+    keys: String,
+    default_keys: String,
+}
+
+#[tauri::command]
+fn get_shortcuts() -> Vec<ShortcutRow> {
+    let saved = saved_shortcuts();
+    SHORTCUTS
+        .iter()
+        .map(|(id, label, default)| ShortcutRow {
+            id: id.to_string(),
+            label: label.to_string(),
+            keys: shortcut_for(&saved, id).unwrap_or_default(),
+            default_keys: default.to_string(),
+        })
+        .collect()
+}
+
+/// Save one action's keys, and show them in the menu at once. Empty clears them.
+/// Refused, with nothing changed, if another action has them or they aren't keys
+/// the menu can use.
+#[tauri::command]
+fn set_shortcut(app: tauri::AppHandle, id: String, keys: String) -> Result<(), String> {
+    if !SHORTCUTS.iter().any(|s| s.0 == id) {
+        return Err("That isn't an action with a shortcut.".to_string());
+    }
+    let mut saved = saved_shortcuts();
+    if !keys.is_empty() {
+        let same = |a: &str, b: &str| a.eq_ignore_ascii_case(b);
+        for (other, label, _) in SHORTCUTS {
+            if other != id && shortcut_for(&saved, other).is_some_and(|k| same(&k, &keys)) {
+                return Err(format!("{} already uses those keys.", label));
+            }
+        }
+        if (1..=9).any(|n| same(&keys, &format!("CmdOrCtrl+{}", n))) {
+            return Err("Those keys switch to your first nine folders.".to_string());
+        }
+    }
+    let before = saved.clone();
+    saved.insert(id, keys);
+    let write = |map: &std::collections::HashMap<String, String>| -> Result<(), String> {
+        let body = serde_json::to_string_pretty(map).map_err(|e| e.to_string())?;
+        std::fs::write(shortcuts_path(), body).map_err(|e| format!("Couldn't save: {}", e))
+    };
+    write(&saved)?;
+    match build_menu(&app, true) {
+        Ok(menu) => app.set_menu(menu).map(|_| ()).map_err(|e| e.to_string()),
+        Err(_) => {
+            let _ = write(&before);
+            Err("The menu can't use those keys. Try another combination.".to_string())
+        }
+    }
+}
+
+/// Rebuild the menu, for a change in the folders. While recording a new shortcut
+/// the menu goes without any, or it would act on the keys being recorded.
+#[tauri::command]
+fn refresh_menu(app: tauri::AppHandle, shortcuts: bool) -> Result<(), String> {
+    let menu = build_menu(&app, shortcuts).map_err(|e| e.to_string())?;
+    app.set_menu(menu).map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn restore_folder(uuid: String) -> Result<(), String> {
     Registry::from_env().restore(&uuid).map(|_| ())
 }
@@ -639,19 +766,24 @@ fn dir_size(path: &std::path::Path) -> std::io::Result<u64> {
 // Menu items with `id` emit menu events that the frontend listens for via
 // `tauri::Emitter`-relayed window events ("menu:<id>"). Predefined items
 // (undo/redo/cut/copy/paste/etc.) work without any wiring.
-fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    // File menu — surface-level navigation accelerators
-    let mi_find = MenuItem::with_id(app, "menu_find", "Find…", true, Some("CmdOrCtrl+K"))?;
-    let mi_recent = MenuItem::with_id(app, "menu_recent", "Show Recent", true, Some("CmdOrCtrl+1"))?;
-    let mi_status = MenuItem::with_id(app, "menu_status", "Show Status", true, Some("CmdOrCtrl+2"))?;
-    let mi_settings = MenuItem::with_id(app, "menu_settings", "Settings…", true, Some("CmdOrCtrl+,"))?;
-    let mi_export = MenuItem::with_id(app, "menu_export", "Export memory.db…", true, Some("CmdOrCtrl+Shift+E"))?;
+fn build_menu(app: &tauri::AppHandle, shortcuts: bool) -> tauri::Result<Menu<tauri::Wry>> {
+    let saved = saved_shortcuts();
+    let keys = |id: &str| if shortcuts { shortcut_for(&saved, id) } else { None };
+    let item = |id: &str, label: &str| MenuItem::with_id(app, id, label, true, keys(id));
+
+    let mi_keep = item("menu_keep", "Keep…")?;
+    let mi_find = item("menu_find", "Find…")?;
+    let mi_recent = item("menu_recent", "Memories")?;
+    let mi_status = item("menu_status", "Status")?;
+    let mi_settings = item("menu_settings", "Settings…")?;
+    let mi_export = item("menu_export", "Export This Folder…")?;
 
     let file_menu = Submenu::with_items(
         app,
         "File",
         true,
         &[
+            &mi_keep,
             &mi_find,
             &mi_recent,
             &mi_status,
@@ -662,6 +794,18 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &PredefinedMenuItem::close_window(app, Some("Close"))?,
         ],
     )?;
+
+    // Folders: the same order as the sidebar, with the first nine a keystroke away.
+    let list = list_folders();
+    let folders_menu = Submenu::new(app, "Folders", true)?;
+    folders_menu.append(&item("menu_new_folder", "New Folder…")?)?;
+    folders_menu.append(&MenuItem::with_id(app, "menu_archived", "Archived", true, None::<&str>)?)?;
+    folders_menu.append(&PredefinedMenuItem::separator(app)?)?;
+    for (i, f) in list.folders.iter().enumerate() {
+        let accel = (shortcuts && i < 9).then(|| format!("CmdOrCtrl+{}", i + 1));
+        let label = if f.current { format!("✓ {}", f.name) } else { f.name.clone() };
+        folders_menu.append(&MenuItem::with_id(app, format!("menu_folder:{}", f.uuid), label, true, accel)?)?;
+    }
 
     let edit_menu = Submenu::with_items(
         app,
@@ -683,8 +827,8 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         "View",
         true,
         &[
-            &MenuItem::with_id(app, "menu_sidebar", "Toggle Sidebar", true, Some("CmdOrCtrl+B"))?,
-            &MenuItem::with_id(app, "menu_refresh", "Refresh", true, Some("CmdOrCtrl+R"))?,
+            &item("menu_sidebar", "Toggle Sidebar")?,
+            &item("menu_refresh", "Refresh")?,
             &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::fullscreen(app, None)?,
         ],
@@ -714,7 +858,7 @@ fn build_menu(app: &tauri::AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
 
     Menu::with_items(
         app,
-        &[&file_menu, &edit_menu, &view_menu, &window_menu, &help_menu],
+        &[&file_menu, &edit_menu, &folders_menu, &view_menu, &window_menu, &help_menu],
     )
 }
 
@@ -774,10 +918,15 @@ pub fn run() {
             move_folder,
             archive_folder,
             restore_folder,
+            pin_folder,
+            resolve_address,
+            get_shortcuts,
+            set_shortcut,
+            refresh_menu,
         ])
         .setup(|app| {
             let handle = app.handle();
-            let menu = build_menu(handle)?;
+            let menu = build_menu(handle, true)?;
             app.set_menu(menu)?;
 
             // Native vibrancy — the window is `transparent: true` in

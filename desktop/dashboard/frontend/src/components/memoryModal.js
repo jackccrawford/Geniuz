@@ -5,6 +5,7 @@
 
 import * as api from '../api.js';
 import * as su from '../stream-ui.js';
+import { getState } from '../store.js';
 
 let dialog = null;
 
@@ -63,7 +64,9 @@ export async function openMemory(uuid, { onClose, folder = null } = {}) {
 
   const { tag, rest } = su.splitGist(m.gist || '');
   const text = su.bodyAfterGist(m.content, m.gist);
-  const id = String(m.uuid).slice(0, 8);
+  // The full address works from any folder, so that's what gets copied.
+  const folderId = folder || (getState().folders?.folders || []).find((f) => f.current)?.uuid || '';
+  const id = `${String(folderId).slice(0, 8)}:${String(m.uuid).slice(0, 8)}`.toUpperCase();
   d.innerHTML = panel(`
     <header class="memory-modal__head">
       ${su.mark(tag, 36, rest)}
@@ -75,14 +78,14 @@ export async function openMemory(uuid, { onClose, folder = null } = {}) {
     <div class="memory-modal__text">${text ? su.renderText(text) : ''}</div>
     <footer class="memory-modal__foot">
       <span>${su.esc(su.timeFull(m.created_at))}</span>
-      <button type="button" class="memory-modal__id" title="Copy the full ID">${su.esc(id)}</button>
+      <button type="button" class="memory-modal__id" title="Copy this memory's address">${su.esc(id)}</button>
     </footer>
   `);
   wire();
   const idBtn = d.querySelector('.memory-modal__id');
   idBtn.addEventListener('click', async () => {
     try {
-      await navigator.clipboard.writeText(m.uuid);
+      await navigator.clipboard.writeText(id);
       idBtn.textContent = 'Copied';
       setTimeout(() => { idBtn.textContent = id; }, 1200);
     } catch (e) {

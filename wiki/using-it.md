@@ -73,9 +73,11 @@ geniuz folder remove /some/directory
 geniuz folder move Clients --to /some/directory
 geniuz folder archive Clients
 geniuz folder restore Clients
+geniuz folder pin Clients
+geniuz folder unpin Clients
 ```
 
-In the dashboard, folders are in the sidebar. To give a project its own folder, put the folder's name in a `.geniuz-folder` file in the project.
+In the dashboard, folders are in the sidebar and in the Folders menu, where the first nine have a shortcut. Pinned folders come first in every list. Keep has a pulldown for choosing a folder, and Find can search any selection of them. You can change the keyboard shortcuts in Settings. To give a project its own folder, put the folder's name in a `.geniuz-folder` file in the project.
 
 Editing a description keeps the old wording. Your first folder, "My memory", can be renamed, but it can't be moved or archived, because other files live beside it.
 

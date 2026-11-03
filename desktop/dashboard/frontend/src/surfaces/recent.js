@@ -66,9 +66,14 @@ export async function mount(container) {
     const empty = document.createElement('div');
     empty.className = 'surface-empty';
     empty.innerHTML = `
-      <p>No memories yet.</p>
-      <p>Click <button type="button" class="surface-empty__link" data-action="go-remember">Keep</button> in the sidebar to save your first one.</p>
+      <p class="folder-welcome__title">${escapeHtml(folder?.name || 'This folder')} is empty.</p>
+      ${folder?.description ? '' : '<p>What should whoever comes here next know? Say so in its description.</p>'}
+      <div class="folder-welcome__actions">
+        <button type="button" class="btn btn--primary" data-action="go-remember">Keep something here</button>
+        ${folder?.description ? '' : '<button type="button" class="btn btn--ghost" data-action="edit-folder">Add a description</button>'}
+      </div>
     `;
+    empty.querySelector('[data-action="edit-folder"]')?.addEventListener('click', () => openFolderDialog(folder));
     const goBtn = empty.querySelector('[data-action="go-remember"]');
     if (goBtn) goBtn.addEventListener('click', () => navigate('remember'));
     body.appendChild(empty);

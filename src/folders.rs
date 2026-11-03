@@ -36,6 +36,7 @@ const DB_FILE: &str = "memory.db";
 const LEGACY_DB_FILE: &str = "station.db";
 const ADDED_FILE: &str = "added-folders";
 const CURRENT_FILE: &str = "current";
+const PINNED_FILE: &str = "pinned-folders";
 const ARCHIVE_DIR: &str = "archive";
 const MOVED_MARK: &str = ".moved-";
 const MOVING_PREFIX: &str = ".moving-";
@@ -218,7 +219,33 @@ impl Registry {
                 out.folders.push(folder);
             }
         }
-        out.folders.sort_by_key(|f| name_key(&f.name));
+        // Pinned first, then by name, so every surface offers the same order.
+        let pinned = self.pinned();
+        out.folders.sort_by_key(|f| {
+            (!pinned.iter().any(|p| p.eq_ignore_ascii_case(&f.uuid)), name_key(&f.name))
+        });
+    }
+
+    /// The UUIDs of pinned folders. A pin outlives a rename or a move.
+    pub fn pinned(&self) -> Vec<String> {
+        std::fs::read_to_string(self.home.join(PINNED_FILE))
+            .map(|s| s.lines().map(str::trim).filter(|l| !l.is_empty()).map(String::from).collect())
+            .unwrap_or_default()
+    }
+
+    /// Pin a folder to the top of every list, or stop.
+    pub fn set_pinned(&self, query: &str, on: bool) -> Result<Folder, String> {
+        self.with_registry_lock(|| {
+            let folder = self.find(query)?;
+            let mut all = self.pinned();
+            all.retain(|p| !p.eq_ignore_ascii_case(&folder.uuid));
+            if on {
+                all.push(folder.uuid.clone());
+            }
+            let body: String = all.iter().map(|p| format!("{}\n", p)).collect();
+            write_atomic(&self.home.join(PINNED_FILE), &body)?;
+            Ok(folder)
+        })
     }
 
     /// Find a folder by name (ignoring case), UUID, or the first eight
@@ -695,6 +722,7 @@ impl Registry {
         Ok(())
     }
 
+    #[cfg(test)]
     fn remember_added(&self, dir: &Path) -> Result<(), String> {
         self.with_registry_lock(|| self.remember_added_unlocked(dir))
     }
@@ -2036,6 +2064,21 @@ mod tests {
         std::fs::hard_link(&f.db_path, linked.join(DB_FILE)).unwrap();
         let err = reg.find("Work").unwrap_err();
         assert!(err.contains("two names for one file"), "{}", err);
+    }
+
+    #[test]
+    fn pinned_folders_come_first_and_stay_pinned_through_a_rename() {
+        let (_tmp, reg) = setup();
+        reg.create("Apple", "", None).unwrap();
+        reg.create("Zebra", "", None).unwrap();
+        reg.set_pinned("Zebra", true).unwrap();
+        assert_eq!(names(&reg), vec!["Zebra", "Apple", DEFAULT_NAME]);
+
+        reg.rename("Zebra", "Yak").unwrap();
+        assert_eq!(names(&reg)[0], "Yak");
+
+        reg.set_pinned("Yak", false).unwrap();
+        assert_eq!(names(&reg), vec!["Apple", DEFAULT_NAME, "Yak"]);
     }
 
     #[test]

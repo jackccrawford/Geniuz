@@ -5,6 +5,7 @@
 import { navigate, subscribe, getState } from '../store.js';
 import * as fmt from '../format.js';
 import * as api from '../api.js';
+import * as su from '../stream-ui.js';
 import { openFolderDialog } from './folderDialog.js';
 
 // Collapsing (Jack, 2026-11-02). Below this width the sidebar collapses to its
@@ -101,6 +102,7 @@ const NAV_ITEMS = [
 ];
 
 const ICONS = {
+  pin:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l-1 7 3 4v2H7v-2l3-4z"/></svg>',
   archive:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/></svg>',
   panel:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M9 4.5v15"/></svg>',
   plus:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
@@ -113,6 +115,16 @@ const ICONS = {
   // on teal-navy ground, self-contained color tile). Final canonical form.
   wall:     '<svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><defs><radialGradient id="geniuz-mark-grad" cx="28%" cy="18%" r="120%"><stop offset="0%" stop-color="#1E7D8C"/><stop offset="58%" stop-color="#134E5A"/><stop offset="100%" stop-color="#0E3540"/></radialGradient></defs><rect width="24" height="24" rx="5.5" fill="url(#geniuz-mark-grad)"/><rect x="3.97" y="3.97" width="4.73" height="3.31" rx="0.93" fill="#2F94A6"/><rect x="9.63" y="3.97" width="4.73" height="3.31" rx="0.93" fill="#2F94A6"/><rect x="15.30" y="3.97" width="4.73" height="3.31" rx="0.93" fill="#1A6E7C"/><rect x="3.97" y="8.22" width="4.73" height="3.31" rx="0.93" fill="#2F94A6"/><rect x="9.63" y="8.22" width="4.73" height="3.31" rx="0.93" fill="#F2EADA"/><rect x="15.30" y="8.22" width="4.73" height="3.31" rx="0.93" fill="#F2EADA"/><rect x="3.97" y="12.47" width="4.73" height="3.31" rx="0.93" fill="#1A6E7C"/><rect x="9.63" y="12.47" width="4.73" height="3.31" rx="0.93" fill="#F2EADA"/><rect x="15.30" y="12.47" width="4.73" height="3.31" rx="0.93" fill="#E0A43B"/><rect x="3.97" y="16.72" width="4.73" height="3.31" rx="0.93" fill="#1A6E7C"/><rect x="9.63" y="16.72" width="4.73" height="3.31" rx="0.93" fill="#1A6E7C"/><rect x="15.30" y="16.72" width="4.73" height="3.31" rx="0.93" fill="#1A6E7C"/></svg>',
 };
+
+const FILTER_FROM = 10;
+
+/** On hover: what it's for, and whether it's alive. */
+function folderTip(f) {
+  const lines = [];
+  if (f.description) lines.push(f.description.split('\n')[0]);
+  lines.push(f.last_written ? `Last written ${su.timeFull(f.last_written)}` : 'Nothing kept here yet');
+  return lines.join('\n');
+}
 
 // Folders replace the Memories row. Choosing one reloads the app, so nothing on
 // screen can still be showing the last folder's memories.
@@ -135,18 +147,52 @@ function foldersSection(list, buttons) {
 
   const rows = document.createElement('div');
   rows.className = 'sidebar-folders';
+  // A long list needs finding things in, not just scrolling.
+  if ((list?.folders || []).length > FILTER_FROM) {
+    const filter = document.createElement('input');
+    filter.type = 'search';
+    filter.className = 'sidebar-folders__filter';
+    filter.placeholder = 'Filter folders';
+    filter.setAttribute('aria-label', 'Filter folders');
+    filter.addEventListener('input', () => {
+      const q = filter.value.trim().toLowerCase();
+      for (const row of rows.children) {
+        row.hidden = !!q && !row.dataset.tip?.toLowerCase().includes(q);
+      }
+    });
+    sec.appendChild(filter);
+  }
   for (const f of list?.folders || []) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `sidebar-item sidebar-folder${f.current ? ' is-current' : ''}`;
     btn.dataset.tip = f.name;
-    btn.title = f.description ? f.description.split('\n')[0] : '';
+    btn.title = folderTip(f);
+    if (f.pinned) btn.classList.add('is-pinned');
     btn.setAttribute('aria-label', f.name);
     const name = document.createElement('span');
     name.className = 'sidebar-item__label';
     name.textContent = f.name;
     btn.innerHTML = `<span class="sidebar-item__icon">${ICONS.book}</span>`;
     btn.appendChild(name);
+    // The pin: shown on hover, and always once it's pinned. A span, because a
+    // button can't hold another button.
+    const pin = document.createElement('span');
+    pin.className = `sidebar-folder__pin${f.pinned ? ' is-on' : ''}`;
+    pin.setAttribute('role', 'button');
+    pin.setAttribute('aria-label', f.pinned ? `Unpin ${f.name}` : `Pin ${f.name} to the top`);
+    pin.title = f.pinned ? 'Unpin' : 'Pin to the top';
+    pin.innerHTML = ICONS.pin;
+    pin.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      try {
+        await api.pinFolder(f.uuid, !f.pinned);
+        location.reload();
+      } catch (e) {
+        console.error('[geniuz] pinning failed:', e);
+      }
+    });
+    btn.appendChild(pin);
     const count = document.createElement('span');
     count.className = 'sidebar-item__count';
     count.textContent = f.memories;
