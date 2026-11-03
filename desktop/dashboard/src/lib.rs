@@ -63,6 +63,9 @@ struct RecentMemory {
     created_at: String,
     category: Option<String>,
     parent_uuid: Option<String>,
+    /// Which folder it came from, when a search covered more than the one on screen.
+    folder: Option<String>,
+    folder_name: Option<String>,
 }
 
 /// One matching line from an Exact search.
@@ -71,6 +74,15 @@ struct FindLine {
     uuid: String,
     created_at: String,
     line: String,
+    folder: String,
+    folder_name: String,
+}
+
+/// Where a pointer in the results can be opened.
+#[derive(Serialize)]
+struct PointerTarget {
+    folder: String,
+    uuid: String,
 }
 
 /// What Find shows: memories (Meaning) or lines (Exact), then where to go
@@ -81,9 +93,9 @@ struct FindResult {
     lines: Vec<FindLine>,
     names: Vec<String>,
     pointers: Vec<String>,
-    /// The bare ids among `pointers` that are memories in this store (the
-    /// ones a click can open); the rest may live elsewhere, e.g. on Relay.
-    pointers_here: Vec<String>,
+    /// The pointers a click can open, in the folders searched or by address in
+    /// any folder. The rest may live elsewhere.
+    pointer_targets: std::collections::HashMap<String, PointerTarget>,
     scope: String,
 }
 
@@ -134,8 +146,12 @@ fn get_app_version() -> &'static str {
 /// auto-derives one from the first 200 chars of content. Returns the short
 /// (8-char) UUID prefix of the new memory.
 #[tauri::command]
-fn remember_memory(gist: Option<String>, content: String) -> Result<String, String> {
-    let db = open_db()?;
+fn remember_memory(gist: Option<String>, content: String, folder: Option<String>) -> Result<String, String> {
+    // The folder chosen on the page, or the one on screen.
+    let db = match folder {
+        Some(uuid) => DatabaseManager::open_existing(&Registry::from_env().find(&uuid)?.db_path.to_string_lossy())?,
+        None => open_db()?,
+    };
     let gist_trimmed = gist.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty());
     db.signal(content.trim(), gist_trimmed, None, None)
         .map(|r| r.uuid)
@@ -199,53 +215,137 @@ fn keyword_search(query: String, limit: Option<u32>) -> Result<Vec<RecentMemory>
 /// Find, the dashboard's door to search: `mode` is "meaning" or "exact";
 /// `since` is any window the CLI takes (24h, 7d, a date), or none.
 #[tauri::command]
-fn find(query: String, mode: String, since: Option<String>, limit: Option<u32>) -> Result<FindResult, String> {
+fn find(
+    query: String,
+    mode: String,
+    since: Option<String>,
+    limit: Option<u32>,
+    folders: Option<Vec<String>>,
+) -> Result<FindResult, String> {
     use geniuz::{dig, window};
-    let db = open_db()?;
+    let reg = Registry::from_env();
     let window = window::Window::parse(since.as_deref(), None)?;
-    let pool = db.count_in(&window).ok();
-    let scope = |mode: &str| match pool {
-        Some(n) => window::scope_line(None, n, &window, mode),
-        None => format!("searched: {mode}"),
+    let limit = limit.unwrap_or(if mode == "exact" { 100 } else { 40 }) as usize;
+
+    let targets: Vec<Folder> = match folders.filter(|f| !f.is_empty()) {
+        Some(ids) => ids.iter().map(|id| reg.find(id)).collect::<Result<_, _>>()?,
+        None => {
+            let shown = std::fs::canonicalize(db_path()?).map_err(|e| e.to_string())?;
+            reg.scan()
+                .folders
+                .into_iter()
+                .filter(|f| std::fs::canonicalize(&f.db_path).ok().as_deref() == Some(shown.as_path()))
+                .collect()
+        }
     };
-    let names = |h: &dig::Harvest| h.names.iter().map(|(n, _)| n.clone()).collect();
-    let here = |h: &dig::Harvest| -> Vec<String> {
-        h.pointers.iter()
-            .filter(|p| !p.contains(':') && db.get_by_uuid_prefix(p).ok().flatten().is_some())
-            .cloned().collect()
+    let open = |f: &Folder| DatabaseManager::open_existing(&f.db_path.to_string_lossy());
+
+    let mut pool = 0;
+    let mut names: Vec<String> = Vec::new();
+    let mut pointers: Vec<String> = Vec::new();
+    let mut add_harvest = |h: &dig::Harvest| {
+        for (n, _) in &h.names {
+            if !names.contains(n) {
+                names.push(n.clone());
+            }
+        }
+        for p in &h.pointers {
+            if !pointers.contains(p) {
+                pointers.push(p.clone());
+            }
+        }
     };
+    let mut memories: Vec<(SignalEntry, &Folder)> = Vec::new();
+    let mut lines: Vec<FindLine> = Vec::new();
+    let mode_text;
+
     if mode == "exact" {
         let terms = dig::Terms::parse(&dig::split_terms(&query))?;
-        let d = db.grep_in(&terms, &window, None, limit.unwrap_or(100) as usize)?;
-        let found: Vec<&str> = d.hits.iter().map(|h| h.line.as_str()).collect();
-        let own: Vec<String> = d.hits.iter().map(|h| h.memory_uuid.clone()).collect();
-        let h = dig::Harvest::of(&found, &query, &own);
-        return Ok(FindResult {
-            memories: Vec::new(),
-            lines: d.hits.iter().map(|h| FindLine {
-                uuid: h.memory_uuid.clone(), created_at: h.created_at.clone(), line: h.line.clone(),
-            }).collect(),
-            names: names(&h),
-            pointers: h.pointers.clone(),
-            pointers_here: here(&h),
-            scope: scope(&d.mode(&terms)),
+        let mut text = None;
+        for f in &targets {
+            let db = open(f)?;
+            pool += db.count_in(&window).unwrap_or(0);
+            let d = db.grep_in(&terms, &window, None, limit)?;
+            text.get_or_insert_with(|| d.mode(&terms));
+            let found: Vec<&str> = d.hits.iter().map(|h| h.line.as_str()).collect();
+            let own: Vec<String> = d.hits.iter().map(|h| h.memory_uuid.clone()).collect();
+            add_harvest(&dig::Harvest::of(&found, &query, &own));
+            lines.extend(d.hits.iter().map(|h| FindLine {
+                uuid: h.memory_uuid.clone(),
+                created_at: h.created_at.clone(),
+                line: h.line.clone(),
+                folder: f.uuid.clone(),
+                folder_name: f.name.clone(),
+            }));
+        }
+        lines.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        lines.truncate(limit);
+        mode_text = text.unwrap_or_else(|| "exact".to_string());
+    } else {
+        // One loaded model for every folder.
+        let backend = geniuz::embedding::create_backend().ok();
+        for f in &targets {
+            let db = open(f)?;
+            pool += db.count_in(&window).unwrap_or(0);
+            let entries = db
+                .semantic_search_with(&query, &window, limit, backend.as_deref())
+                .or_else(|_| db.keyword_search_in(&query, &window, limit))?;
+            add_harvest(&db.harvest(&entries, &query));
+            memories.extend(entries.into_iter().map(|e| (e, f)));
+        }
+        memories.sort_by(|a, b| {
+            b.0.score
+                .unwrap_or(f32::MIN)
+                .total_cmp(&a.0.score.unwrap_or(f32::MIN))
+                .then_with(|| b.0.created_at.cmp(&a.0.created_at))
         });
+        memories.truncate(limit);
+        mode_text = dig::semantic_mode(&query);
     }
-    let entries = db.semantic_search_in(&query, &window, limit.unwrap_or(40) as usize)?;
-    let h = db.harvest(&entries, &query);
+
+    // A bare ID opens in a folder searched. An address opens in its own folder.
+    let mut pointer_targets = std::collections::HashMap::new();
+    for p in &pointers {
+        let found = match geniuz::folders::parse_address(p) {
+            Some((folder, memory)) => reg.find(&folder).ok().and_then(|f| {
+                let here = open(&f).ok()?.get_by_uuid_prefix(&memory).ok().flatten()?;
+                Some(PointerTarget { folder: f.uuid, uuid: here.memory_uuid })
+            }),
+            None => targets.iter().find_map(|f| {
+                let here = open(f).ok()?.get_by_uuid_prefix(p).ok().flatten()?;
+                Some(PointerTarget { folder: f.uuid.clone(), uuid: here.memory_uuid })
+            }),
+        };
+        if let Some(target) = found {
+            pointer_targets.insert(p.clone(), target);
+        }
+    }
+
+    let many = (targets.len() > 1).then(|| format!("{} folders", targets.len()));
+    let scope = window::scope_line(many.as_deref(), pool, &window, &mode_text);
     Ok(FindResult {
-        memories: entries.into_iter().map(map_recent).collect(),
-        lines: Vec::new(),
-        names: names(&h),
-        pointers: h.pointers.clone(),
-        pointers_here: here(&h),
-        scope: scope(&dig::semantic_mode(&query)),
+        memories: memories
+            .into_iter()
+            .map(|(e, f)| RecentMemory {
+                folder: Some(f.uuid.clone()),
+                folder_name: Some(f.name.clone()),
+                ..map_recent(e)
+            })
+            .collect(),
+        lines,
+        names,
+        pointers,
+        pointer_targets,
+        scope,
     })
 }
 
 #[tauri::command]
-fn get_memory_detail(uuid: String) -> Result<Option<MemoryDetail>, String> {
-    let db = open_db()?;
+fn get_memory_detail(uuid: String, folder: Option<String>) -> Result<Option<MemoryDetail>, String> {
+    let db = match folder {
+        Some(id) => DatabaseManager::open_existing(&Registry::from_env().find(&id)?.db_path.to_string_lossy())?,
+        None => open_db()?,
+    };
     let entry = db.get_by_uuid_prefix(&uuid)?;
     Ok(entry.map(map_detail))
 }
@@ -504,6 +604,8 @@ fn map_recent(e: SignalEntry) -> RecentMemory {
         created_at: e.created_at,
         category,
         parent_uuid: e.parent_uuid,
+        folder: None,
+        folder_name: None,
     }
 }
 
@@ -861,16 +963,16 @@ mod tests {
         db.signal("Roundup\nCubic reviewed the PR; see 13625F6B:D824ADA7.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
         db.signal("Asked Devin to retest.", Some("follow-up"), None, None).unwrap();
 
-        let r = find("Devin".into(), "exact".into(), Some("24h".into()), None).unwrap();
+        let r = find("Devin".into(), "exact".into(), Some("24h".into()), None, None).unwrap();
         let lines: Vec<&str> = r.lines.iter().map(|l| l.line.as_str()).collect();
         assert_eq!(lines, ["Asked Devin to retest.", "Devin filed issues."]);
         assert!(r.memories.is_empty());
         assert_eq!(r.scope, "searched: 2 memories · since 24h · grep \"Devin\" · 2 lines in 2 memories");
 
-        let r = find("\"the PR\" Cubic".into(), "exact".into(), None, None).unwrap();
+        let r = find("\"the PR\" Cubic".into(), "exact".into(), None, None, None).unwrap();
         assert_eq!(r.lines.len(), 1);
         assert_eq!(r.pointers, ["13625F6B:D824ADA7"]);
-        assert!(find("x".into(), "exact".into(), Some("someday".into()), None).is_err());
+        assert!(find("x".into(), "exact".into(), Some("someday".into()), None, None).is_err());
         std::fs::remove_dir_all(&dir).ok();
     }
 }

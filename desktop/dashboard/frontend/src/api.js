@@ -65,8 +65,8 @@ export function getRecentMemories(limit = 24) {
  * auto-derives one from the first 200 chars of content. Returns the short
  * (8-char) UUID prefix of the new memory.
  */
-export function rememberMemory(gist, content) {
-  return invoke('remember_memory', { gist: gist || null, content });
+export function rememberMemory(gist, content, folder) {
+  return invoke('remember_memory', { gist: gist || null, content, folder: folder || null });
 }
 
 export function getActivity(days = 14) {
@@ -86,8 +86,8 @@ export function keywordSearch(query, limit = 20) {
  * Returns: { memories: [...], lines: [{ uuid, created_at, line }],
  *            names: [string], pointers: [string], scope: string }
  */
-export function find(query, mode, since = null, limit = null) {
-  return invoke('find', { query, mode, since, limit });
+export function find(query, mode, since = null, limit = null, folders = null) {
+  return invoke('find', { query, mode, since, limit, folders });
 }
 
 export function getDataDir() {
@@ -106,8 +106,8 @@ export function openPath(path) {
  * Fetch full details for a single memory by UUID.
  * Returns: { uuid, gist, content, created_at, parent_uuid, category } | null
  */
-export function getMemoryDetail(uuid) {
-  return invoke('get_memory_detail', { uuid });
+export function getMemoryDetail(uuid, folder = null) {
+  return invoke('get_memory_detail', { uuid, folder });
 }
 
 /**

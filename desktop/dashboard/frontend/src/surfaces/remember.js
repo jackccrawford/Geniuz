@@ -26,11 +26,12 @@ export async function mount(container) {
   const root = document.createElement('main');
   root.className = 'main';
 
-  const folderName = (getState().folders?.folders || []).find((f) => f.current)?.name || 'your memory';
+  const folders = getState().folders?.folders || [];
+  const shown = folders.find((f) => f.current);
   const header = document.createElement('header');
   header.className = 'main-header';
   header.innerHTML = `
-    <h1 class="main-header__title">Keep in ${su.esc(folderName)}</h1>
+    <h1 class="main-header__title">Keep</h1>
     <p class="main-header__sub">Gist is a short shelf-label for retrieval. Content is the body.</p>
   `;
   root.appendChild(header);
@@ -42,7 +43,16 @@ export async function mount(container) {
 
   const form = document.createElement('form');
   form.className = 'remember-form';
+  const folderField = folders.length > 1
+    ? `<label class="remember-field">
+      <span class="remember-field__label">Folder</span>
+      <select class="remember-field__input remember-field__select" name="folder">
+        ${folders.map((f) => `<option value="${su.esc(f.uuid)}"${f.current ? ' selected' : ''}>${su.esc(f.name)}</option>`).join('')}
+      </select>
+    </label>`
+    : '';
   form.innerHTML = `
+    ${folderField}
     <label class="remember-field">
       <span class="remember-field__label">Gist <span class="remember-field__hint">· short shelf-label, e.g. "fix: auth token order"</span></span>
       <input
@@ -87,13 +97,17 @@ export async function mount(container) {
   };
   contentInput.addEventListener('input', updateSubmitState);
 
+  const folderSelect = form.querySelector('select[name="folder"]');
   const draft = readDraft();
   gistInput.value = draft.gist || '';
   contentInput.value = draft.content || '';
+  // A choice made for this draft stands, if that folder is still there.
+  if (folderSelect && folders.some((f) => f.uuid === draft.folder)) folderSelect.value = draft.folder;
   updateSubmitState();
-  const saveDraft = () => writeDraft({ gist: gistInput.value, content: contentInput.value });
+  const saveDraft = () => writeDraft({ gist: gistInput.value, content: contentInput.value, folder: folderSelect?.value });
   gistInput.addEventListener('input', saveDraft);
   contentInput.addEventListener('input', saveDraft);
+  folderSelect?.addEventListener('change', saveDraft);
 
   cancelBtn.addEventListener('click', () => {
     clearDraft();
@@ -108,8 +122,20 @@ export async function mount(container) {
     submitBtn.disabled = true;
     status.textContent = 'Saving…';
     try {
-      const shortUuid = await api.rememberMemory(gist || null, content);
+      const chosen = folderSelect?.value || shown?.uuid || null;
+      const shortUuid = await api.rememberMemory(gist || null, content, chosen);
       clearDraft();
+      if (chosen && chosen !== shown?.uuid) {
+        // It went elsewhere, so the list here won't show it. Say so, and stay.
+        const name = folders.find((f) => f.uuid === chosen)?.name || 'that folder';
+        status.textContent = `Kept in ${name} · ${shortUuid}`;
+        gistInput.value = '';
+        contentInput.value = '';
+        folderSelect.value = shown.uuid;
+        updateSubmitState();
+        gistInput.focus();
+        return;
+      }
       status.textContent = `Kept · ${shortUuid}`;
       // Navigate to Recent and select the new memory
       setTimeout(() => navigate('recent'), 300);
@@ -126,6 +152,7 @@ export async function mount(container) {
       if (!submitBtn.disabled) form.requestSubmit();
     }
   };
+  folderSelect?.addEventListener('keydown', submitOnHotkey);
   gistInput.addEventListener('keydown', submitOnHotkey);
   contentInput.addEventListener('keydown', submitOnHotkey);
 }

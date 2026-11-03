@@ -142,7 +142,7 @@ export async function mount(container) {
   const numOf = new Map(numbered.map((m) => [key8(m.uuid), m._num]));
   const card = (m, { depth = 0, here = false, count = 0, opened = false } = {}) => {
     const { tag, rest } = su.splitGist(m.gist || '');
-    const text = (m.content || '').trim();
+    const text = su.bodyAfterGist(m.content, m.gist);
     const num = numOf.get(key8(m.uuid));
     const head = tag
       ? `<b class="smsg__tag">${su.esc(tag)}</b><span class="smsg__gist">${su.esc(rest)}</span>`
@@ -152,7 +152,7 @@ export async function mount(container) {
       : `<span class="stwisty stwisty--leaf"></span>`;
     return `
       <article class="smsg${depth ? ' smsg--child' : ''}${here ? ' is-here' : ''}" data-uuid="${su.esc(m.uuid)}" tabindex="0">
-        <div class="smsg__gutter">${twisty}${su.mark(tag, depth ? 28 : 36)}</div>
+        <div class="smsg__gutter">${twisty}${su.mark(tag, depth ? 28 : 36, rest)}</div>
         <div class="smsg__body">
           <div class="smsg__head">${head}
             <time datetime="${su.esc(m.created_at)}" title="${su.esc(su.timeFull(m.created_at))}">${su.esc(su.timeShort(m.created_at))}</time>

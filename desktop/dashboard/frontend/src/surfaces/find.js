@@ -47,6 +47,14 @@ export async function mount(container) {
   let query = (getState().searchQuery || '');
   let debounceTimer = null;
   let inFlight = 0; // monotonic ticket; ignore replies older than the latest.
+  // Which folders to search: the one on screen, until someone chooses. The choice
+  // lasts while the app is open, like the query.
+  const allFolders = getState().folders?.folders || [];
+  const onScreen = allFolders.find((f) => f.current)?.uuid;
+  let chosen = new Set(
+    (getState().searchFolders || [onScreen]).filter((id) => allFolders.some((f) => f.uuid === id)),
+  );
+  if (chosen.size === 0 && onScreen) chosen.add(onScreen);
 
   // ---- Scaffold -------------------------------------------------------
   const root = document.createElement('main');
@@ -56,7 +64,7 @@ export async function mount(container) {
   header.className = 'main-header';
   header.innerHTML = `
     <h1 class="main-header__title">Find</h1>
-    <p class="main-header__sub">Search across everything you've remembered, by meaning or by exact words.</p>
+    <p class="main-header__sub">Search your folders, by meaning or by exact words.</p>
   `;
   root.appendChild(header);
 
@@ -81,7 +89,6 @@ export async function mount(container) {
   submitBtn.className = 'find-submit';
   submitBtn.textContent = 'Search';
   inputWrap.appendChild(submitBtn);
-  body.appendChild(inputWrap);
 
   const toggle = document.createElement('div');
   toggle.className = 'find-mode-toggle';
@@ -128,7 +135,64 @@ export async function mount(container) {
     windowToggle.appendChild(btn);
   }
   controls.appendChild(windowToggle);
+
+  // ---- Which folders --------------------------------------------------
+  if (allFolders.length > 1) {
+    const picker = document.createElement('div');
+    picker.className = 'find-folders';
+    picker.setAttribute('role', 'group');
+    picker.setAttribute('aria-label', 'Folders to search');
+    const label = document.createElement('span');
+    label.className = 'find-folders__label';
+    label.textContent = 'Search in';
+    picker.appendChild(label);
+
+    const chips = [];
+    const paint = () => {
+      for (const { btn, id } of chips) {
+        const on = id ? chosen.has(id) : chosen.size === allFolders.length;
+        btn.classList.toggle('is-active', on);
+        btn.setAttribute('aria-pressed', String(on));
+      }
+    };
+    const choose = () => {
+      setState({ searchFolders: [...chosen] });
+      paint();
+      runSearch(input.value, /* immediate */ true);
+    };
+    const makeChip = (text, id, onClick) => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'find-folder';
+      btn.textContent = text;
+      btn.addEventListener('click', onClick);
+      chips.push({ btn, id });
+      picker.appendChild(btn);
+    };
+    makeChip('All', null, () => {
+      // All on; from all, back to the folder on screen. Never none.
+      chosen = chosen.size === allFolders.length
+        ? new Set(onScreen ? [onScreen] : [allFolders[0].uuid])
+        : new Set(allFolders.map((f) => f.uuid));
+      choose();
+    });
+    for (const f of allFolders) {
+      makeChip(f.name, f.uuid, () => {
+        if (chosen.has(f.uuid)) {
+          if (chosen.size === 1) return; // always at least one
+          chosen.delete(f.uuid);
+        } else {
+          chosen.add(f.uuid);
+        }
+        choose();
+      });
+    }
+    paint();
+    body.appendChild(picker);
+  }
+
   body.appendChild(controls);
+  body.appendChild(inputWrap);
 
   // ---- Results region -------------------------------------------------
   const resultsEl = document.createElement('div');
@@ -186,7 +250,7 @@ export async function mount(container) {
     renderLoading();
     let results;
     try {
-      results = await api.find(q, mode, since, mode === 'exact' ? 100 : RESULT_LIMIT);
+      results = await api.find(q, mode, since, mode === 'exact' ? 100 : RESULT_LIMIT, [...chosen]);
     } catch (e) {
       if (!mounted || ticket !== inFlight) return;
       renderError(e);
@@ -225,11 +289,13 @@ export async function mount(container) {
     if (empty) {
       const none = document.createElement('div');
       none.className = 'surface-empty';
-      none.textContent = 'No matches in your memory';
+      none.textContent = chosen.size > 1 ? 'No matches in these folders' : 'No matches in this folder';
       resultsEl.appendChild(none);
     }
     const list = document.createElement('div');
     list.className = 'memory-list';
+    // Say where a result came from, whenever it could have come from more than one.
+    const from = (name) => (chosen.size > 1 && name ? `<span class="find-row-folder">${escapeHtml(name)}</span>` : '');
     for (const l of r.lines) {
       const row = document.createElement('button');
       row.type = 'button';
@@ -237,9 +303,10 @@ export async function mount(container) {
       row.innerHTML = `
         <span class="find-line__id">${escapeHtml(l.uuid.slice(0, 8))}</span>
         <span class="memory-row__gist">${escapeHtml(l.line)}</span>
+        ${from(l.folder_name)}
         <span class="memory-row__time">${fmt.ago(l.created_at)}</span>
       `;
-      row.addEventListener('click', () => openMemory(l.uuid));
+      row.addEventListener('click', () => openMemory(l.uuid, { folder: l.folder }));
       list.appendChild(row);
     }
     for (const m of r.memories) {
@@ -250,9 +317,10 @@ export async function mount(container) {
       // No separate chip — one visual anchor per row, matching Recent and TUI.
       row.innerHTML = `
         <span class="memory-row__gist">${formatGist(m.gist || '(no gist)')}</span>
+        ${from(m.folder_name)}
         <span class="memory-row__time">${fmt.ago(m.created_at)}</span>
       `;
-      row.addEventListener('click', () => openMemory(m.uuid));
+      row.addEventListener('click', () => openMemory(m.uuid, { folder: m.folder }));
       list.appendChild(row);
     }
     // Where to go next, at the top for a person reading down (agents get it
@@ -290,17 +358,18 @@ export async function mount(container) {
         label.textContent = 'Pointers';
         next.appendChild(label);
         for (const p of r.pointers) {
-          // Only an id that is a memory here can be opened; the rest (a
-          // signal pointer A:B, or an id from another store) are shown.
-          const here = (r.pointers_here || []).includes(p);
+          // A pointer opens if it's a memory in a folder searched, or an address
+          // whose folder is reachable. The rest are only shown.
+          const target = (r.pointer_targets || {})[p];
+          const here = !!target;
           const chip = document.createElement(here ? 'button' : 'span');
           chip.className = 'find-next__chip find-next__chip--mono' + (here ? '' : ' find-next__chip--elsewhere');
           chip.textContent = p;
-          if (!here) chip.title = 'Not in this folder — it may be in another one';
+          if (!here) chip.title = 'Not in the folders searched';
           if (here) {
             chip.type = 'button';
             chip.title = 'Open this memory';
-            chip.addEventListener('click', () => openMemory(p));
+            chip.addEventListener('click', () => openMemory(target.uuid, { folder: target.folder }));
           }
           next.appendChild(chip);
         }

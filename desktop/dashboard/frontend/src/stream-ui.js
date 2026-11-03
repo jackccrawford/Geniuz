@@ -36,10 +36,29 @@ export function splitGist(gist) {
   return { tag, rest: g.slice(i + 1).trim() };
 }
 
-/** A memory's mark: its category's first letter on the category's colour. */
-export function mark(tag, size = 36) {
+/**
+ * A memory's body, without repeating its gist. A gist left blank is taken from
+ * the first line, so showing both would say the same thing twice.
+ */
+export function bodyAfterGist(text, gist) {
+  const body = String(text || '').trim();
+  const same = (s) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const g = same(gist).replace(/(…|\.\.\.)$/, '');
+  if (!g) return body;
+  const nl = body.indexOf('\n');
+  const first = nl < 0 ? body : body.slice(0, nl);
+  if (same(first) !== g) return body;
+  return nl < 0 ? '' : body.slice(nl + 1).trim();
+}
+
+/**
+ * A memory's mark: its category's first letter on the category's colour. With
+ * no category, the first letter of its gist, on the one colour that says so.
+ */
+export function mark(tag, size = 36, gist = '') {
   const key = (tag || 'memory').toLowerCase();
-  const letter = tag ? tag.trim()[0].toUpperCase() : '·';
+  const initial = (String(gist).match(/\p{L}|\p{N}/u) || ['·'])[0];
+  const letter = tag ? tag.trim()[0].toUpperCase() : initial.toUpperCase();
   return `<span class="sm" style="--sm:${size}px;--st:${tintOf(key)}" aria-hidden="true">${esc(letter)}</span>`;
 }
 

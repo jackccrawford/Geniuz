@@ -1130,6 +1130,13 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 .sidebar-folders__add svg { width: 12px; height: 12px; }
 .sidebar-folders__add:hover { background: rgba(250, 244, 232, 0.12); }
 .sidebar-folders__note { padding: 6px 8px 0; font-size: 11px; opacity: 0.7; }
+/* A long name wraps rather than hiding its end, with the icon and count on its first line. */
+.sidebar-folder { align-items: flex-start; }
+.sidebar-folder .sidebar-item__label {
+  white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; line-height: 1.3;
+}
+.sidebar-folder .sidebar-item__icon { margin-top: 1px; }
+.sidebar-folder .sidebar-item__count { margin-top: 1px; }
 .is-collapsed .sidebar-folder:not(.is-current),
 .is-collapsed .sidebar-folders__add,
 .is-collapsed .sidebar-folders__note { display: none; }
@@ -1162,3 +1169,22 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 .archived-row__text { flex: 1; min-width: 0; }
 .archived-row__name { font-weight: 600; overflow-wrap: anywhere; }
 .archived-row__meta { font-size: 13px; opacity: 0.72; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Find: choose folders, then how to search, then the search box. A long list of
+   folders scrolls by itself, so the search box stays in reach. */
+.find-folders { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: var(--s-2); max-height: 112px; overflow-y: auto; }
+.find-folders__label { color: var(--ink-3); font-size: 13px; margin-right: 4px; }
+.find-folder {
+  appearance: none; font: inherit; font-size: 13px; padding: 3px 10px; cursor: pointer;
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: transparent; color: var(--ink-2);
+  border: 1px solid var(--hairline-2); border-radius: 999px;
+}
+.find-folder:hover { border-color: var(--accent); color: var(--ink-1); }
+.find-folder.is-active { background: #1A6E7C; border-color: #1A6E7C; color: #fff; font-weight: 600; }
+.find-folder:focus-visible { outline: 2px solid #2F94A6; outline-offset: 1px; }
+.find-row-folder {
+  flex: none; font-size: 12px; color: var(--ink-3); padding: 1px 8px; max-width: 160px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border: 1px solid var(--hairline-2); border-radius: 999px;
+}
