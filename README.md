@@ -256,7 +256,7 @@ geniuz recall 13625F6B:3487B9B0                  # open that memory, whichever f
 geniuz folder use Work                           # use it whenever none is named
 ```
 
-Everything goes in your data directory unless you say otherwise. `geniuz folder create Limen --at /Users/LIMEN` makes one elsewhere, and `geniuz folder add <dir>` makes Geniuz look in a directory you choose. It never searches your disk, and it can only show what your file permissions let it read.
+Everything goes in your data directory unless you say otherwise. `geniuz folder create Notes --at ~/notes` makes one elsewhere, and `geniuz folder add <dir>` makes Geniuz look in a directory you choose. It never searches your disk, and it can only show what your file permissions let it read.
 
 **Move a folder with `geniuz folder move`, never by copying it.** A copy of a live database can lose memories. And a folder can't be duplicated: its ID and the ID of every memory in it are permanent, so Geniuz refuses a second copy. For a backup, use Export in the dashboard.
 
@@ -473,7 +473,7 @@ with `--thread ID`.
 
 ### When to use the TUI
 
-`geniuz tui` only launches with an interactive terminal. Agents calling from a subprocess get a clean refusal with exit code 2. If you want browsing in code, use `geniuz recent`, `geniuz recall`, or the MCP tools. They're shell-friendly.
+`geniuz tui` only launches with an interactive terminal. Agents calling from a subprocess get a clean refusal with exit code 2. If you want browsing in code, use `geniuz recall`, or the MCP tools. They're shell-friendly.
 
 ---
 

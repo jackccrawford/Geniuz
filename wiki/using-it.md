@@ -64,7 +64,7 @@ geniuz folder list
 geniuz folder list --archived
 geniuz folder show Work
 geniuz folder create Work -d "Client projects. No passwords here."
-geniuz folder create Limen --at /Users/LIMEN
+geniuz folder create Notes --at ~/notes
 geniuz folder use Work
 geniuz folder rename Work Clients
 geniuz folder describe Clients "Client projects, and who owns them."

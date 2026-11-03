@@ -263,7 +263,7 @@ pub enum FolderCommand {
     },
 
     /// Create a folder
-    #[command(after_help = "Examples:\n  geniuz folder create Work\n  geniuz folder create Clients -d \"One thread per client. No passwords here.\"\n  geniuz folder create Limen --at /Users/LIMEN")]
+    #[command(after_help = "Examples:\n  geniuz folder create Work\n  geniuz folder create Clients -d \"One thread per client. No passwords here.\"\n  geniuz folder create Notes --at ~/notes")]
     Create {
         /// Its name
         name: String,
