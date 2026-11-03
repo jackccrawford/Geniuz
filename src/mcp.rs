@@ -16,7 +16,7 @@ use std::io::{self, BufRead, Write};
 
 use geniuz::db::{DatabaseManager, SignalEntry};
 use geniuz::embedding::{self, EmbeddingBackend};
-use geniuz::folders::Registry;
+use geniuz::folders::{parse_address, search_across, Registry, Search};
 use geniuz::window::Window;
 
 // =============================================================================
@@ -112,7 +112,11 @@ fn base_tool_definitions() -> Value {
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ. Proper names (a Capitalized word after the first, or anything in \"quotes\") must match exactly, and memories holding them come first. Leave it out to get the most recent memories, which is how to orient yourself at the start of a conversation."
+                            "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ. Proper names (a Capitalized word after the first, or anything in \"quotes\") must match exactly, and memories holding them come first. An address like 13625F6B:3487B9B0 opens that memory, whichever folder it is in. Leave it out to get the most recent memories, which is how to orient yourself at the start of a conversation."
+                        },
+                        "all": {
+                            "type": "boolean",
+                            "description": "If true, searches every folder and shows each result's address. Use it when you don't know which folder holds something."
                         },
                         "grep": {
                             "type": ["string", "array"],
@@ -121,7 +125,7 @@ fn base_tool_definitions() -> Value {
                         },
                         "thread": {
                             "type": "string",
-                            "description": "Optional. The short UUID of any memory in a thread (the 8 characters before '|', or the one after '<-'). Returns that whole thread, root first, oldest to newest, instead of searching. Use it to read a conversation you found one piece of."
+                            "description": "Optional. The short UUID or address of any memory in a thread (the 8 characters before '|', or the one after '<-'). Returns that whole thread, root first, oldest to newest, instead of searching. Use it to read a conversation you found one piece of."
                         },
                         "full": {
                             "type": "boolean",
@@ -348,6 +352,63 @@ fn open_for_call(reg: &Registry, params: &Value) -> Result<DatabaseManager, Stri
     DatabaseManager::new(&path.to_string_lossy())
 }
 
+/// A query or thread given as an address names its own folder. `None` means
+/// the arguments hold no address.
+fn recall_by_address(reg: &Registry, args: &Value) -> Option<(String, bool)> {
+    let field = |key: &str| args.get(key).and_then(|v| v.as_str()).and_then(parse_address);
+    let opened = field("query");
+    let thread = field("thread");
+    let (folder, _) = opened.as_ref().or(thread.as_ref())?;
+    let folder = folder.clone();
+    let open = || -> Result<DatabaseManager, String> {
+        let found = reg.find(&folder).map_err(|_| format!("No folder with the ID {}. The folders tool lists them.", folder))?;
+        DatabaseManager::new(&found.db_path.to_string_lossy())
+    };
+    let db = match open() {
+        Ok(db) => db,
+        Err(e) => return Some((format!("Error: {}", e), true)),
+    };
+    if let Some((_, memory)) = opened {
+        return Some(match db.get_by_uuid_prefix(&memory) {
+            Ok(Some(entry)) => (format_entries(&[entry], true, &db), false),
+            Ok(None) => (format!("Error: No memory {} in folder {}.", memory, folder), true),
+            Err(e) => (format!("Error: {}", e), true),
+        });
+    }
+    let (_, memory) = thread?;
+    let mut rewritten = args.clone();
+    rewritten["thread"] = json!(memory);
+    Some(execute_recall(&db, &rewritten))
+}
+
+fn execute_recall_all(reg: &Registry, backend: Option<&dyn EmbeddingBackend>, args: &Value) -> (String, bool) {
+    let window = match window_from(args) {
+        Ok(w) => w,
+        Err(e) => return (format!("Error: {}", e), true),
+    };
+    let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10).min(100) as usize;
+    let query = args.get("query").and_then(|q| q.as_str()).map(str::trim).filter(|q| !q.is_empty());
+    let search = match query {
+        None => Search::Recent,
+        Some(q) if backend.is_some() => Search::Semantic(q, backend),
+        Some(q) => Search::Keyword(q),
+    };
+    let found = search_across(reg, &search, &window, limit);
+    let mut lines: Vec<String> = found
+        .hits
+        .iter()
+        .map(|h| {
+            let score = h.entry.score.map(|s| format!(" ({:.3})", s)).unwrap_or_default();
+            format!("{} | {} | {} | {}{}", h.address(), h.folder.name, crate::shorten_ts(&h.entry.created_at), h.entry.gist, score)
+        })
+        .collect();
+    if !found.skipped.is_empty() {
+        lines.push(format!("Couldn't read: {}", found.skipped.join(", ")));
+    }
+    lines.push(format!("searched: {} folders · {} memories", found.searched, found.memories));
+    (lines.join("\n"), false)
+}
+
 fn call_tool(
     reg: &Registry,
     backend: Option<&dyn EmbeddingBackend>,
@@ -359,6 +420,14 @@ fn call_tool(
     }
     if !matches!(name, "keep" | "remember" | "recall" | "recall_recent") {
         return (format!("Unknown tool: {}", name), true);
+    }
+    if name == "recall" {
+        if args.get("all").and_then(|a| a.as_bool()).unwrap_or(false) {
+            return execute_recall_all(reg, backend, args);
+        }
+        if let Some(found) = recall_by_address(reg, args) {
+            return found;
+        }
     }
     let db = match open_for_call(reg, args) {
         Ok(db) => db,
@@ -607,6 +676,31 @@ mod tests {
         }
         let (out, _) = execute_recall(&db, &json!({ "limit": 1 }));
         assert!(out.contains("five"), "{out}");
+    }
+
+    #[test]
+    fn an_address_opens_its_own_folder_from_anywhere() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let reg = Registry::new(&home);
+        let work = reg.create("Work", "", None).unwrap();
+        let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
+        let id = db.signal("the whole body", Some("the gist"), None, None).unwrap().uuid;
+        let address = format!("{}:{}", work.short_id(), &id[..8]);
+
+        let (out, is_err) = call_tool(&reg, None, "recall", &json!({ "query": address }));
+        assert!(!is_err && out.contains("the whole body"), "{out}");
+
+        let (out, is_err) = call_tool(&reg, None, "recall", &json!({ "thread": address }));
+        assert!(!is_err && out.contains("the gist"), "{out}");
+
+        let wrong = format!("{}:00000000", work.short_id());
+        let (out, is_err) = call_tool(&reg, None, "recall", &json!({ "query": wrong }));
+        assert!(is_err && out.contains("No memory"), "{out}");
+
+        let (out, is_err) = call_tool(&reg, None, "recall", &json!({ "all": true, "query": "body" }));
+        assert!(!is_err && out.contains(&address), "{out}");
     }
 
     #[test]

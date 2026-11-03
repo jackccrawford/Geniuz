@@ -396,7 +396,8 @@ impl DatabaseManager {
 
     /// [`Self::semantic_search_in`] with the query embedded by `backend`
     /// (tests pass a deterministic one; `None` is the production backend).
-    fn semantic_search_with(
+    /// Searching many folders passes one, so the model loads only once.
+    pub fn semantic_search_with(
         &self, query: &str, window: &Window, limit: usize,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,
     ) -> Result<Vec<SignalEntry>, String> {

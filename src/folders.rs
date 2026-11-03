@@ -24,6 +24,9 @@
 //! Reads use a read-only connection and never `DatabaseManager::new`, which
 //! applies the schema on open: listing must not change a file it doesn't own.
 
+use crate::db::SignalEntry;
+use crate::embedding::EmbeddingBackend;
+use crate::window::Window;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -541,6 +544,75 @@ impl Registry {
         let body: String = dirs.iter().map(|d| format!("{}\n", d.display())).collect();
         write_atomic(&self.added_path(), &body)
     }
+}
+
+/// Split an address like `13625F6B:3487B9B0` into folder and memory.
+pub fn parse_address(text: &str) -> Option<(String, String)> {
+    let (folder, memory) = text.trim().split_once(':')?;
+    let hex8 = |s: &str| s.len() == SHORT_ID && s.chars().all(|c| c.is_ascii_hexdigit());
+    (hex8(folder) && hex8(memory)).then(|| (folder.to_uppercase(), memory.to_uppercase()))
+}
+
+/// What to look for across every folder.
+pub enum Search<'a> {
+    Recent,
+    Keyword(&'a str),
+    Semantic(&'a str, Option<&'a dyn EmbeddingBackend>),
+}
+
+/// One result, with the folder it came from.
+pub struct Hit {
+    pub folder: Folder,
+    pub entry: SignalEntry,
+}
+
+impl Hit {
+    /// The address that opens this memory directly.
+    pub fn address(&self) -> String {
+        let memory: String = self.entry.memory_uuid.chars().take(SHORT_ID).collect();
+        format!("{}:{}", self.folder.short_id(), memory.to_uppercase())
+    }
+}
+
+/// The result of searching every folder.
+pub struct Across {
+    pub hits: Vec<Hit>,
+    pub searched: usize,
+    pub memories: usize,
+    /// Folders that couldn't be read, reported rather than quietly left out.
+    pub skipped: Vec<String>,
+}
+
+/// Search every visible folder and merge: best score first, then newest.
+pub fn search_across(reg: &Registry, search: &Search, window: &Window, limit: usize) -> Across {
+    let mut out = Across { hits: Vec::new(), searched: 0, memories: 0, skipped: Vec::new() };
+    for folder in reg.scan().folders {
+        let found = crate::db::DatabaseManager::new(&folder.db_path.to_string_lossy()).and_then(|db| {
+            let entries = match search {
+                Search::Recent => db.recent_in(window, limit),
+                Search::Keyword(q) => db.keyword_search_in(q, window, limit),
+                Search::Semantic(q, backend) => db.semantic_search_with(q, window, limit, *backend),
+            }?;
+            Ok((entries, db.count_in(window)?))
+        });
+        match found {
+            Ok((entries, count)) => {
+                out.searched += 1;
+                out.memories += count;
+                out.hits.extend(entries.into_iter().map(|entry| Hit { folder: folder.clone(), entry }));
+            }
+            Err(_) => out.skipped.push(folder.name),
+        }
+    }
+    out.hits.sort_by(|a, b| {
+        b.entry
+            .score
+            .unwrap_or(f32::MIN)
+            .total_cmp(&a.entry.score.unwrap_or(f32::MIN))
+            .then_with(|| b.entry.created_at.cmp(&a.entry.created_at))
+    });
+    out.hits.truncate(limit);
+    out
 }
 
 /// A name is short, one line, and can't be mistaken for an address or a path.
@@ -1205,6 +1277,39 @@ mod tests {
             .execute("UPDATE _meta SET value = 'clawmark' WHERE key = 'product'", [])
             .unwrap();
         assert_eq!(reg.add(&old).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn addresses_are_two_eight_character_ids() {
+        assert_eq!(
+            parse_address("13625f6b:3487B9B0"),
+            Some(("13625F6B".to_string(), "3487B9B0".to_string()))
+        );
+        for bad in ["13625F6B", "13625F6B:", "note: 3487B9B0", "13625F6B:3487B9B", "ZZZZZZZZ:3487B9B0"] {
+            assert!(parse_address(bad).is_none(), "{}", bad);
+        }
+    }
+
+    #[test]
+    fn searching_across_labels_each_hit_and_merges_newest_first() {
+        let (_tmp, reg) = setup();
+        let a = reg.create("Alpha", "", None).unwrap();
+        let b = reg.create("Beta", "", None).unwrap();
+        let open = |f: &Folder| crate::db::DatabaseManager::new(&f.db_path.to_string_lossy()).unwrap();
+        open(&a).signal("the older note", Some("older"), None, Some("2026-01-01 00:00:00")).unwrap();
+        open(&b).signal("the newer note", Some("newer"), None, Some("2026-02-01 00:00:00")).unwrap();
+        open(&b).signal("unrelated", Some("other"), None, Some("2026-03-01 00:00:00")).unwrap();
+
+        let window = Window::parse(None, None).unwrap();
+        let found = search_across(&reg, &Search::Keyword("note"), &window, 10);
+        assert_eq!(found.searched, 3);
+        assert_eq!(found.memories, 3);
+        let names: Vec<_> = found.hits.iter().map(|h| h.folder.name.as_str()).collect();
+        assert_eq!(names, vec!["Beta", "Alpha"]);
+        assert!(found.hits[0].address().starts_with(&b.short_id()));
+
+        let recent = search_across(&reg, &Search::Recent, &window, 1);
+        assert_eq!(recent.hits[0].entry.gist, "other");
     }
 
     #[test]

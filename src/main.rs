@@ -276,6 +276,67 @@ fn scope_json(db: &db::DatabaseManager, window: &geniuz::window::Window, mode: &
     })
 }
 
+/// `recall --all`: every folder, merged, each result labelled with its address.
+fn recall_all(
+    query: Option<&str>, keyword: bool, full: bool,
+    window: &geniuz::window::Window, limit: usize, json: bool,
+) -> Result<String, String> {
+    use geniuz::folders::{search_across, Registry, Search};
+    let reg = Registry::from_env();
+    let backend = match query {
+        Some(_) if !keyword => geniuz::embedding::create_backend().ok(),
+        _ => None,
+    };
+    let (search, mode) = match query {
+        None => (Search::Recent, "recent".to_string()),
+        Some(q) if keyword || backend.is_none() => (Search::Keyword(q), format!("keyword \"{q}\"")),
+        Some(q) => (Search::Semantic(q, backend.as_deref()), geniuz::dig::semantic_mode(q)),
+    };
+    let found = search_across(&reg, &search, window, limit);
+    let content = |hit: &geniuz::folders::Hit| -> Option<String> {
+        if !full { return None; }
+        db::DatabaseManager::new(&hit.folder.db_path.to_string_lossy()).ok()?
+            .get_full_content(&hit.entry.memory_uuid).ok().flatten()
+    };
+
+    if json {
+        let data: Vec<_> = found.hits.iter().map(|h| {
+            let mut v = serde_json::json!({
+                "address": h.address(),
+                "folder": h.folder.name,
+                "gist": h.entry.gist,
+                "created_at": h.entry.created_at,
+            });
+            if let Some(s) = h.entry.score { v["score"] = serde_json::json!(format!("{:.3}", s)); }
+            if let Some(c) = content(h) { v["content"] = serde_json::json!(c); }
+            v
+        }).collect();
+        return serde_json::to_string_pretty(&serde_json::json!({
+            "ok": true, "action": "recall", "count": data.len(), "memories": data,
+            "searched": { "folders": found.searched, "memories": found.memories, "mode": mode },
+            "skipped": found.skipped,
+        })).map_err(|e| e.to_string());
+    }
+
+    let mut lines = Vec::new();
+    for h in &found.hits {
+        let score = h.entry.score.map(|s| format!(" ({:.3})", s)).unwrap_or_default();
+        lines.push(format!("{} | {} | {} | {}{}", h.address(), h.folder.name, shorten_ts(&h.entry.created_at), h.entry.gist, score));
+        if let Some(c) = content(h) {
+            lines.extend(c.lines().map(|l| format!("           {}", l)));
+            lines.push(String::new());
+        }
+    }
+    if found.hits.is_empty() {
+        lines.push("No memories found.".to_string());
+    }
+    if !found.skipped.is_empty() {
+        lines.push(format!("Couldn't read: {}", found.skipped.join(", ")));
+    }
+    lines.push(format!("searched: {} folders · {} memories · {}", found.searched, found.memories, mode));
+    Ok(lines.join("\n"))
+}
+
 pub fn shorten_ts(ts: &str) -> String {
     use chrono::{DateTime, NaiveDateTime, Utc, Local};
 
@@ -528,7 +589,7 @@ fn run(cli: Cli) -> Result<String, String> {
             }
         }
 
-        Command::Recall { query, thread, grep, random, keyword, full, limit, since, until, json } => {
+        Command::Recall { query, all, thread, grep, random, keyword, full, limit, since, until, json } => {
             if query.as_deref() == Some("help") {
                 let mut cmd = Cli::build();
                 let sub = cmd.find_subcommand_mut("recall").unwrap();
@@ -538,7 +599,34 @@ fn run(cli: Cli) -> Result<String, String> {
             }
 
             let window = geniuz::window::Window::parse(since.as_deref(), until.as_deref())?;
-            let db = get_db()?;
+
+            if all {
+                if IN_FOLDER.get().and_then(|f| f.as_deref()).is_some() {
+                    return Err("--all searches every folder, so it can't be combined with --in.".to_string());
+                }
+                return recall_all(query.as_deref(), keyword, full, &window, limit.unwrap_or(20), json);
+            }
+
+            // An address names its own folder, wherever this command would
+            // otherwise have looked.
+            let opened = query.as_deref().and_then(geniuz::folders::parse_address);
+            let thread_address = thread.as_deref().and_then(geniuz::folders::parse_address);
+            let db = match opened.as_ref().or(thread_address.as_ref()) {
+                Some((folder, _)) => {
+                    let found = geniuz::folders::Registry::from_env().find(folder)?;
+                    db::DatabaseManager::new(&found.db_path.to_string_lossy())?
+                }
+                None => get_db()?,
+            };
+            let thread = thread_address.map(|(_, memory)| memory).or(thread);
+            if let Some((folder, memory)) = &opened {
+                if db.get_by_uuid_prefix(memory)?.is_none() {
+                    return Err(format!("No memory {} in folder {}.", memory, folder));
+                }
+            }
+            let full = full || opened.is_some();
+            let keyword = keyword && opened.is_none();
+            let query = opened.map(|(_, memory)| memory).or(query);
 
             if !grep.is_empty() {
                 let terms = geniuz::dig::Terms::parse(&grep)?;

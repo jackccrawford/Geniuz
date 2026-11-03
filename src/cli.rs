@@ -67,10 +67,14 @@ pub enum Command {
         after_help = "Examples:\n  geniuz recall \"auth token\"                  Semantic search\n  geniuz recall --keyword \"auth\"               Keyword fallback\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n  geniuz recall --grep Cubic --since 7d        Lines naming Cubic, past week\n\nTip: Run 'geniuz backfill' first to enable semantic search."
     )]
     Recall {
-        /// Search query
+        /// Search query, or an address like 13625F6B:3487B9B0 to open that memory
         query: Option<String>,
 
-        /// Show the whole thread this memory belongs to (a UUID or prefix):
+        /// Search every folder. Each result shows the address that opens it
+        #[arg(long, conflicts_with_all = ["thread", "grep", "random"])]
+        all: bool,
+
+        /// Show the whole thread this memory belongs to (a UUID, prefix or address):
         /// up to its root, then everything under it, oldest first
         #[arg(long, value_name = "ID", conflicts_with_all = ["query", "random", "keyword"])]
         thread: Option<String>,
