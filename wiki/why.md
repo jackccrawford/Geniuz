@@ -8,11 +8,23 @@ The cost is that a mistake stays on the record. In return, the history is hard t
 
 ## No server
 
-"There is no HTTP server in Geniuz Free", says the [README](../README.md#architecture). There is nothing to host, keep running or secure, and tools reach Geniuz by running it or through MCP. That also leaves the storage free to change, which is why the SQLite file is not a public interface.
+"There is no HTTP server in Geniuz", says the [README](../README.md#architecture). There is nothing to host, keep running or secure, and tools reach Geniuz by running it or through MCP.
+
+## One table
+
+A UUID, a JSON payload, a parent, a time. Rows are added and never changed. That shape holds a surprising range of work, and it spares you most of the design a normalized schema would demand up front. It is a way of working as much as a file format, so tailor it: the name of the UUID column, the shape of the payload, the promises a given store makes. Make something updatable only where a concrete need says so, and write that need down beside the schema.
+
+## Folders without types
+
+A project, a knowledge base and a conversation between agents are the same file with a different description. Adding types would mean deciding the categories for everyone, and the people who used stores like these wrote what they needed in free text anyway.
+
+## UUIDs are forever
+
+Memories point at each other by address, so an ID that changes breaks every memory that mentions it. That is why a folder can be moved but not copied, and why Geniuz would rather refuse than guess.
 
 ## Local by default
 
-Your memory is a file on your computer. You can copy it, back it up or read the code that touches it, and no account or API key stands between you and it.
+Your memory is files on your computer. You can move them, back them up or read the code that touches them, and no account or API key stands between you and them.
 
 ## Meaning and exact search, together
 

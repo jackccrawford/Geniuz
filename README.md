@@ -38,17 +38,17 @@ Geniuz is one Rust core with several ways to reach it. Pick what fits the moment
 
 Browse memories, save new ones, search by meaning, see recent threads. Native vibrancy on macOS, system tray on Windows + Linux.
 
-Surfaces: **Memories · Remember · Find · Detail · Status · Data & Export · Settings**.
+Surfaces: **Folders · Keep · Find · Archived · Status · Data & Export · Settings**.
 
 ### Terminal UI · `geniuz tui`
 
-Same data, terminal-native. For developers and agents who live in a shell. Two-field compose for `/remember`, semantic search via `/find`, sort toggle via `/reorder`.
+Same data, terminal-native. For developers and agents who live in a shell. Two-field compose for `/keep`, semantic search via `/find`, sort toggle via `/reorder`.
 
 ```
 $ geniuz tui
 ```
 
-![The Geniuz TUI showing the Recent view. Station name, memory count, newest-first list with date, category prefix, and gist on each row. Slash commands across the footer.](images/tui-recent.png)
+![The Geniuz TUI showing the Recent view. Folder name, memory count, newest-first list with date, category prefix, and gist on each row. Slash commands across the footer.](images/tui-recent.png)
 
 Drill into any memory with `/detail <prefix>` (or `/random` to surface one at random):
 
@@ -67,7 +67,7 @@ Ambient presence. Memory count, recent activity, one-click to the dashboard. The
 Underneath everything, the `geniuz` command. Your agents call it from any shell, any framework.
 
 ```bash
-geniuz remember -c "OAuth token refresh is async but middleware assumed sync. Swapped lines 42-47." -g "fix: auth token refresh — async ordering"
+geniuz keep -c "OAuth token refresh is async but middleware assumed sync. Swapped lines 42-47." -g "fix: auth token refresh — async ordering"
 geniuz recall "authentication middleware"
 ```
 
@@ -77,25 +77,25 @@ The full surface:
 
 ```bash
 % geniuz --help
-Start here: 'geniuz recent' to see what's in your folder.
+Start here: 'geniuz recall' to see what's in your folder.
 
 GENIUZ: Your AI remembers now.
 
-Persistent memory for AI agents. Three R's: remember, recall, recent.
+Persistent memory for AI agents. Keep what matters, recall it later.
 Works with any agent framework — Claude Code, Cursor, Windsurf, Aider,
 or anything that can run a shell command.
 
-Usage: geniuz <COMMAND>
+Usage: geniuz [OPTIONS] <COMMAND>
 
 Commands:
-  remember   Save a memory — what you learned, decided, or discovered
+  keep       Keep a memory — what you learned, decided, or discovered
   recall     Search your memories — semantic by default
-  recent     Show recent memories
-  capture    Capture files or directories into your folder
+  folder     See and manage your folders
+  capture    Capture files or directories into a folder
   watch      Watch for new memories in real time
   backfill   Build embedding cache for semantic search
   skill      Show usage guide for agents
-  status     Show folder stats
+  status     Show stats for the folder in use
   tui        Launch the terminal UI for browsing your memories
   dashboard  Launch the graphical dashboard app
   mcp        MCP server for Claude Desktop — run, install, or check status
@@ -103,6 +103,9 @@ Commands:
   help       Print this message or the help of the given subcommand(s)
 
 Options:
+      --in <FOLDER>
+          Use this folder for the command: a name or its 8-character ID
+
   -v, --version
           Show version information
 
@@ -111,31 +114,23 @@ Options:
 
 Examples:
   geniuz tui                                 Browse memories in a terminal UI
-  geniuz remember -c "Fixed the auth bug" -g "fix: token refresh"
+  geniuz keep -c "Fixed the auth bug" -g "fix: token refresh"
   geniuz recall "auth"                       Semantic search
-  geniuz recent                              Latest memories
+  geniuz recall                              Latest memories
   geniuz capture ./notes/                    Bulk-load markdown files
   geniuz backfill                            Build embedding cache
 
-Folder: Defaults to .geniuz in your home directory
-  Override with GENIUZ_HOME to change the folder location
-  Override with GENIUZ_STATION for a specific memory.db file
+Folders: 'geniuz folder list' shows them, and --in <name> uses one for a command.
   Multiple agents can share a folder for shared memory.
+
+Data: Kept in .geniuz in your home directory
+  Override with GENIUZ_HOME to change where Geniuz keeps its data
+  Override with GENIUZ_STATION for a specific memory.db file
 
 Use "geniuz [command] --help" for more information.
 ```
 
 ---
-
-## Geniuz Free vs Geniuz Team
-
-This repository is **Geniuz Free**: MIT-licensed, single-station memory for any AI chassis. Install it, bring your own AI, get memory that survives across conversations.
-
-**[Geniuz Team](https://github.com/mvara-ai)** is the paid tier from mVara: unlimited continuity, perpetual agents that live in your environment, and a team chassis that coordinates around your customers' reality. Geniuz Team is built on the same substrate as Geniuz Free.
-
-If you want memory for yourself or a developer team using existing AI tools, Geniuz Free is what you want.
-
-If you want a configured team of agents living in your private cloud, remembering your work, and coordinating around your customers, that's Geniuz Team. Contact mVara for pilot inquiries.
 
 ## Why local
 
@@ -170,7 +165,7 @@ sudo ln -sf /Applications/Geniuz.app/Contents/Resources/geniuz /usr/local/bin/ge
 
 Download **[Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe)** Windows 11, per-user, no admin prompt. Signed via Azure Trusted Signing (Microsoft-rooted cert, no "unknown publisher" warning). For managed deployment it runs silently with `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART`.
 
-![Geniuz on Windows 11. Claude Desktop with the Geniuz MCP server alongside the Station Dashboard, showing a memory written from Claude appearing live in the dashboard.](images/windows-dashboard.jpg)
+![Geniuz on Windows 11. Claude Desktop with the Geniuz MCP server alongside the Dashboard, showing a memory written from Claude appearing live in the dashboard.](images/windows-dashboard.jpg)
 
 After install, the dashboard runs as a system tray app. Left-click → window; right-click → menu.
 
@@ -220,7 +215,7 @@ cargo tauri build
 |------------|-----------|
 | Claude Desktop | `geniuz mcp install` → restart Claude Desktop |
 | Claude Code / Cursor / Windsurf | Add two lines to your agent's instructions (see below) |
-| Custom agents | Call `geniuz remember` and `geniuz recall` from any shell |
+| Custom agents | Call `geniuz keep` and `geniuz recall` from any shell |
 | Just want to see your memories | `geniuz tui` in any terminal, or open the dashboard from the menubar/tray |
 
 ---
@@ -232,7 +227,7 @@ Geniuz is a compiled Rust binary backed by SQLite. No cloud. No API key. No acco
 - **Memories** store what you learned: a gist (how you find it later) and content (the full detail)
 - **Semantic search** finds memories by meaning, not keywords. Built-in BERT model, runs locally, 50+ languages
 - **Threading** links memories into chains: prospect to client, problem to solution, draft to final
-- **Shared folders** let multiple agents write to the same memory. What one learns, all find
+- **Folders** keep separate memories apart: a project, a knowledge base, personal notes. Multiple agents can share one, and what one learns, all find
 
 ```
    Dashboard ─┐
@@ -247,15 +242,37 @@ The model downloads once (~118MB), the first time anything is embedded. Every me
 
 ---
 
+## Folders
+
+Keep separate memories apart. Work and Home, one per project, a knowledge base, a place agents leave each other messages. Each folder is one directory holding one `memory.db`, and it carries its own name and description.
+
+```bash
+geniuz folder list                               # all of them; * is the one in use
+geniuz folder create Work -d "Client projects. No passwords here."
+geniuz keep --in Work -c "Acme prefers Friday reviews" -g "client: Acme"
+geniuz recall --in Work "reviews"
+geniuz recall --all "reviews"                    # every folder; each result shows its address
+geniuz recall 13625F6B:3487B9B0                  # open that memory, whichever folder it's in
+geniuz folder use Work                           # use it whenever none is named
+```
+
+Everything goes in your data directory unless you say otherwise. `geniuz folder create Limen --at /Users/LIMEN` makes one elsewhere, and `geniuz folder add <dir>` makes Geniuz look in a directory you choose. It never searches your disk, and it can only show what your file permissions let it read.
+
+**Move a folder with `geniuz folder move`, never by copying it.** A copy of a live database can lose memories. And a folder can't be duplicated: its ID and the ID of every memory in it are permanent, so Geniuz refuses a second copy. For a backup, use Export in the dashboard.
+
+`geniuz folder archive` hides a folder without deleting anything, and `geniuz folder restore` brings it back.
+
+---
+
 ## Works with everything
 
 | Platform | How |
 |----------|-----|
-| **Claude Desktop** | `geniuz mcp install` — automatic remember/recall/recent tools |
-| **Claude Code** | Remember from hooks or inline via Bash; or use the TUI for browsing |
+| **Claude Desktop** | `geniuz mcp install` — automatic keep, recall and folders tools |
+| **Claude Code** | Keep from hooks or inline via Bash; or use the TUI for browsing |
 | **Cursor / Windsurf / Aider** | Any agent that can run a shell command |
 | **OpenClaw** | `geniuz capture --openclaw` imports your existing memory |
-| **Custom agents** | If your agent can exec, it can remember |
+| **Custom agents** | If your agent can exec, it can keep memories |
 | **Just you** | Dashboard for browse/search/compose; TUI for the same in a terminal |
 
 ---
@@ -263,15 +280,15 @@ The model downloads once (~118MB), the first time anything is embedded. Every me
 ## What it looks like
 
 <!-- SCREENSHOT_GALLERY: a 2x2 grid would be ideal here. Suggested:
-     [Dashboard Memories]  [Dashboard Remember compose]
+     [Dashboard Memories]  [Dashboard Keep compose]
      [TUI recent list]     [TUI detail view]
 -->
 
 **Save what you learned (CLI):**
 
 ```
-$ geniuz remember -c "Maria prefers retention over acquisition in Q2. Budget is $40K." -g "client: Maria — Q2 retention focus, $40K budget"
-✅ Remembered 7A3B29F1
+$ geniuz keep -c "Maria prefers retention over acquisition in Q2. Budget is $40K." -g "client: Maria — Q2 retention focus, $40K budget"
+✅ Kept 7A3B29F1
 ```
 
 **Find it later, by meaning:**
@@ -287,13 +304,13 @@ $ geniuz recall "Maria's budget priorities"
 $ geniuz tui
 ```
 
-Opens a terminal UI with `/recent`, `/remember`, `/find`, `/reorder`, `/random`, `/detail`, `/help`. Press `/` to start typing a command; `↑`/`↓` to navigate; `Enter` to open detail; `Ctrl-C` to exit.
+Opens a terminal UI with `/recent`, `/keep`, `/find`, `/reorder`, `/random`, `/detail`, `/help`. Press `/` to start typing a command; `↑`/`↓` to navigate; `Enter` to open detail; `Ctrl-C` to exit.
 
 **Thread a follow-up:**
 
 ```
-$ geniuz remember -c "Maria approved the retention plan. Starting in April." -g "client: Maria — plan approved" -p 7A3B29F1
-✅ Remembered E5F6A7B8
+$ geniuz keep -c "Maria approved the retention plan. Starting in April." -g "client: Maria — plan approved" -p 7A3B29F1
+✅ Kept E5F6A7B8
 ```
 
 The full client history, from first meeting to approval, is one chain. Any future session finds the whole story.
@@ -319,11 +336,11 @@ Three commands (`capture`, `backfill`, `recall`) turn any folder of markdown int
 ## Commands
 
 ```bash
-# The three R's — remember, recall, recent
-geniuz remember -c "what happened" -g "category: compressed insight"
-geniuz remember -c @notes.md -g "session: review"
-echo "content" | geniuz remember -c - -g "piped: from process"
-geniuz remember -c "follow-up" -g "update" -p 98672A90
+# Keep and recall
+geniuz keep -c "what happened" -g "category: compressed insight"
+geniuz keep -c @notes.md -g "session: review"
+echo "content" | geniuz keep -c - -g "piped: from process"
+geniuz keep -c "follow-up" -g "update" -p 98672A90
 
 geniuz recall "topic"                         # semantic search
 geniuz recall "topic" --since 7d              # only the past week
@@ -335,9 +352,9 @@ geniuz recall --random                        # discover something
 geniuz recall --full "topic"                  # include full content
 geniuz recall --json "topic"                  # JSON output
 
-geniuz recent                                 # latest memories
-geniuz recent -l 5                            # last 5
-geniuz recent --full                          # with content
+geniuz recall                                 # latest memories
+geniuz recall -l 5                            # last 5
+geniuz recall --full                          # with content
 
 # Interactive
 geniuz tui                                    # terminal UI (requires a TTY)
@@ -365,7 +382,7 @@ Add two lines to your agent's instructions:
 
 ```
 When you learn something worth keeping:
-  geniuz remember -c "what you learned" -g "category: compressed insight"
+  geniuz keep -c "what you learned" -g "category: compressed insight"
 
 When you need to remember something:
   geniuz recall "what you're looking for"
@@ -375,7 +392,7 @@ When you need to remember something:
 
 ## Architecture
 
-Geniuz Free exposes four user surfaces plus the MCP server for agents:
+Geniuz exposes four user surfaces plus the MCP server for agents:
 
 - **Dashboard** (Tauri) — for browse, search, compose, settings. Cross-platform.
 - **TUI** (`geniuz tui`) — same for terminal users and agents that prefer ratatui over GUI.
@@ -383,11 +400,13 @@ Geniuz Free exposes four user surfaces plus the MCP server for agents:
 - **CLI** — for scripting and direct agent integration. Every subcommand supports `--json` for procedural callers.
 - **MCP** — `geniuz mcp serve` is the stdio MCP server. Used by Claude Desktop, Claude Code, and any MCP client.
 
-All surfaces go through one library: `db::DatabaseManager`. Same write path, same read path, same invariants. The dashboard's "Remember" button and the CLI's `geniuz remember` end up at the same SQL `INSERT`.
+All surfaces go through one library: `db::DatabaseManager`. Same write path, same read path, same invariants. The dashboard's "Keep" button and the CLI's `geniuz keep` end up at the same SQL `INSERT`.
 
-**The SQLite file (`memory.db`) is not a public interface.** Schema may change without notice. Invariants (memory immutability enforced by triggers, every-memory-has-an-embedding enforced by the library's write transaction) hold at the interface boundary, not at the file boundary. If you want programmatic access, go through MCP or the CLI.
+**The schema is the idea, so borrow it.** One table: a UUID, a JSON payload, a parent, a time. Rows are added and never changed. Tailor it to your own work, and make something updatable only where a concrete need says so.
 
-There is no HTTP server in Geniuz Free. Procedural software speaks MCP. This keeps the storage layer free to evolve and the invariants centralized in one place.
+**Write through Geniuz, not the file.** Triggers keep memories immutable in the file itself, but an embedding for every memory and a folder's identity are kept by the library's write path. To read or write programmatically, use MCP or the CLI.
+
+There is no HTTP server in Geniuz. Procedural software speaks MCP. This keeps the storage layer free to evolve and the invariants centralized in one place.
 
 ---
 
@@ -399,6 +418,7 @@ This repo contains the full Geniuz source (CLI, TUI, dashboard, Mac menubar app,
 |------|--------------|
 | `src/` | Rust CLI + TUI + embedding + MCP server source |
 | `src/tui.rs` | Terminal UI (ratatui + crossterm) |
+| `src/folders.rs` | Folders: finding them, moving them, refusing duplicates |
 | `schema/` | SQLite schema for the memory database |
 | `skills/` | `SKILL.md` — the embedded skill guide `geniuz skill` prints |
 | `install.sh` | Linux/Mac CLI installer (the `curl \| bash` target) |
@@ -463,8 +483,8 @@ with `--thread ID`.
 
 ```bash
 geniuz-embed &                 # start (auto-exits after 5 min idle)
-geniuz remember -c "first"     # 1.6s (model loads)
-geniuz remember -c "second"    # 0.04s (model warm)
+geniuz keep -c "first"     # 1.6s (model loads)
+geniuz keep -c "second"    # 0.04s (model warm)
 ```
 
 | | Mac (Apple Silicon) | Raspberry Pi 5 |
@@ -494,7 +514,6 @@ Your data stays on your computer. Geniuz stores memories in a local SQLite datab
 ## Learn more
 
 - **Website**: [geniuz.life](https://geniuz.life)
-- **Geniuz Team** (paid tier): [mvara-ai](https://github.com/mvara-ai)
 - **Built by**: [Jack C. Crawford](https://github.com/jackccrawford)
 - **Discussions**: [GitHub Discussions](https://github.com/jackccrawford/Geniuz/discussions)
 - **Issues**: [GitHub Issues](https://github.com/jackccrawford/Geniuz/issues)

@@ -28,8 +28,9 @@ Open an issue describing the change before opening a PR. Geniuz is a small subst
 
 ## What we look for in PRs
 
-- **Substrate hygiene.** Geniuz's records table is intentionally minimal. PRs that add columns, change schema, or alter triggers need to clear a high bar.
-- **Backward compatibility.** Existing stations and existing CLI behavior should keep working. If a change must break compatibility, it needs a migration path.
+- **Substrate hygiene.** One table, a JSON payload, a parent, a time, and rows are added rather than changed. PRs that add columns or alter triggers need a concrete need, written down beside the schema.
+- **Backward compatibility.** Existing folders and existing CLI behavior should keep working. If a change must break compatibility, it needs a migration path.
+- **UUIDs are permanent.** A folder's UUID and its memories' UUIDs never change, and nothing may issue a new one to data that already has one.
 - **Tests.** New behavior gets new tests. Changed behavior gets updated tests.
 - **Documentation.** User-facing changes update the README and any affected guides.
 - **No dependencies for taste.** Adding a dependency is a real decision. The substrate should run on as little as possible.
@@ -43,7 +44,3 @@ Hostile, demeaning, or off-topic comments will be moderated. Persistent bad-fait
 ## License
 
 Contributions are accepted under the MIT license (see LICENSE). By submitting a PR you confirm that you have the right to license your contribution under MIT.
-
-## Geniuz Team
-
-If you're interested in the paid tier (perpetual agents, team chassis, customer-environment deployment), Geniuz Team is built and operated by [mVara](https://github.com/mvara-ai). Contact through the link in the main README for pilot and enterprise inquiries.

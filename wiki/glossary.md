@@ -7,7 +7,11 @@
 | Content | The full detail of a memory. |
 | Thread | Memories linked by parent, such as a problem and its solution. |
 | Parent | The earlier memory that a memory replies to. |
-| Station | The older name for a memory store. It survives in `GENIUZ_STATION` and in `station.db`, which Geniuz still reads. |
+| Folder | A directory holding one `memory.db`, with its own permanent UUID, name and description. |
+| Address | Two short IDs that open one memory from anywhere: `13625F6B:3487B9B0`, folder then memory. |
+| Allow list | The directories you added, where Geniuz looks for folders besides its own data directory. |
+| Archive | Hiding a folder by moving it into `archive/`. Nothing is deleted, and it can be restored. |
+| Station | The older name for a folder. It survives in `GENIUZ_STATION` and in `station.db`, which Geniuz still reads. |
 | Embedding | Numbers representing a memory's meaning, used to search by meaning. |
 | Backfill | Embedding memories that do not have one yet. |
 | Capture | Loading existing files into memory in bulk. |

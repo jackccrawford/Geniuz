@@ -4,7 +4,7 @@ Your next session starts cold. No memory of what you built, what broke, what you
 
 Works with any framework — Claude Code, Cursor, Windsurf, Aider, or anything with shell access.
 
-**You** (the agent reading this) use the CLI commands below. `geniuz remember` writes; `geniuz recall` reads. There's also a terminal UI (`geniuz tui`) and a graphical dashboard — those are for your human user to browse memories, not for you to call. The TUI refuses to launch from non-interactive callers and exits with code 2; calling it from a subprocess locks nothing up.
+**You** (the agent reading this) use the CLI commands below. `geniuz keep` writes; `geniuz recall` reads. There's also a terminal UI (`geniuz tui`) and a graphical dashboard — those are for your human user to browse memories, not for you to call. The TUI refuses to launch from non-interactive callers and exits with code 2; calling it from a subprocess locks nothing up.
 
 ## Why this matters
 
@@ -22,16 +22,16 @@ echo "Token validation was running before refresh in auth.rs.
 Swapped lines 42-47. Root cause: middleware ordering assumed
 sync validation, but OAuth refresh is async. Three edge cases
 tested: expired token, revoked token, concurrent refresh." \
-  | geniuz remember -c - -g "fix: auth token refresh — async ordering in middleware"
+  | geniuz keep -c - -g "fix: auth token refresh — async ordering in middleware"
 
 # Quick memory when depth isn't needed
-geniuz remember -c "Upgraded rusqlite to 0.32" -g "dep: rusqlite 0.32"
+geniuz keep -c "Upgraded rusqlite to 0.32" -g "dep: rusqlite 0.32"
 
-# Remember from a file
-geniuz remember -c @session-notes.md -g "session: March 19 architecture review"
+# Keep from a file
+geniuz keep -c @session-notes.md -g "session: March 19 architecture review"
 
 # Thread a follow-up
-geniuz remember -c "Same fix needed in staging compose" -g "fix: staging auth ordering" -p A1B2C3D4
+geniuz keep -c "Same fix needed in staging compose" -g "fix: staging auth ordering" -p A1B2C3D4
 
 # Search by meaning — not keywords
 geniuz recall "authentication middleware"
@@ -51,9 +51,9 @@ geniuz recall --thread A1B2C3D4
 # Keyword fallback (whole memories, any word)
 geniuz recall --keyword "auth"
 
-# Recent memories
-geniuz recent
-geniuz recent -l 5
+# Recent memories: recall with no search
+geniuz recall
+geniuz recall -l 5
 
 # Full content (not just gist)
 geniuz recall --full "auth"
@@ -68,20 +68,31 @@ geniuz capture --openclaw
 # Build embedding cache (once, then automatic)
 geniuz backfill
 
-# Folder stats
+# Stats for the folder in use
 geniuz status
 ```
 
-## Shared folders
+## Folders
 
-Multiple agents can write to the same folder. What one agent learns, every agent finds.
+Memories live in folders, each with a name and a description. Read a folder's description before writing to it: it may say what belongs there, what must not go there, and how to use it.
 
 ```bash
-GENIUZ_STATION=/shared/team.db geniuz remember -c "Deploy complete" -g "ops: deploy v2.1"
-GENIUZ_STATION=/shared/team.db geniuz recall "deploy"
+geniuz folder list                     # all of them; * is the one in use
+geniuz folder show Work                # one in full, with its description
+
+geniuz keep --in Work -c "..." -g "..."
+geniuz recall --in Work "deploy"
+geniuz recall --all "deploy"           # every folder; each result shows its address
+geniuz recall 13625F6B:3487B9B0        # open an address, whichever folder it's in
 ```
 
-## When to remember
+A wrong name is an error, never a different folder. To use one folder throughout a project, put its name in a `.geniuz-folder` file there.
+
+Multiple agents can use the same folder. What one agent learns, every agent finds. That also makes a folder a way to leave each other messages: thread your reply to theirs with `-p`.
+
+Never copy a folder's files: a copy of a live database can lose memories, and a folder can't be duplicated, because its ID and its memories' IDs are permanent. To relocate one, use `geniuz folder move`.
+
+## When to keep
 
 - **After solving something hard.** Your next session will hit the same problem. Give it the answer.
 - **Before your session ends.** Everything in your context window dies with the session. Your folder doesn't.
@@ -103,13 +114,13 @@ Exact is for **recall**: who, when, did it happen, by proper name.
    memories outrank last week's answer.
 2. Start by meaning. Every answer ends with `names seen:` and `pointers:`.
    Those are your next hops.
-3. Go exact with what you found: `--grep Devin`, or `--thread 13625F6B` to
+3. Go exact with what you found: `--grep Devin`, or `--thread 3487B9B0` to
    read the whole conversation.
 4. Read the last line. `searched: 312 memories · since 7d · grep "Cubic"`
    says what "nothing found" means: nothing *in that scope*.
 
-Through MCP the same works as `recall` arguments: `since`, `until`,
-`grep` (a word or a list), `thread`.
+Through MCP the same works as `recall` arguments: `folder`, `all`, `since`,
+`until`, `grep` (a word or a list), `thread`. `query` takes an address too.
 
 > Note: `geniuz recall help` prints recall's help instead of searching for the literal word "help". To find memories about that word, use a phrase containing it — e.g. `geniuz recall "help with debugging"` or `geniuz recall "how to help"`.
 
@@ -129,7 +140,7 @@ When something works, write down **what the green light did not tell you**. A pa
 
 ## Memories are permanent
 
-There is no edit and no delete. If a memory was wrong, remember the correction threaded to it with `-p`. The folder keeps the wrong turn and the fix together, which is why you can trust what you find in it.
+There is no edit and no delete. If a memory was wrong, keep the correction threaded to it with `-p`. The folder keeps the wrong turn and the fix together, which is why you can trust what you find in it.
 
 ## How it works
 

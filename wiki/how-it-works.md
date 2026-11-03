@@ -1,6 +1,6 @@
 # How it works
 
-Geniuz is a Rust core and one SQLite file. Everything else is a way of reaching them.
+Geniuz is a Rust core and SQLite files. Everything else is a way of reaching them.
 
 ## What a memory is
 
@@ -8,7 +8,25 @@ A memory has two parts: a **gist**, which is how you find it later, and **conten
 
 Memories are stored in the `memories` table of [`schema/schema.sql`](../schema/schema.sql). Database triggers refuse any update, delete or replace, including from other tools that open the file. Changing the past takes a deliberate step: dropping the trigger.
 
-## When you remember
+## What a folder is
+
+A folder is a directory holding one `memory.db`. Its identity is inside that file: a UUID, a name, a description and when it was made, in the `_meta` table of [`schema/schema.sql`](../schema/schema.sql). So a folder can be renamed, or moved anywhere, and is still the same folder. The first one is `~/.geniuz/memory.db`, called "My memory", and it stays where it is.
+
+The same file serves many uses: a project, a standard, a knowledge base, personal notes, what an agent keeps between sessions, messages between agents. There are no folder types. The description says what a folder is for, and the prompt for writing one is "What should whoever comes here next know?"
+
+Geniuz looks in two kinds of place: its data directory, and directories you added on purpose. It reads each one level down and never searches your disk. That list decides what Geniuz shows. Your file permissions decide who can read, so a file it can't read is simply left out. The rules are in [`src/folders.rs`](../src/folders.rs).
+
+A command uses the first of these that applies: `--in <name>`, the `GENIUZ_STATION` file path, a `.geniuz-folder` file in this directory or a parent, the folder chosen with `geniuz folder use`, then "My memory". A name that matches nothing is an error, so a typo can't send a memory somewhere else.
+
+### One of each
+
+A folder's UUID is permanent, and so is the UUID of every memory in it, and addresses like `13625F6B:3487B9B0` rely on both. So a folder can be moved but not copied. `folder add` refuses a directory holding a folder already here, and a copy that turns up later is blocked until it is moved. Names are unique too, ignoring case.
+
+`folder move` is the safe way to relocate one. SQLite keeps recent writes in a `-wal` file beside the database, so copying a live `memory.db` by hand can lose them. Moving flushes that file and holds off writers first. Across drives it also checks the new copy's integrity, identity and memory count, then moves the original to `archive/` for you to delete when you're satisfied.
+
+`folder archive` moves a folder into `archive/` beside itself, one level below where Geniuz reads. Nothing is deleted, and `folder restore` puts it back.
+
+## When you keep
 
 1. The command reads your text, which can be inline, from a file (`-c @notes.md`) or piped in (`-c -`).
 2. [`signal_with_backend`](../src/db.rs) refuses empty content and creates an ID. If you named a parent, it looks it up. An unknown parent does not stop the write: the memory is saved as the start of a new thread.
@@ -33,11 +51,13 @@ Other kinds of recall skip meaning entirely:
 | `--keyword "exact words"` | Keyword search |
 | `--random` | Something you may have forgotten |
 
+Two more forms reach across folders. `recall --all "topic"` searches every folder and shows each result with its address. `recall 13625F6B:3487B9B0` opens that memory in full, whichever folder it is in.
+
 The reason is in [`src/dig.rs`](../src/dig.rs): "Semantic search is for discovery; exact search is for recall".
 
 ## The model
 
-Search by meaning runs locally through ONNX Runtime, using a BERT sentence model that covers more than 50 languages. It downloads once from Hugging Face, about 118 MB, into `~/.geniuz/models/`, the first time anything is embedded. That includes your first `remember`. Loading a model is slow, so a helper called `geniuz-embed` keeps it ready over a local socket and exits after five idle minutes.
+Search by meaning runs locally through ONNX Runtime, using a BERT sentence model that covers more than 50 languages. It downloads once from Hugging Face, about 118 MB, into `~/.geniuz/models/`, the first time anything is embedded. That includes your first `keep`. Loading a model is slow, so a helper called `geniuz-embed` keeps it ready over a local socket and exits after five idle minutes.
 
 If the built-in model fails to load, Geniuz tries an embedding service instead: Ollama on your own machine by default. See [Using it](using-it.md#settings).
 

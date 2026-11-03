@@ -99,7 +99,7 @@ impl App {
             list_state,
             input: String::new(),
             status: format!("{} memories", total),
-            hint: "/recent  /search <q>  /find <q>  /remember  /detail  /random  /reorder  /status  /version  /help  /quit".into(),
+            hint: "/recent  /search <q>  /find <q>  /keep  /detail  /random  /reorder  /status  /version  /help  /quit".into(),
             mode: Mode::List,
             detail: None,
             should_quit: false,
@@ -233,7 +233,7 @@ impl App {
                 self.detail = None;
                 self.status = "help · Esc to return".into();
             }
-            "remember" | "r" => {
+            "keep" | "remember" | "k" | "r" => {
                 self.handle_remember(arg)?;
             }
             "reorder" | "sort" | "reverse" => {
@@ -478,7 +478,7 @@ fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
                 Line::from(vec![
                     Span::styled("  Try ", Style::default().fg(Color::DarkGray)),
                     Span::styled(
-                        "/remember",
+                        "/keep",
                         Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
                     ),
                     Span::styled(" to add one.", Style::default().fg(Color::DarkGray)),
@@ -626,7 +626,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from(vec![Span::styled("  /recent [n]   ", cmd), Span::raw("last n memories (default 24)")]),
         Line::from(vec![Span::styled("  /search <q>   ", cmd), Span::raw("keyword search across gists and content")]),
         Line::from(vec![Span::styled("  /find <q>     ", cmd), Span::raw("find by meaning (semantic search)")]),
-        Line::from(vec![Span::styled("  /remember     ", cmd), Span::raw("author a new memory (compose pane)")]),
+        Line::from(vec![Span::styled("  /keep         ", cmd), Span::raw("author a new memory (compose pane)")]),
         Line::from(vec![Span::styled("  /detail [id]  ", cmd), Span::raw("open detail; no arg uses selected row")]),
         Line::from(vec![Span::styled("  /random       ", cmd), Span::raw("open a random memory")]),
         Line::from(vec![Span::styled("  /reorder      ", cmd), Span::raw("toggle list order (newest / oldest first)")]),
