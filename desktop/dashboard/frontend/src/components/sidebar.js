@@ -5,7 +5,7 @@
 import { navigate, subscribe, getState } from '../store.js';
 import * as fmt from '../format.js';
 import * as api from '../api.js';
-import { openFolderDialog, openArchivedDialog } from './folderDialog.js';
+import { openFolderDialog } from './folderDialog.js';
 
 // Collapsing (Jack, 2026-11-02). Below this width the sidebar collapses to its
 // icons on its own, so the window can narrow further. That automatic collapse
@@ -177,7 +177,11 @@ function foldersSection(list, buttons) {
     row.innerHTML = `<span class="sidebar-item__icon">${ICONS.archive}</span>
       <span class="sidebar-item__label">Archived</span>
       <span class="sidebar-item__count">${archived.length}</span>`;
-    row.addEventListener('click', () => openArchivedDialog(archived));
+    row.dataset.surface = 'archived';
+    row.dataset.tip = 'Archived';
+    row.setAttribute('aria-label', 'Archived');
+    row.addEventListener('click', () => navigate('archived'));
+    buttons.push(row);
     sec.appendChild(row);
   }
 

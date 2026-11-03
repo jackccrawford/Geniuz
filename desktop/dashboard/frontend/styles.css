@@ -1153,10 +1153,12 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 .folder-form__spacer { flex: 1; }
 
 .sidebar-folders__archived { margin-top: 2px; opacity: 0.72; }
-.sidebar-folders__archived:hover { opacity: 1; }
+.sidebar-folders__archived:hover,
+.sidebar-folders__archived.is-active { opacity: 1; }
 .is-collapsed .sidebar-folders__archived { display: none; }
-.archived-list { display: flex; flex-direction: column; gap: 10px; max-height: 50vh; overflow-y: auto; }
-.archived-row { display: flex; align-items: center; gap: 16px; }
+.archived-list { display: flex; flex-direction: column; gap: 4px; max-width: 760px; }
+.archived-row { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--hairline-1); }
+.archived-status { margin-top: 12px; }
 .archived-row__text { flex: 1; min-width: 0; }
 .archived-row__name { font-weight: 600; overflow-wrap: anywhere; }
 .archived-row__meta { font-size: 13px; opacity: 0.72; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -5,6 +5,7 @@ import { sidebar, wireCollapse } from './components/sidebar.js';
 import * as recent from './surfaces/recent.js';
 import * as remember from './surfaces/remember.js';
 import * as find from './surfaces/find.js';
+import * as archived from './surfaces/archived.js';
 import * as status from './surfaces/status.js';
 import * as settings from './surfaces/settings.js';
 import * as dataSurface from './surfaces/data.js';
@@ -27,6 +28,7 @@ const SURFACE_MOUNTS = {
   recent: recent.mount,
   remember: remember.mount,
   find: find.mount,
+  archived: archived.mount,
   status: status.mount,
   settings: settings.mount,
   data: dataSurface.mount,

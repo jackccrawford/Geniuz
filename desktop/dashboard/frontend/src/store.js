@@ -3,7 +3,7 @@
 // to changes; surfaces dispatch via setState.
 
 const state = {
-  currentSurface: 'recent', // 'recent' | 'remember' | 'find' | 'status' | 'settings' | 'data'
+  currentSurface: 'recent', // 'recent' | 'remember' | 'find' | 'archived' | 'status' | 'settings' | 'data'
   searchQuery: '',          // active search query (empty = recent view)
   appVersion: null,         // set on bootstrap
   dataDir: null,            // set on bootstrap
