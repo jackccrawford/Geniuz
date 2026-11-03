@@ -38,7 +38,27 @@ struct GeniuzSettings: Codable, Equatable {
     }
 }
 
+/// One row of `geniuz folder list --json`.
+struct FolderOption: Decodable, Identifiable, Equatable {
+    let uuid: String
+    let name: String
+    let path: String
+    let memories: Int
+    let inUse: Bool
+    var id: String { uuid }
+
+    enum CodingKeys: String, CodingKey {
+        case uuid, name, path, memories
+        case inUse = "in_use"
+    }
+}
+
+private struct FolderListing: Decodable {
+    let folders: [FolderOption]
+}
+
 class GeniuzService: ObservableObject {
+    @Published var folders: [FolderOption] = []
     @Published var memoryCount: Int = 0
     @Published var recentGists: [String] = []
     @Published var recentMemories: [RecentMemory] = []
@@ -90,8 +110,82 @@ class GeniuzService: ObservableObject {
         return "\(realHome)/.geniuz"
     }
 
+    /// The first folder: where everything goes until another is chosen.
+    var defaultStationPath: String {
+        return "\(dataDir)/memory.db"
+    }
+
+    /// The folder in use. The binary owns the rules for finding folders, so this
+    /// never has a second copy of them.
     var stationPath: String {
-        return "\(realHome)/.geniuz/memory.db"
+        return cachedFolders.first(where: { $0.inUse })?.path ?? defaultStationPath
+    }
+
+    // MARK: - Folders
+
+    private var cachedFolders: [FolderOption] = []
+    private var folderStamp: String = ""
+    private var foldersReadAt = Date.distantPast
+
+    /// Run the bundled binary with this app's idea of the data directory. It runs
+    /// from the root so that a project's `.geniuz-folder` can't affect the menu.
+    private func runGeniuz(_ arguments: [String]) -> Data? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: geniuzBinaryPath)
+        process.arguments = arguments
+        process.currentDirectoryURL = URL(fileURLWithPath: "/")
+        var env = ProcessInfo.processInfo.environment
+        env["GENIUZ_HOME"] = dataDir
+        env.removeValue(forKey: "GENIUZ_STATION")
+        process.environment = env
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            NSLog("[geniuz-app] couldn't run geniuz: %@", error.localizedDescription)
+            return nil
+        }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return process.terminationStatus == 0 ? data : nil
+    }
+
+    private func fileStamp(_ path: String) -> String {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        return (attrs?[.modificationDate] as? Date).map { "\($0.timeIntervalSince1970)" } ?? "-"
+    }
+
+    /// Ask the binary only when something may have changed: the current folder,
+    /// the list of added directories, a folder that has gone from where it was,
+    /// or once a minute for what the rest of the app writes.
+    private func readFolders() -> [FolderOption] {
+        let stamp = fileStamp("\(dataDir)/current") + "|" + fileStamp("\(dataDir)/added-folders")
+        let inUseGone = cachedFolders.first(where: { $0.inUse }).map {
+            !FileManager.default.fileExists(atPath: $0.path)
+        } ?? false
+        let fresh = stamp == folderStamp && !inUseGone && Date().timeIntervalSince(foldersReadAt) < 60
+        if fresh { return cachedFolders }
+
+        guard let data = runGeniuz(["folder", "list", "--json"]),
+              let listing = try? JSONDecoder().decode(FolderListing.self, from: data) else {
+            return cachedFolders
+        }
+        cachedFolders = listing.folders
+        folderStamp = stamp
+        foldersReadAt = Date()
+        return cachedFolders
+    }
+
+    /// Change the folder in use for every surface, then show it here.
+    func useFolder(_ folder: FolderOption) {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            _ = self.runGeniuz(["folder", "use", folder.uuid])
+            self.foldersReadAt = .distantPast
+            self.refresh()
+        }
     }
 
     var settingsPath: String {
@@ -132,12 +226,14 @@ class GeniuzService: ObservableObject {
     func refresh() {
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
+            let folders = self.readFolders()
             let station = self.readStation()
             let mcp = self.checkMcpInstalled()
             let onPath = self.checkCliOnPath()
             let s = self.loadSettings()
 
             DispatchQueue.main.async {
+                self.folders = folders
                 self.stationExists = station.exists
                 self.memoryCount = station.memories
                 self.recentMemories = station.recentMemories
@@ -289,12 +385,20 @@ class GeniuzService: ObservableObject {
         guard fileExists else { return info }
         info.exists = true
 
+        // Read through the WAL, or the newest memories wouldn't show until they
+        // were flushed to the main file. That needs to touch the -shm file, so
+        // a folder this app can't write to falls back to reading the main file
+        // alone: slightly behind beats blank.
         var db: OpaquePointer?
-        // Open as immutable — skips WAL, no write access needed
-        let uri = "file:\(path)?mode=ro&immutable=1"
-        let rc = sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_URI, nil)
-        NSLog("[geniuz-app] sqlite3_open rc=%d path=%@", rc, uri)
-        guard rc == SQLITE_OK else { return info }
+        for mode in ["mode=ro", "mode=ro&immutable=1"] {
+            if db != nil { sqlite3_close(db); db = nil }
+            let uri = "file:\(path)?\(mode)"
+            let rc = sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_URI, nil)
+            NSLog("[geniuz-app] sqlite3_open rc=%d path=%@", rc, uri)
+            guard rc == SQLITE_OK else { continue }
+            if sqlite3_exec(db, "SELECT 1 FROM memories LIMIT 1", nil, nil, nil) == SQLITE_OK { break }
+        }
+        guard db != nil else { return info }
         defer { sqlite3_close(db) }
 
         // Memory count

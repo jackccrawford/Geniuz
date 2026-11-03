@@ -91,7 +91,7 @@ export async function mount(container) {
   const sizeValue = dataBytes === null || dataBytes === undefined ? '—' : `${sizeNum} ${sizeUnit}`;
 
   body.appendChild(section('Storage', [
-    row('Data folder', dataDir ? escapeHtml(dataDir) : '—', 'ok'),
+    row('Data location', dataDir ? escapeHtml(dataDir) : '—', 'ok'),
     row('Size on disk', sizeValue, 'ok'),
   ]));
 

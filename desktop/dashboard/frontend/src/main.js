@@ -158,5 +158,18 @@ async function wireMenuEvents() {
   await listen('tray-nav', (event) => handleNav(event.payload));
 }
 
+// The folder in use can change from the menu bar or the command line. Coming back
+// to this window shows it, rather than one folder's memories under another's name.
+window.addEventListener('focus', async () => {
+  if (!api.isTauri()) return;
+  try {
+    const shown = (getState().folders?.folders || []).find((f) => f.current)?.uuid;
+    const now = (await api.listFolders()).folders.find((f) => f.current)?.uuid;
+    if (shown && now && shown !== now) location.reload();
+  } catch (e) {
+    console.error('[geniuz] checking the folder failed:', e);
+  }
+});
+
 bootstrap();
 wireMenuEvents();

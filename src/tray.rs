@@ -38,11 +38,30 @@ struct Status {
     recent_gists: Vec<String>,
     claude_configured: bool,
     restart_required: bool,
+    /// UUID, name, and whether it's the one in use.
+    folders: Vec<(String, String, bool)>,
 }
 
 impl Status {
+    fn current_folder(&self) -> Option<&str> {
+        self.folders.iter().find(|f| f.2).map(|f| f.1.as_str())
+    }
+
     fn fetch(restart_required: bool) -> Self {
-        let station_path = geniuz_memory_db_path();
+        let reg = geniuz::folders::Registry::from_env();
+        let station_path = reg
+            .resolve(None, None, None)
+            .unwrap_or_else(|_| geniuz::data_dir().join("memory.db"));
+        let in_use = std::fs::canonicalize(&station_path).unwrap_or_else(|_| station_path.clone());
+        let folders: Vec<(String, String, bool)> = reg
+            .scan()
+            .folders
+            .into_iter()
+            .map(|f| {
+                let current = std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()) == in_use;
+                (f.uuid, f.name, current)
+            })
+            .collect();
         let (memory_count, recent_gists, station_exists) = if station_path.exists() {
             match geniuz::db::DatabaseManager::new(&station_path.to_string_lossy()) {
                 Ok(db) => {
@@ -62,6 +81,7 @@ impl Status {
         };
 
         Status {
+            folders,
             memory_count,
             station_exists,
             recent_gists,
@@ -82,21 +102,11 @@ impl Status {
         match self.recent_gists.first() {
             Some(g) => {
                 let g = truncate_for_menu(g, 100);
-                format!("Geniuz · {}\n{}", mem, g)
+                format!("Geniuz · {} · {}\n{}", self.current_folder().unwrap_or(""), mem, g)
             }
-            None => format!("Geniuz · {}", mem),
+            None => format!("Geniuz · {} · {}", self.current_folder().unwrap_or(""), mem),
         }
     }
-}
-
-fn geniuz_memory_db_path() -> PathBuf {
-    if let Ok(home) = std::env::var("GENIUZ_HOME") {
-        return PathBuf::from(home).join("memory.db");
-    }
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_default();
-    PathBuf::from(home).join(".geniuz").join("memory.db")
 }
 
 fn claude_config_path() -> PathBuf {
@@ -174,7 +184,9 @@ struct MenuBuild {
     menu: Menu,
     configure_id: Option<MenuId>,
     quit_id: MenuId,
-    // Submenu items are disabled (no click action); we don't track their IDs.
+    /// Folder rows, each with the UUID it switches to. Other submenu items are
+    /// disabled (no click action), so we don't track their IDs.
+    folder_ids: Vec<(MenuId, String)>,
 }
 
 fn build_menu(status: &Status) -> MenuBuild {
@@ -188,6 +200,21 @@ fn build_menu(status: &Status) -> MenuBuild {
     );
     menu.append(&header).ok();
     menu.append(&PredefinedMenuItem::separator()).ok();
+
+    // Folders — one needs no choosing, so this only appears with two or more.
+    let mut folder_ids = Vec::new();
+    if status.folders.len() > 1 {
+        let name = status.current_folder().unwrap_or("Folders");
+        let submenu = Submenu::new(truncate_for_menu(name, 40), true);
+        for (uuid, folder, current) in &status.folders {
+            let label = if *current { format!("✓  {}", folder) } else { format!("    {}", folder) };
+            let item = MenuItem::new(truncate_for_menu(&label, 60), true, None);
+            folder_ids.push((item.id().clone(), uuid.clone()));
+            submenu.append(&item).ok();
+        }
+        menu.append(&submenu).ok();
+        menu.append(&PredefinedMenuItem::separator()).ok();
+    }
 
     // Recent memories submenu — only if there are any.
     // Bullet prefix matches the Mac menu bar's secondary-color dot affordance;
@@ -229,6 +256,7 @@ fn build_menu(status: &Status) -> MenuBuild {
         menu,
         configure_id,
         quit_id,
+        folder_ids,
     }
 }
 
@@ -250,11 +278,12 @@ struct TrayApp {
     restart_required: Arc<Mutex<bool>>,
     current_configure_id: Arc<Mutex<Option<MenuId>>>,
     current_quit_id: Arc<Mutex<MenuId>>,
+    folder_ids: Vec<(MenuId, String)>,
     last_tooltip_refresh: std::time::Instant,
 }
 
 impl TrayApp {
-    fn rebuild_menu(&self) {
+    fn rebuild_menu(&mut self) {
         let rr = *self.restart_required.lock().unwrap();
         let fresh = Status::fetch(rr);
 
@@ -267,6 +296,7 @@ impl TrayApp {
         *self.status.lock().unwrap() = fresh;
         *self.current_configure_id.lock().unwrap() = build.configure_id;
         *self.current_quit_id.lock().unwrap() = build.quit_id;
+        self.folder_ids = build.folder_ids;
     }
 
     fn refresh_tooltip_only(&mut self) {
@@ -293,6 +323,14 @@ impl ApplicationHandler for TrayApp {
 
             if event.id == quit {
                 event_loop.exit();
+                return;
+            }
+            let chosen = self.folder_ids.iter().find(|(id, _)| *id == event.id).map(|(_, uuid)| uuid.clone());
+            if let Some(uuid) = chosen {
+                if let Err(e) = geniuz::folders::Registry::from_env().use_folder(&uuid) {
+                    eprintln!("[geniuz-tray] switching folder failed: {}", e);
+                }
+                self.rebuild_menu();
                 return;
             }
             if let Some(cfg_id) = configure {
@@ -362,6 +400,7 @@ fn main() {
     let status = Arc::new(Mutex::new(initial_status));
     let current_configure_id = Arc::new(Mutex::new(build.configure_id));
     let current_quit_id = Arc::new(Mutex::new(build.quit_id));
+    let folder_ids = build.folder_ids;
 
     let mut app = TrayApp {
         tray,
@@ -369,6 +408,7 @@ fn main() {
         restart_required,
         current_configure_id,
         current_quit_id,
+        folder_ids,
         last_tooltip_refresh: std::time::Instant::now(),
     };
 

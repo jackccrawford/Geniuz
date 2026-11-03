@@ -7,6 +7,7 @@ struct GeniuzMenu: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
+            folderPicker
 
             if service.stationExists {
                 recentMemoriesList
@@ -30,6 +31,41 @@ struct GeniuzMenu: View {
         }
         .frame(width: 360)
         .background(.regularMaterial)
+    }
+
+    // MARK: - Folders
+
+    /// Which folder this menu is showing, and the way to another. One folder
+    /// needs no choosing, so the row only appears with two or more.
+    @ViewBuilder
+    private var folderPicker: some View {
+        if service.folders.count > 1 {
+            Menu {
+                ForEach(service.folders) { folder in
+                    Button(action: { service.useFolder(folder) }) {
+                        if folder.inUse {
+                            Label(folder.name, systemImage: "checkmark")
+                        } else {
+                            Text(folder.name)
+                        }
+                    }
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "book")
+                        .font(.system(size: 12))
+                    Text(service.folders.first(where: { $0.inUse })?.name ?? "My memory")
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                    Spacer()
+                }
+            }
+            .menuStyle(.borderlessButton)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+
+            Divider()
+        }
     }
 
     // MARK: - Open Dashboard
@@ -348,7 +384,7 @@ struct GeniuzSettingsView: View {
             }
 
             Section("Storage") {
-                LabeledContent("Folder") {
+                LabeledContent("Location") {
                     Text(service.dataDir)
                         .font(.system(.caption, design: .monospaced))
                         .textSelection(.enabled)
