@@ -131,7 +131,7 @@ Use "geniuz [command] --help" for more information.
 
 This repository is **Geniuz Community Edition**: open source, MIT-licensed, single-station memory for any AI chassis. Install it, bring your own AI, get memory that survives across conversations. Make a PR if you like, fork if you like. We maintain it with bug fixes.
 
-**[Geniuz Team](https://github.com/mvara-ai)** is the paid tier from mVara: unlimited continuity, perpetual agents that live in your environment, and a team chassis that coordinates around your customers' reality. Geniuz Team is built on the same substrate as Geniuz Free.
+**[Geniuz Team](https://github.com/mvara-ai)** is the paid tier from mVara: unlimited continuity, perpetual agents that live in your environment, and a team chassis that coordinates around your customers' reality. Geniuz Team is built on the same substrate as Geniuz Community Edition.
 
 If you want memory for yourself or a developer team using existing AI tools, Geniuz Community Edition is what you want.
 
