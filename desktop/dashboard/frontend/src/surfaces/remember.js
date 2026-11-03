@@ -5,6 +5,8 @@
 // from the first 200 chars of content. Submit calls `remember_memory` which
 // wraps `db::signal()` — same write path as the CLI and TUI.
 
+import { getState } from '../store.js';
+import * as su from '../stream-ui.js';
 import * as api from '../api.js';
 import { navigate, setState } from '../store.js';
 
@@ -16,7 +18,7 @@ export async function mount(container) {
   header.className = 'main-header';
   header.innerHTML = `
     <h1 class="main-header__title">Keep</h1>
-    <p class="main-header__sub">Save what matters. Gist is a short shelf-label for retrieval. Content is the body.</p>
+    <p class="main-header__sub">Saving in ${su.esc((getState().folders?.folders || []).find((f) => f.current)?.name || 'your memory')}. Gist is a short shelf-label for retrieval. Content is the body.</p>
   `;
   root.appendChild(header);
 

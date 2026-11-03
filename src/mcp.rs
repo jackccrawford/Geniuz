@@ -336,7 +336,7 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
         lines.push(line);
     }
     if !scan.blocked.is_empty() {
-        lines.push(format!("{} blocked as duplicates.", scan.blocked.len()));
+        lines.push(format!("{} blocked as copies of each other, until one is moved.", scan.blocked.len()));
     }
     (lines.join("\n"), false)
 }
@@ -344,12 +344,15 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
 /// The store for this call: the named folder, or the one in use right now.
 fn open_for_call(reg: &Registry, params: &Value) -> Result<DatabaseManager, String> {
     let named = params.get("folder").and_then(|f| f.as_str()).map(str::trim).filter(|f| !f.is_empty());
-    let path = match named {
+    match named {
         // State, not instruction: this caller has the folders tool, not a shell.
-        Some(q) => reg.find(q).map_err(|_| format!("No folder called \"{}\". The folders tool lists them.", q))?.db_path,
-        None => crate::resolve_db_path()?,
-    };
-    DatabaseManager::new(&path.to_string_lossy())
+        Some(q) => crate::open_resolved(|| {
+            reg.find(q)
+                .map(|f| f.db_path)
+                .map_err(|e| if e.starts_with("No folder") { format!("No folder called \"{}\". The folders tool lists them.", q) } else { e })
+        }),
+        None => crate::get_db(),
+    }
 }
 
 /// A query or thread given as an address names its own folder. `None` means
@@ -361,8 +364,11 @@ fn recall_by_address(reg: &Registry, args: &Value) -> Option<(String, bool)> {
     let (folder, _) = opened.as_ref().or(thread.as_ref())?;
     let folder = folder.clone();
     let open = || -> Result<DatabaseManager, String> {
-        let found = reg.find(&folder).map_err(|_| format!("No folder with the ID {}. The folders tool lists them.", folder))?;
-        DatabaseManager::new(&found.db_path.to_string_lossy())
+        crate::open_resolved(|| {
+            reg.find(&folder)
+                .map(|f| f.db_path)
+                .map_err(|_| format!("No folder with the ID {}. The folders tool lists them.", folder))
+        })
     };
     let db = match open() {
         Ok(db) => db,

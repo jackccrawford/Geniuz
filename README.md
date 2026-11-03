@@ -137,7 +137,7 @@ Use "geniuz [command] --help" for more information.
 - **Private.** All your data is stored on your machine. No cloud. No account. No telemetry.
 - **Fast.** Semantic search runs locally in the binary, with no round trip to anyone.
 - **Free.** No API keys. No token costs for memory. No subscription.
-- **Portable.** Your folder is a SQLite file. Copy it, back it up, share it.
+- **Portable.** Each folder is a SQLite file you own. Move it with `geniuz folder move`, or back it up with Export.
 - **Framework-independent.** Switch from Cursor to Claude Code. Your memory comes with you.
 
 ---

@@ -52,14 +52,28 @@ fn check_product(conn: &Connection, db_path: &str) -> Result<(), String> {
 }
 
 impl DatabaseManager {
+    /// Open a store, creating it if it doesn't exist.
     pub fn new(db_path: &str) -> Result<Self, String> {
         if let Some(parent) = Path::new(db_path).parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create directory: {}", e))?;
         }
-
         let conn = Connection::open(db_path)
             .map_err(|e| format!("Failed to open database: {}", e))?;
+        Self::prepare(conn, db_path)
+    }
+
+    /// Open a store that must already exist. A folder that moved between finding
+    /// its path and opening it fails here, rather than an empty store quietly
+    /// appearing at the old path and taking the memory where nobody will look.
+    pub fn open_existing(db_path: &str) -> Result<Self, String> {
+        let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = Connection::open_with_flags(db_path, flags)
+            .map_err(|e| format!("Failed to open database: {}", e))?;
+        Self::prepare(conn, db_path)
+    }
+
+    fn prepare(conn: Connection, db_path: &str) -> Result<Self, String> {
         check_product(&conn, db_path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")
             .map_err(|e| format!("Failed to enable WAL: {}", e))?;
@@ -123,7 +137,8 @@ impl DatabaseManager {
     }
 
     fn conn(&self) -> Result<Connection, String> {
-        let conn = Connection::open(&self.db_path)
+        let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = Connection::open_with_flags(&self.db_path, flags)
             .map_err(|e| format!("Failed to open database: {}", e))?;
         conn.busy_timeout(std::time::Duration::from_secs(30))
             .map_err(|e| format!("Failed to set timeout: {}", e))?;

@@ -16,6 +16,10 @@ export function getAppVersion() {
   return invoke('get_app_version');
 }
 
+export function bindCurrentFolder() {
+  return invoke('bind_current_folder');
+}
+
 export function listFolders() {
   return invoke('list_folders');
 }

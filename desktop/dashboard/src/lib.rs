@@ -15,13 +15,22 @@ use tauri::{Emitter, Manager};
 /// The folder in use, shared with the CLI and MCP through the same `current`
 /// file. Resolved every time, because any of them can change it or move it.
 fn db_path() -> Result<String, String> {
-    Registry::from_env()
-        .resolve(None, None, None)
-        .map(|p| p.to_string_lossy().into_owned())
+    let reg = Registry::from_env();
+    let shown = SHOWN.lock().map_err(|_| "The app is in a bad state.".to_string())?.clone();
+    match shown {
+        // The path, afresh: the folder may have moved, but it's still the one on screen.
+        Some(uuid) => reg.find(&uuid).map(|f| f.db_path.to_string_lossy().into_owned()),
+        None => reg.resolve(None, None, None).map(|p| p.to_string_lossy().into_owned()),
+    }
 }
 
+/// The folder this window is showing, set when the page loads. Every read and
+/// write goes to it, so if something else changes the current folder, a draft
+/// can't land in a folder that isn't the one on screen.
+static SHOWN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
 fn open_db() -> Result<DatabaseManager, String> {
-    DatabaseManager::new(&db_path()?)
+    DatabaseManager::open_existing(&db_path()?).or_else(|_| DatabaseManager::open_existing(&db_path()?))
 }
 
 // -------------------------------------------------------------------------
@@ -367,6 +376,20 @@ fn list_folders() -> FolderList {
     }
 }
 
+/// Called once per page load: show the current folder, and stay with it.
+#[tauri::command]
+fn bind_current_folder() -> FolderList {
+    let reg = Registry::from_env();
+    let current = reg.resolve(None, None, None).ok().map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+    let shown = reg.scan().folders.into_iter().find(|f| {
+        current.as_deref() == Some(std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()).as_path())
+    });
+    if let Ok(mut slot) = SHOWN.lock() {
+        *slot = shown.map(|f| f.uuid);
+    }
+    list_folders()
+}
+
 #[tauri::command]
 fn use_folder(uuid: String) -> Result<(), String> {
     Registry::from_env().use_folder(&uuid).map(|_| ())
@@ -612,6 +635,7 @@ pub fn run() {
             export_memory_db_to,
             get_data_dir,
             list_folders,
+            bind_current_folder,
             use_folder,
             create_folder,
             update_folder,

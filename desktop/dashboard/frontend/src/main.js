@@ -42,10 +42,10 @@ async function bootstrap() {
   let folders = null;
   if (api.isTauri()) {
     try {
-      [version, dataDir, folders] = await Promise.all([
+      folders = await api.bindCurrentFolder();
+      [version, dataDir] = await Promise.all([
         api.getAppVersion(),
         api.getDataDir(),
-        api.listFolders(),
       ]);
       stats = await api.getStationStats();
     } catch (e) {
@@ -162,6 +162,8 @@ async function wireMenuEvents() {
 // to this window shows it, rather than one folder's memories under another's name.
 window.addEventListener('focus', async () => {
   if (!api.isTauri()) return;
+  // Don't reload away a draft. It's bound to the folder it names, so it stays right.
+  if (getState().currentSurface === 'remember') return;
   try {
     const shown = (getState().folders?.folders || []).find((f) => f.current)?.uuid;
     const now = (await api.listFolders()).folders.find((f) => f.current)?.uuid;

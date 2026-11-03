@@ -92,7 +92,7 @@ fn list(reg: &Registry, json: bool) -> Result<String, String> {
         lines.push(line);
     }
     for b in &scan.blocked {
-        lines.push(format!("! Blocked: {}. {} Using {}.", b.db_path.display(), b.reason, b.kept.display()));
+        lines.push(format!("! Blocked: {} at {}. {}, at {}. Move one of them.", b.name, b.db_path.display(), b.reason, b.other.display()));
     }
     for dir in &scan.unavailable {
         lines.push(format!("? Can't reach {} right now.", dir.display()));
@@ -124,7 +124,7 @@ fn list_json(scan: &Scan, using: &Option<PathBuf>) -> Result<String, String> {
     let blocked: Vec<_> = scan
         .blocked
         .iter()
-        .map(|b| serde_json::json!({ "path": b.db_path, "kept": b.kept, "reason": b.reason }))
+        .map(|b| serde_json::json!({ "name": b.name, "uuid": b.uuid, "path": b.db_path, "other": b.other, "reason": b.reason }))
         .collect();
     serde_json::to_string_pretty(&serde_json::json!({
         "folders": folders,

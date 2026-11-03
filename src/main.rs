@@ -150,8 +150,20 @@ pub fn resolve_db_path() -> Result<PathBuf, String> {
 }
 
 pub fn get_db() -> Result<db::DatabaseManager, String> {
-    let path = resolve_db_path()?;
-    db::DatabaseManager::new(&path.to_string_lossy())
+    // An explicit file path may name a store to be created, as it always could.
+    if std::env::var("GENIUZ_STATION").is_ok_and(|s| !s.is_empty()) && IN_FOLDER.get().and_then(|f| f.as_deref()).is_none() {
+        return db::DatabaseManager::new(&resolve_db_path()?.to_string_lossy());
+    }
+    open_resolved(resolve_db_path)
+}
+
+/// Open the folder `find` names. If it moved in between, ask once more: it will
+/// be at its new path. Never create a store as a side effect of choosing a folder.
+pub fn open_resolved(find: impl Fn() -> Result<PathBuf, String>) -> Result<db::DatabaseManager, String> {
+    match db::DatabaseManager::open_existing(&find()?.to_string_lossy()) {
+        Ok(db) => Ok(db),
+        Err(_) => db::DatabaseManager::open_existing(&find()?.to_string_lossy()),
+    }
 }
 
 /// Convert a UTC timestamp string from SQLite into a human-readable
@@ -295,7 +307,7 @@ fn recall_all(
     let found = search_across(&reg, &search, window, limit);
     let content = |hit: &geniuz::folders::Hit| -> Option<String> {
         if !full { return None; }
-        db::DatabaseManager::new(&hit.folder.db_path.to_string_lossy()).ok()?
+        db::DatabaseManager::open_existing(&hit.folder.db_path.to_string_lossy()).ok()?
             .get_full_content(&hit.entry.memory_uuid).ok().flatten()
     };
 
@@ -613,8 +625,8 @@ fn run(cli: Cli) -> Result<String, String> {
             let thread_address = thread.as_deref().and_then(geniuz::folders::parse_address);
             let db = match opened.as_ref().or(thread_address.as_ref()) {
                 Some((folder, _)) => {
-                    let found = geniuz::folders::Registry::from_env().find(folder)?;
-                    db::DatabaseManager::new(&found.db_path.to_string_lossy())?
+                    let reg = geniuz::folders::Registry::from_env();
+                    open_resolved(|| Ok(reg.find(folder)?.db_path))?
                 }
                 None => get_db()?,
             };
