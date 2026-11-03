@@ -42,6 +42,12 @@ const MOVING_PREFIX: &str = ".moving-";
 const ABANDONED_MARK: &str = ".abandoned-";
 const LOCK_FILE: &str = "registry.lock";
 const FENCE_TRIGGER: &str = "geniuz_moved_away";
+/// In a hidden copy: held locked by the process moving it, so a lock that can be
+/// taken proves that process has stopped. The system releases it if the process dies.
+const MOVE_OWNER: &str = "move-owner";
+/// In a hidden copy: written once the original is fenced, as proof that the copy is
+/// final. Without this or a fenced original, the copy may have fallen behind.
+const MOVE_COMMITTED: &str = "move-committed";
 const DOTFILE: &str = ".geniuz-folder";
 const DEFAULT_NAME: &str = "My memory";
 const MAX_NAME: usize = 60;
@@ -94,6 +100,8 @@ pub struct Scan {
     pub blocked: Vec<Blocked>,
     /// Added directories that can't be reached right now, such as an unplugged drive.
     pub unavailable: Vec<PathBuf>,
+    /// Interrupted moves whose original can't be reached, so can't be settled yet.
+    pub pending_moves: Vec<PathBuf>,
 }
 
 /// The result of a move. `left_behind` is set when it crossed drives.
@@ -173,59 +181,34 @@ impl Registry {
             }
         }
 
-        let mut seen_paths = HashSet::new();
-        let mut found: Vec<Folder> = Vec::new();
-        let mut paused: Vec<Folder> = Vec::new();
+        let (found, paused) = read_all(&roots);
+        let mut changed = false;
         for root in &roots {
-            for db in candidates(root) {
-                let key = canonical(&db);
-                if !seen_paths.insert(key) {
-                    continue;
-                }
-                let Some(folder) = read_identity(&db) else { continue };
-                if is_fenced(&db) {
-                    paused.push(folder);
-                } else {
-                    found.push(folder);
-                }
-            }
+            changed |= finish_interrupted_moves(root, &found, &paused, &mut out.pending_moves);
         }
-        if roots.iter().any(|root| finish_interrupted_moves(root, &found, &paused)) {
-            return self.scan_without_recovery(out, &roots);
-        }
-        self.settle(&mut out, found);
-        out
-    }
-
-    fn scan_without_recovery(&self, mut out: Scan, roots: &[PathBuf]) -> Scan {
-        let mut seen_paths = HashSet::new();
-        let mut found = Vec::new();
-        for root in roots {
-            for db in candidates(root) {
-                if !seen_paths.insert(canonical(&db)) || is_fenced(&db) {
-                    continue;
-                }
-                if let Some(folder) = read_identity(&db) {
-                    found.push(folder);
-                }
-            }
-        }
+        let found = if changed { read_all(&roots).0 } else { found };
         self.settle(&mut out, found);
         out
     }
 
     /// Sort what was found into usable folders and blocked copies.
     fn settle(&self, out: &mut Scan, found: Vec<Folder>) {
-        let mut counts: HashMap<String, Vec<PathBuf>> = HashMap::new();
+        let mut same_id: HashMap<String, Vec<PathBuf>> = HashMap::new();
         for f in &found {
-            counts.entry(f.uuid.to_lowercase()).or_default().push(f.db_path.clone());
+            same_id.entry(f.uuid.to_lowercase()).or_default().push(f.db_path.clone());
         }
         for folder in found {
-            let paths = &counts[&folder.uuid.to_lowercase()];
+            let paths = &same_id[&folder.uuid.to_lowercase()];
             if paths.len() > 1 {
                 let other = paths.iter().find(|p| **p != folder.db_path).cloned().unwrap_or_default();
+                let reason = if same_file(&folder.db_path, &other) {
+                    // Each name would keep its own -wal file, which can corrupt the store.
+                    "has two names for one file, which isn't safe"
+                } else {
+                    "has two copies, and nothing can tell which is the original"
+                };
                 out.blocked.push(Blocked {
-                    reason: format!("Another copy of {}", folder.short_id()),
+                    reason: reason.to_string(),
                     uuid: folder.uuid,
                     name: folder.name,
                     db_path: folder.db_path,
@@ -252,8 +235,9 @@ impl Registry {
         // anything else is named.
         if let Some(b) = scan.blocked.iter().find(|b| id_hit(&b.uuid) || name_key(&b.name) == name_key(query)) {
             return Err(format!(
-                "\"{}\" has two copies, at {} and {}, and nothing can tell which is the original. Move one of them out of Geniuz's reach first.",
+                "\"{}\" {}: {} and {}. Move one of them out of Geniuz's reach first.",
                 b.name,
+                b.reason,
                 b.db_path.display(),
                 b.other.display()
             ));
@@ -265,7 +249,10 @@ impl Registry {
         match named.as_slice() {
             [one] => return Ok((*one).clone()),
             [] => {}
-            _ => return Err(format!("More than one folder is called \"{}\". Use its ID.", query)),
+            _ => return Err(format!(
+                "More than one folder is called \"{}\". Use an ID from `geniuz folder list`, and rename one of them.",
+                query
+            )),
         }
         if q.len() == SHORT_ID {
             let hits: Vec<_> = scan.folders.iter().filter(|f| f.uuid.to_lowercase().starts_with(&q)).collect();
@@ -309,7 +296,7 @@ impl Registry {
                 .find(&q)
                 .map(|f| f.db_path)
                 .map_err(|e| {
-                    if e.contains("two copies") {
+                    if e.contains("Move one of them") {
                         e
                     } else {
                         format!("The current folder ({}) isn't available. Choose one with `geniuz folder use`.", q)
@@ -320,7 +307,8 @@ impl Registry {
         let scan = self.scan();
         if let Some(b) = scan.blocked.iter().find(|b| canonical(&b.db_path) == canonical(&first)) {
             return Err(format!(
-                "Your first folder has a second copy at {}, and nothing can tell which is the original. Move it out of Geniuz's reach first.",
+                "Your first folder {}: {}. Move it out of Geniuz's reach first.",
+                b.reason,
                 b.other.display()
             ));
         }
@@ -338,6 +326,10 @@ impl Registry {
     /// Make a folder the one used when none is named. Records its UUID, so
     /// renaming it changes nothing.
     pub fn use_folder(&self, query: &str) -> Result<Folder, String> {
+        self.with_registry_lock(|| self.use_folder_unlocked(query))
+    }
+
+    fn use_folder_unlocked(&self, query: &str) -> Result<Folder, String> {
         let folder = self.find(query)?;
         write_atomic(&self.current_path(), &format!("{}\n", folder.uuid))?;
         Ok(folder)
@@ -346,6 +338,10 @@ impl Registry {
     /// Create a folder, in the data directory unless `at` names another place.
     /// A new place goes on the allow list so the folder can be seen.
     pub fn create(&self, name: &str, description: &str, at: Option<&Path>) -> Result<Folder, String> {
+        self.with_registry_lock(|| self.create_unlocked(name, description, at))
+    }
+
+    fn create_unlocked(&self, name: &str, description: &str, at: Option<&Path>) -> Result<Folder, String> {
         let name = validate_name(name)?;
         self.check_name_free(&name, None)?;
 
@@ -364,7 +360,7 @@ impl Registry {
         drop(conn);
 
         if at.is_some() {
-            self.remember_added(parent)?;
+            self.remember_added_unlocked(parent)?;
         }
         read_identity(&db).ok_or_else(|| format!("Couldn't read {} after creating it", db.display()))
     }
@@ -378,6 +374,10 @@ impl Registry {
     /// two identities. A database from anything else has no identity and is
     /// left untouched, so adding a directory of them finds nothing.
     pub fn add(&self, dir: &Path) -> Result<Vec<Folder>, String> {
+        self.with_registry_lock(|| self.add_unlocked(dir))
+    }
+
+    fn add_unlocked(&self, dir: &Path) -> Result<Vec<Folder>, String> {
         let dir = std::fs::canonicalize(dir)
             .map_err(|e| format!("Couldn't open {}: {}", dir.display(), e))?;
         if dir == canonical(&self.home) || self.added().iter().any(|d| canonical(d) == dir) {
@@ -396,7 +396,14 @@ impl Registry {
             .iter()
             .map(|f| (name_key(&f.name), f.db_path.clone()))
             .collect();
-        let mut compared: Vec<PathBuf> = existing.folders.iter().map(|f| f.db_path.clone()).collect();
+        // Every memory ID already here. Copies can differ in identity and in their
+        // oldest memories, so only comparing all of them can establish this.
+        let mut memories: HashMap<String, PathBuf> = HashMap::new();
+        for f in &existing.folders {
+            for id in memory_ids(&f.db_path) {
+                memories.insert(id, f.db_path.clone());
+            }
+        }
 
         // Check everything before writing anything.
         let mut to_stamp = Vec::new();
@@ -407,21 +414,23 @@ impl Registry {
             }
             let (uuid, name) = match read_identity(&db) {
                 Some(f) => (Some(f.uuid), f.name),
-                None if is_geniuz_store(&db) => {
-                    if let Some(other) = stores_sharing_memories(&db, &compared) {
+                None if is_geniuz_store(&db) => (None, directory_name(&db)),
+                None => continue,
+            };
+            for id in memory_ids(&db) {
+                if let Some(other) = memories.insert(id, db.clone()) {
+                    if other != db {
                         return Err(format!(
-                            "Not added. {} holds the same memories as the folder at {}. Copies aren't supported; move or retire one of them first.",
+                            "Not added. {} holds memories that are also in {}. Copies aren't supported; move or retire one of them first.",
                             db.display(),
                             other.display()
                         ));
                     }
-                    let name = directory_name(&db);
-                    to_stamp.push((db.clone(), name.clone()));
-                    compared.push(db.clone());
-                    (None, name)
                 }
-                None => continue,
-            };
+            }
+            if uuid.is_none() {
+                to_stamp.push((db.clone(), name.clone()));
+            }
             found += 1;
             if let Some(uuid) = uuid {
                 if let Some(other) = uuids.insert(uuid.to_lowercase(), db.clone()) {
@@ -445,7 +454,7 @@ impl Registry {
             return Err(format!("No Geniuz folders in {}.", dir.display()));
         }
 
-        self.remember_added(&dir)?;
+        self.remember_added_unlocked(&dir)?;
         for (db, name) in &to_stamp {
             stamp(db, name)?;
         }
@@ -460,18 +469,24 @@ impl Registry {
 
     /// Take a directory off the allow list. Its files aren't touched.
     pub fn remove(&self, dir: &Path) -> Result<(), String> {
+        self.with_registry_lock(|| self.remove_unlocked(dir))
+    }
+
+    fn remove_unlocked(&self, dir: &Path) -> Result<(), String> {
         let target = canonical(dir);
-        self.with_registry_lock(|| {
-            let current = self.added();
-            let kept: Vec<_> = current.iter().filter(|d| canonical(d) != target).cloned().collect();
-            if kept.len() == current.len() {
-                return Err(format!("{} isn't on the list.", dir.display()));
-            }
-            self.write_added(&kept)
-        })
+        let current = self.added();
+        let kept: Vec<_> = current.iter().filter(|d| canonical(d) != target).cloned().collect();
+        if kept.len() == current.len() {
+            return Err(format!("{} isn't on the list.", dir.display()));
+        }
+        self.write_added(&kept)
     }
 
     pub fn rename(&self, query: &str, new_name: &str) -> Result<Folder, String> {
+        self.with_registry_lock(|| self.rename_unlocked(query, new_name))
+    }
+
+    fn rename_unlocked(&self, query: &str, new_name: &str) -> Result<Folder, String> {
         let folder = self.find(query)?;
         let name = validate_name(new_name)?;
         self.check_name_free(&name, Some(&folder.uuid))?;
@@ -488,6 +503,10 @@ impl Registry {
     /// Retire a folder by moving it into `archive/` beside itself, one level
     /// below where Geniuz reads. Nothing is deleted, and `restore` brings it back.
     pub fn archive(&self, query: &str) -> Result<PathBuf, String> {
+        self.with_registry_lock(|| self.archive_unlocked(query))
+    }
+
+    fn archive_unlocked(&self, query: &str) -> Result<PathBuf, String> {
         let folder = self.find(query)?;
         let dir = folder
             .db_path
@@ -550,6 +569,10 @@ impl Registry {
     /// Bring an archived folder back to where it was. Refused if that would
     /// duplicate a folder in use, by UUID or by name.
     pub fn restore(&self, query: &str) -> Result<Folder, String> {
+        self.with_registry_lock(|| self.restore_unlocked(query))
+    }
+
+    fn restore_unlocked(&self, query: &str) -> Result<Folder, String> {
         let q = query.trim().to_lowercase();
         let archived = self.archived();
         let folder = archived
@@ -598,6 +621,10 @@ impl Registry {
     /// `archive/` beside itself and is returned, for the person to delete once
     /// they are satisfied; Geniuz never deletes it.
     pub fn relocate(&self, query: &str, dest: &Path) -> Result<Relocated, String> {
+        self.with_registry_lock(|| self.relocate_unlocked(query, dest))
+    }
+
+    fn relocate_unlocked(&self, query: &str, dest: &Path) -> Result<Relocated, String> {
         let folder = self.find(query)?;
         let dir = folder
             .db_path
@@ -629,7 +656,7 @@ impl Registry {
         // Put the destination on the list first. If that fails, nothing has moved.
         // If a later step fails, an extra directory on the list does no harm.
         let was_added_directly = self.added().iter().any(|d| canonical(d) == canonical(&dir));
-        self.remember_added(&dest)?;
+        self.remember_added_unlocked(&dest)?;
 
         let lock = quiesce(&folder.db_path)?;
         let left_behind = match std::fs::rename(&dir, &target) {
@@ -651,7 +678,7 @@ impl Registry {
         };
 
         if was_added_directly {
-            let _ = self.remove(&dir);
+            let _ = self.remove_unlocked(&dir);
         }
         Ok(Relocated { folder: self.find(&folder.uuid)?, left_behind })
     }
@@ -669,22 +696,26 @@ impl Registry {
     }
 
     fn remember_added(&self, dir: &Path) -> Result<(), String> {
+        self.with_registry_lock(|| self.remember_added_unlocked(dir))
+    }
+
+    fn remember_added_unlocked(&self, dir: &Path) -> Result<(), String> {
         let dir = canonical(dir);
         if dir == canonical(&self.home) {
             return Ok(());
         }
-        self.with_registry_lock(|| {
-            let mut all = self.added();
-            if all.iter().any(|d| canonical(d) == dir) {
-                return Ok(());
-            }
-            all.push(dir.clone());
-            self.write_added(&all)
-        })
+        let mut all = self.added();
+        if all.iter().any(|d| canonical(d) == dir) {
+            return Ok(());
+        }
+        all.push(dir);
+        self.write_added(&all)
     }
 
-    /// Hold the registry for a whole read-change-write, across processes, so
-    /// that two changes at once can't overwrite each other.
+    /// Every change to folders happens under this lock, across processes: the
+    /// list, the current folder, creating, renaming, archiving, moving. A check
+    /// and the change it allows must not have another change between them. Never
+    /// nest it: a process waits on its own lock. Reading needs no lock.
     fn with_registry_lock<T>(&self, change: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
         std::fs::create_dir_all(&self.home)
             .map_err(|e| format!("Couldn't create {}: {}", self.home.display(), e))?;
@@ -887,14 +918,53 @@ fn replace_meta(db: &Path, key: &str, value: &str) -> Result<(), String> {
     tx.commit().map_err(|e| format!("Couldn't save {}: {}", key, e))
 }
 
+/// Everything in these places: folders in use, and those fenced mid-move.
+fn read_all(roots: &[PathBuf]) -> (Vec<Folder>, Vec<Folder>) {
+    let mut seen = HashSet::new();
+    let (mut found, mut paused) = (Vec::new(), Vec::new());
+    for root in roots {
+        for db in candidates(root) {
+            if !seen.insert(canonical(&db)) {
+                continue;
+            }
+            let Ok(conn) = open_read_only(&db) else { continue };
+            let Some(folder) = identity_from(&conn, &db) else { continue };
+            if fenced(&conn) {
+                paused.push(folder);
+            } else {
+                found.push(folder);
+            }
+        }
+    }
+    (found, paused)
+}
+
+/// Whether two paths are hard links to one file.
+#[cfg(unix)]
+fn same_file(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(a), std::fs::metadata(b)) {
+        (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn same_file(_: &Path, _: &Path) -> bool {
+    false
+}
+
 /// Read a file's identity. `None` means it isn't a folder, or can't be read.
 fn read_identity(db: &Path) -> Option<Folder> {
-    let conn = open_read_only(db).ok()?;
-    let uuid = get_meta(&conn, KEY_UUID)?;
+    identity_from(&open_read_only(db).ok()?, db)
+}
+
+fn identity_from(conn: &Connection, db: &Path) -> Option<Folder> {
+    let uuid = get_meta(conn, KEY_UUID)?;
     Some(Folder {
-        name: get_meta(&conn, KEY_NAME).unwrap_or_else(|| uuid.chars().take(SHORT_ID).collect()),
-        description: get_meta(&conn, KEY_DESCRIPTION).unwrap_or_default(),
-        created: get_meta(&conn, KEY_CREATED).unwrap_or_default(),
+        name: get_meta(conn, KEY_NAME).unwrap_or_else(|| uuid.chars().take(SHORT_ID).collect()),
+        description: get_meta(conn, KEY_DESCRIPTION).unwrap_or_default(),
+        created: get_meta(conn, KEY_CREATED).unwrap_or_default(),
         uuid,
         db_path: db.to_path_buf(),
     })
@@ -920,28 +990,16 @@ fn memory_table(conn: &Connection) -> Result<(&'static str, &'static str), Strin
     Err("It has no memory table.".to_string())
 }
 
-/// The first store holding any of this store's oldest memories. Every copy shares
-/// the original's oldest rows, whenever it was taken, so a small sample finds one
-/// without reading whole stores.
-fn stores_sharing_memories(db: &Path, others: &[PathBuf]) -> Option<PathBuf> {
-    let conn = open_read_only(db).ok()?;
-    let (table, column) = memory_table(&conn).ok()?;
-    let mut stmt = conn
-        .prepare(&format!("SELECT {} FROM {} ORDER BY created_at ASC LIMIT 20", column, table))
-        .ok()?;
-    let sample: Vec<String> = stmt.query_map([], |r| r.get(0)).ok()?.flatten().collect();
-    if sample.is_empty() {
-        return None;
-    }
-    others.iter().find_map(|path| {
-        let other = open_read_only(path).ok()?;
-        let (table, column) = memory_table(&other).ok()?;
-        let sql = format!("SELECT 1 FROM {} WHERE {} = ?1", table, column);
-        sample
-            .iter()
-            .any(|uuid| other.query_row(&sql, [uuid], |_| Ok(())).optional().ok().flatten().is_some())
-            .then(|| path.clone())
-    })
+/// Every memory ID in a store, normalised for comparing.
+fn memory_ids(db: &Path) -> Vec<String> {
+    let read = || -> Option<Vec<String>> {
+        let conn = open_read_only(db).ok()?;
+        let (table, column) = memory_table(&conn).ok()?;
+        let mut stmt = conn.prepare(&format!("SELECT {} FROM {}", column, table)).ok()?;
+        let ids = stmt.query_map([], |r| r.get::<_, String>(0)).ok()?.flatten();
+        Some(ids.map(|id| id.to_lowercase()).collect())
+    };
+    read().unwrap_or_default()
 }
 
 /// The UUID for a store getting its first identity. It comes from the store's
@@ -995,18 +1053,29 @@ fn quiesce(db: &Path) -> Result<Connection, String> {
 }
 
 /// Whether a store has been fenced off because it moved to another drive.
-fn is_fenced(db: &Path) -> bool {
-    open_read_only(db)
-        .ok()
-        .map(|c| {
-            c.query_row(
-                "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
-                [format!("{}_memories", FENCE_TRIGGER)],
-                |_| Ok(()),
-            )
-            .is_ok()
-        })
-        .unwrap_or(false)
+fn fenced(conn: &Connection) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'trigger' AND name = ?1",
+        [format!("{}_memories_insert", FENCE_TRIGGER)],
+        |_| Ok(()),
+    )
+    .is_ok()
+}
+
+/// Triggers that refuse every change to a store's contents, in the file itself.
+fn fence_sql() -> String {
+    let mut sql = String::new();
+    for table in ["memories", "memory_embeddings", "embedding_meta", "_meta"] {
+        for op in ["insert", "update", "delete"] {
+            sql.push_str(&format!(
+                "CREATE TRIGGER {f}_{t}_{o} BEFORE {o} ON {t} BEGIN SELECT RAISE(ABORT, 'This folder has moved to another drive'); END;\n",
+                f = FENCE_TRIGGER,
+                t = table,
+                o = op
+            ));
+        }
+    }
+    sql
 }
 
 /// Move across drives. Every step can be interrupted without losing a memory or
@@ -1015,11 +1084,13 @@ fn is_fenced(db: &Path) -> bool {
 ///  1. Make sure the original has somewhere to retire to.
 ///  2. Copy into a hidden directory, force it to disk, and verify it.
 ///  3. In the transaction already holding writers off, fence the original with
-///     triggers. From here it refuses every write, durably, including from a
+///     triggers. From here it refuses every change, durably, including from a
 ///     connection opened before the move or a writer waiting on the lock.
-///  4. Retire the original, then put the copy in place.
+///  4. Record in the copy that it is final.
+///  5. Retire the original, then put the copy in place.
 ///
 /// If this stops partway, `finish_interrupted_moves` completes it or undoes it.
+/// It leaves this alone while `MOVE_OWNER` is locked, which it is until this returns.
 fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: Connection) -> Result<PathBuf, String> {
     let expected: i64 = lock
         .query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))
@@ -1036,6 +1107,11 @@ fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: Connection) 
     }
     std::fs::create_dir_all(&staging)
         .map_err(|e| format!("Couldn't create {}: {}", staging.display(), e))?;
+    let owner = std::fs::File::create(staging.join(MOVE_OWNER))
+        .map_err(|e| format!("Couldn't write in {}: {}", staging.display(), e))?;
+    owner
+        .lock()
+        .map_err(|e| format!("Couldn't lock {}: {}", staging.display(), e))?;
     let entries = std::fs::read_dir(dir).map_err(|e| format!("Couldn't read {}: {}", dir.display(), e))?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -1056,38 +1132,59 @@ fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: Connection) 
     verify_copy(&staging.join(DB_FILE), folder, expected)
         .map_err(|e| format!("{} The original is untouched; the partial copy is at {}.", e, staging.display()))?;
 
-    lock.execute_batch(&format!(
-        "CREATE TRIGGER {f}_memories BEFORE INSERT ON memories
-           BEGIN SELECT RAISE(ABORT, 'This folder has moved to another drive'); END;
-         CREATE TRIGGER {f}_embeddings BEFORE INSERT ON memory_embeddings
-           BEGIN SELECT RAISE(ABORT, 'This folder has moved to another drive'); END;
-         COMMIT;",
-        f = FENCE_TRIGGER
-    ))
-    .map_err(|e| format!("Couldn't close off the original: {}. Nothing moved.", e))?;
+    lock.execute_batch(&format!("{}COMMIT;", fence_sql()))
+        .map_err(|e| format!("Couldn't close off the original: {}. Nothing moved.", e))?;
     drop(lock);
+    let committed = staging.join(MOVE_COMMITTED);
+    std::fs::File::create(&committed)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| format!("Couldn't record the move in {}: {}. Geniuz will finish it next time it runs.", staging.display(), e))?;
 
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     let retired = archive.join(format!("{}{}{}", folder.uuid, MOVED_MARK, stamp));
     std::fs::rename(dir, &retired)
         .map_err(|e| format!("Couldn't retire {}: {}. Geniuz will finish this next time it runs.", dir.display(), e))?;
-    let target = dest.join(&folder.uuid);
-    std::fs::rename(&staging, &target)
-        .map_err(|e| format!("Couldn't finish the move to {}: {}. Geniuz will finish this next time it runs.", target.display(), e))?;
+    drop(owner);
+    publish(&staging, &dest.join(&folder.uuid))
+        .map_err(|e| format!("{} Geniuz will finish this next time it runs.", e))?;
     Ok(retired)
 }
 
+/// Put a finished copy in place, without the two files that tracked the move.
+fn publish(staging: &Path, target: &Path) -> Result<(), String> {
+    std::fs::rename(staging, target)
+        .map_err(|e| format!("Couldn't finish the move to {}: {}.", target.display(), e))?;
+    for name in [MOVE_OWNER, MOVE_COMMITTED] {
+        let _ = std::fs::remove_file(target.join(name));
+    }
+    Ok(())
+}
+
 /// Finish or undo a move across drives that was interrupted. Returns whether
-/// anything changed. A copy whose original is still accepting writes is out of
-/// date, so it is set aside. If the original was fenced, or was retired, the copy
-/// was verified before that happened, so the move is completed.
-fn finish_interrupted_moves(root: &Path, live: &[Folder], paused: &[Folder]) -> bool {
+/// anything changed. A move still running is left alone. A copy whose original
+/// still accepts writes may be out of date, so it is set aside. A copy can only
+/// be published with proof that it is final: its original is fenced, or the copy
+/// records that it was. If neither can be seen, it waits, because a sound file
+/// isn't proof: the original may hold newer memories on a drive that's unplugged.
+fn finish_interrupted_moves(root: &Path, live: &[Folder], paused: &[Folder], pending: &mut Vec<PathBuf>) -> bool {
     let Ok(entries) = std::fs::read_dir(root) else { return false };
     let mut changed = false;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(uuid) = name.strip_prefix(MOVING_PREFIX) else { continue };
         let staging = entry.path();
+
+        // A lock that can be taken means the process moving this has stopped.
+        let owner = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(staging.join(MOVE_OWNER));
+        let Ok(owner) = owner else { continue };
+        if owner.try_lock().is_err() {
+            continue;
+        }
+
         let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
         if live.iter().any(|f| f.uuid.eq_ignore_ascii_case(uuid)) {
             let archive = root.join(ARCHIVE_DIR);
@@ -1096,7 +1193,23 @@ fn finish_interrupted_moves(root: &Path, live: &[Folder], paused: &[Folder]) -> 
             changed |= std::fs::rename(&staging, aside).is_ok();
             continue;
         }
-        if let Some(original) = paused.iter().find(|f| f.uuid.eq_ignore_ascii_case(uuid)) {
+        let original = paused.iter().find(|f| f.uuid.eq_ignore_ascii_case(uuid));
+        if original.is_none() && !staging.join(MOVE_COMMITTED).exists() {
+            pending.push(staging);
+            continue;
+        }
+
+        // Only something that really is this folder, complete and readable.
+        let db = staging.join(DB_FILE);
+        let is_it = read_identity(&db).is_some_and(|f| f.uuid.eq_ignore_ascii_case(uuid));
+        let sound = open_read_only(&db)
+            .and_then(|c| c.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)).map_err(|e| e.to_string()))
+            .is_ok_and(|r| r == "ok");
+        if !is_it || !sound {
+            pending.push(staging);
+            continue;
+        }
+        if let Some(original) = original {
             let Some(dir) = original.db_path.parent() else { continue };
             let Some(parent) = dir.parent() else { continue };
             let archive = parent.join(ARCHIVE_DIR);
@@ -1106,15 +1219,8 @@ fn finish_interrupted_moves(root: &Path, live: &[Folder], paused: &[Folder]) -> 
                 continue;
             }
         }
-        // Only something that really is this folder, complete and readable.
-        let db = staging.join(DB_FILE);
-        let is_it = read_identity(&db).is_some_and(|f| f.uuid.eq_ignore_ascii_case(uuid));
-        let sound = open_read_only(&db)
-            .and_then(|c| c.query_row("PRAGMA integrity_check", [], |r| r.get::<_, String>(0)).map_err(|e| e.to_string()))
-            .is_ok_and(|r| r == "ok");
-        if is_it && sound {
-            changed |= std::fs::rename(&staging, root.join(uuid)).is_ok();
-        }
+        drop(owner);
+        changed |= publish(&staging, &root.join(uuid)).is_ok();
     }
     changed
 }
@@ -1398,7 +1504,7 @@ mod tests {
         insert(&copy_db);
 
         let err = reg.add(&copy).unwrap_err();
-        assert!(err.contains("same memories"), "{}", err);
+        assert!(err.contains("memories that are also in"), "{}", err);
         assert!(read_identity(&copy_db).is_none(), "the copy must not be stamped");
         assert!(reg.added().is_empty());
     }
@@ -1645,7 +1751,7 @@ mod tests {
         Connection::open(&f.db_path)
             .unwrap()
             .execute_batch(&format!(
-                "CREATE TRIGGER {}_memories BEFORE INSERT ON memories BEGIN SELECT RAISE(ABORT, 'moved'); END;",
+                "CREATE TRIGGER {}_memories_insert BEFORE INSERT ON memories BEGIN SELECT RAISE(ABORT, 'moved'); END;",
                 FENCE_TRIGGER
             ))
             .unwrap();
@@ -1774,6 +1880,162 @@ mod tests {
         reg.archive("École").unwrap();
         reg.create("école", "", None).unwrap();
         assert!(reg.restore("École").is_err());
+    }
+
+    // ---- From the second review (Codex Astra, 3 Nov). ----
+
+    fn staged(reg: &Registry, f: &Folder, dest: &Path) -> PathBuf {
+        std::fs::create_dir_all(dest).unwrap();
+        reg.remember_added(dest).unwrap();
+        let staging = dest.join(format!("{}{}", MOVING_PREFIX, f.uuid));
+        copy_dir(f.db_path.parent().unwrap(), &staging);
+        staging
+    }
+
+    #[test]
+    fn pass2_a_scan_never_touches_a_move_still_running() {
+        let (tmp, reg) = setup();
+        let f = reg.create("Work", "", None).unwrap();
+        let staging = staged(&reg, &f, &tmp.path().join("drive"));
+        let running = std::fs::File::create(staging.join(MOVE_OWNER)).unwrap();
+        running.lock().unwrap();
+
+        reg.scan();
+        assert!(staging.exists(), "the running mover still needs this");
+        drop(running);
+    }
+
+    #[test]
+    fn pass2_a_copy_with_no_proof_waits_when_its_original_is_out_of_reach() {
+        let (tmp, reg) = setup();
+        let source = tmp.path().join("removable");
+        let f = reg.create("Work", "", Some(&source)).unwrap();
+        let staging = staged(&reg, &f, &tmp.path().join("drive"));
+        add_memory(&f.db_path, M1); // newer than the copy
+        std::fs::rename(&source, tmp.path().join("unplugged")).unwrap();
+
+        let scan = reg.scan();
+        assert_eq!(scan.pending_moves.len(), 1);
+        assert!(staging.exists());
+        assert!(reg.find("Work").is_err(), "a stale copy must not become the folder");
+    }
+
+    #[test]
+    fn pass2_a_committed_copy_is_finished_even_with_its_original_out_of_reach() {
+        let (tmp, reg) = setup();
+        let source = tmp.path().join("removable");
+        let f = reg.create("Work", "", Some(&source)).unwrap();
+        let dest = tmp.path().join("drive");
+        let staging = staged(&reg, &f, &dest);
+        std::fs::File::create(staging.join(MOVE_COMMITTED)).unwrap();
+        std::fs::rename(&source, tmp.path().join("unplugged")).unwrap();
+
+        let found = reg.find("Work").unwrap();
+        assert!(canonical(&found.db_path).starts_with(canonical(&dest)));
+        assert!(!found.db_path.parent().unwrap().join(MOVE_COMMITTED).exists());
+    }
+
+    #[test]
+    fn pass2_the_fence_refuses_every_kind_of_write() {
+        let (tmp, reg) = setup();
+        let f = reg.create("Work", "note", None).unwrap();
+        let waiting = Connection::open(&f.db_path).unwrap();
+        waiting.query_row("SELECT COUNT(*) FROM memories", [], |r| r.get::<_, i64>(0)).unwrap();
+        let dest = tmp.path().join("drive");
+        std::fs::create_dir_all(&dest).unwrap();
+        let dir = f.db_path.parent().unwrap().to_path_buf();
+        copy_then_retire(&dir, &dest, &f, quiesce(&f.db_path).unwrap()).unwrap();
+
+        for sql in [
+            "UPDATE _meta SET value = 'changed' WHERE key = 'folder_description'",
+            "INSERT OR REPLACE INTO _meta (key, value) VALUES ('folder_description', 'changed')",
+            "INSERT OR REPLACE INTO embedding_meta (key, value) VALUES ('model', 'other')",
+            "INSERT INTO memory_embeddings (memory_uuid, embedding) VALUES ('x', x'00')",
+        ] {
+            assert!(waiting.execute(sql, []).is_err(), "{}", sql);
+        }
+        assert!(!dest.join(&f.uuid).join(MOVE_COMMITTED).exists());
+        assert!(!dest.join(&f.uuid).join(MOVE_OWNER).exists());
+    }
+
+    #[test]
+    fn pass2_simultaneous_creates_of_one_name_leave_one_folder() {
+        let (_tmp, reg) = setup();
+        reg.ensure_default().unwrap();
+        let home = reg.home.clone();
+        let threads: Vec<_> = (0..16)
+            .map(|_| {
+                let home = home.clone();
+                std::thread::spawn(move || Registry::new(home).create("Work", "", None).is_ok())
+            })
+            .collect();
+        let ok = threads.into_iter().map(|t| t.join().unwrap()).filter(|x| *x).count();
+        assert_eq!(ok, 1);
+        assert_eq!(names(&reg), vec![DEFAULT_NAME, "Work"]);
+    }
+
+    #[test]
+    fn pass2_a_name_clash_made_by_hand_is_refused_by_name_and_mended_by_id() {
+        let (tmp, reg) = setup();
+        let first = reg.create("Work", "", None).unwrap();
+        let other = tmp.path().join("other");
+        let second = Registry::new(&other).create("work", "", None).unwrap();
+        reg.remember_added(&other).unwrap();
+
+        assert!(reg.find("Work").unwrap_err().contains("More than one"));
+        assert_eq!(reg.find(&first.uuid).unwrap().uuid, first.uuid);
+        reg.rename(&second.uuid, "Other").unwrap();
+        assert_eq!(reg.find("Work").unwrap().uuid, first.uuid);
+    }
+
+    #[test]
+    fn pass2_a_stamped_and_an_unstamped_copy_are_refused_together() {
+        let (tmp, reg) = setup();
+        reg.ensure_default().unwrap();
+        let there = tmp.path().join("there");
+        let stamped = there.join("a").join(DB_FILE);
+        crate::db::DatabaseManager::new(&stamped.to_string_lossy()).unwrap();
+        add_memory(&stamped, M1);
+        stamp(&stamped, "A").unwrap();
+        let plain = there.join("b").join(DB_FILE);
+        crate::db::DatabaseManager::new(&plain.to_string_lossy()).unwrap();
+        add_memory(&plain, M1);
+
+        assert!(reg.add(&there).is_err());
+        assert!(read_identity(&plain).is_none());
+    }
+
+    #[test]
+    fn pass2_a_shared_memory_outside_the_oldest_rows_is_still_found() {
+        let (tmp, reg) = setup();
+        let first = reg.ensure_default().unwrap();
+        add_memory(&first, M1);
+        let copy = tmp.path().join("copy");
+        let db = copy.join(DB_FILE);
+        crate::db::DatabaseManager::new(&db.to_string_lossy()).unwrap();
+        add_memory(&db, M1);
+        let conn = Connection::open(&db).unwrap();
+        for i in 0..25 {
+            conn.execute(
+                "INSERT INTO memories (memory_uuid, payload, created_at) VALUES (?1, '{}', '2001-01-01 00:00:00')",
+                [format!("dddddddd-2222-3333-4444-{:012}", i)],
+            )
+            .unwrap();
+        }
+        drop(conn);
+        assert!(reg.add(&copy).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pass2_a_hard_link_is_named_for_what_it_is() {
+        let (_tmp, reg) = setup();
+        let f = reg.create("Work", "", None).unwrap();
+        let linked = reg.home.join("linked");
+        std::fs::create_dir_all(&linked).unwrap();
+        std::fs::hard_link(&f.db_path, linked.join(DB_FILE)).unwrap();
+        let err = reg.find("Work").unwrap_err();
+        assert!(err.contains("two names for one file"), "{}", err);
     }
 
     #[test]

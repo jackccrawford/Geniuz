@@ -92,7 +92,10 @@ fn list(reg: &Registry, json: bool) -> Result<String, String> {
         lines.push(line);
     }
     for b in &scan.blocked {
-        lines.push(format!("! Blocked: {} at {}. {}, at {}. Move one of them.", b.name, b.db_path.display(), b.reason, b.other.display()));
+        lines.push(format!("! Blocked: {} {}: {} and {}. Move one of them.", b.name, b.reason, b.db_path.display(), b.other.display()));
+    }
+    for dir in &scan.pending_moves {
+        lines.push(format!("? An unfinished move at {} is waiting for its original to be reachable.", dir.display()));
     }
     for dir in &scan.unavailable {
         lines.push(format!("? Can't reach {} right now.", dir.display()));

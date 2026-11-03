@@ -82,11 +82,7 @@ struct App {
 
 impl App {
     fn new() -> Result<Self> {
-        let db_path = crate::resolve_db_path().map_err(|e| anyhow::anyhow!(e))?;
-        let db_path_str = db_path
-            .to_str()
-            .ok_or_else(|| anyhow::anyhow!("memory.db path is not valid UTF-8"))?;
-        let db = DatabaseManager::new(db_path_str).map_err(|e| anyhow::anyhow!(e))?;
+        let db = crate::open_resolved(crate::resolve_db_path).map_err(|e| anyhow::anyhow!(e))?;
         let memories = db.recent(24).map_err(|e| anyhow::anyhow!(e))?;
         let total = db.count().map_err(|e| anyhow::anyhow!(e))?;
         let mut list_state = ListState::default();

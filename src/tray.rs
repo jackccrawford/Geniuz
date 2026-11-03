@@ -63,7 +63,7 @@ impl Status {
             })
             .collect();
         let (memory_count, recent_gists, station_exists) = if station_path.exists() {
-            match geniuz::db::DatabaseManager::new(&station_path.to_string_lossy()) {
+            match geniuz::db::DatabaseManager::open_existing(&station_path.to_string_lossy()) {
                 Ok(db) => {
                     let count = db.count().unwrap_or(0);
                     let gists = db

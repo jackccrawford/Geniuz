@@ -19,15 +19,24 @@ fn db_path() -> Result<String, String> {
     let shown = SHOWN.lock().map_err(|_| "The app is in a bad state.".to_string())?.clone();
     match shown {
         // The path, afresh: the folder may have moved, but it's still the one on screen.
-        Some(uuid) => reg.find(&uuid).map(|f| f.db_path.to_string_lossy().into_owned()),
-        None => reg.resolve(None, None, None).map(|p| p.to_string_lossy().into_owned()),
+        Shown::Folder(uuid) => reg.find(&uuid).map(|f| f.db_path.to_string_lossy().into_owned()),
+        Shown::Failed(why) => Err(why),
+        Shown::NotYet => reg.resolve(None, None, None).map(|p| p.to_string_lossy().into_owned()),
     }
 }
 
 /// The folder this window is showing, set when the page loads. Every read and
 /// write goes to it, so if something else changes the current folder, a draft
 /// can't land in a folder that isn't the one on screen.
-static SHOWN: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static SHOWN: std::sync::Mutex<Shown> = std::sync::Mutex::new(Shown::NotYet);
+
+#[derive(Clone)]
+enum Shown {
+    NotYet,
+    Folder(String),
+    /// Nothing may quietly follow the current folder after this.
+    Failed(String),
+}
 
 fn open_db() -> Result<DatabaseManager, String> {
     DatabaseManager::open_existing(&db_path()?).or_else(|_| DatabaseManager::open_existing(&db_path()?))
@@ -343,7 +352,7 @@ struct FolderList {
     unavailable: usize,
 }
 
-fn folder_row(f: &Folder, using: &Option<std::path::PathBuf>) -> FolderRow {
+fn folder_row(f: &Folder, current: Option<&str>) -> FolderRow {
     let canonical = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let (memories, last_written) = f.stats().unwrap_or((0, None));
     let dir = f.db_path.parent().unwrap_or(&f.db_path);
@@ -355,7 +364,7 @@ fn folder_row(f: &Folder, using: &Option<std::path::PathBuf>) -> FolderRow {
         memories,
         last_written,
         location: dir.to_string_lossy().into_owned(),
-        current: using.as_deref() == Some(canonical(&f.db_path).as_path()),
+        current: current.is_some_and(|c| c.eq_ignore_ascii_case(&f.uuid)),
         fixed: canonical(dir) == canonical(&geniuz::data_dir()),
     }
 }
@@ -363,31 +372,51 @@ fn folder_row(f: &Folder, using: &Option<std::path::PathBuf>) -> FolderRow {
 #[tauri::command]
 fn list_folders() -> FolderList {
     let reg = Registry::from_env();
+    let using = reg.resolve(None, None, None).ok().map(|p| std::fs::canonicalize(&p).unwrap_or(p));
     let scan = reg.scan();
-    let using = reg
-        .resolve(None, None, None)
-        .ok()
-        .map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+    let uuid = scan
+        .folders
+        .iter()
+        .find(|f| using.as_deref() == Some(std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()).as_path()))
+        .map(|f| f.uuid.clone());
+    folder_list(&reg, uuid.as_deref())
+}
+
+/// The list, with `current` marking exactly this folder.
+fn folder_list(reg: &Registry, current: Option<&str>) -> FolderList {
+    let scan = reg.scan();
     FolderList {
-        folders: scan.folders.iter().map(|f| folder_row(f, &using)).collect(),
-        archived: reg.archived().iter().map(|f| folder_row(f, &None)).collect(),
+        folders: scan.folders.iter().map(|f| folder_row(f, current)).collect(),
+        archived: reg.archived().iter().map(|f| folder_row(f, None)).collect(),
         blocked: scan.blocked.len(),
-        unavailable: scan.unavailable.len(),
+        unavailable: scan.unavailable.len() + scan.pending_moves.len(),
     }
 }
 
 /// Called once per page load: show the current folder, and stay with it.
 #[tauri::command]
-fn bind_current_folder() -> FolderList {
+fn bind_current_folder() -> Result<FolderList, String> {
     let reg = Registry::from_env();
-    let current = reg.resolve(None, None, None).ok().map(|p| std::fs::canonicalize(&p).unwrap_or(p));
-    let shown = reg.scan().folders.into_iter().find(|f| {
-        current.as_deref() == Some(std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()).as_path())
+    // One decision: what's bound is exactly what the page is told it's showing.
+    let chosen = reg.resolve(None, None, None).and_then(|p| {
+        let path = std::fs::canonicalize(&p).unwrap_or(p);
+        let scan = reg.scan();
+        let found = scan.folders.iter().find(|f| {
+            std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()) == path
+        });
+        found.map(|f| f.uuid.clone()).ok_or_else(|| "The folder in use isn't available.".to_string())
     });
-    if let Ok(mut slot) = SHOWN.lock() {
-        *slot = shown.map(|f| f.uuid);
+    let mut slot = SHOWN.lock().map_err(|_| "The app is in a bad state.".to_string())?;
+    match chosen {
+        Ok(uuid) => {
+            *slot = Shown::Folder(uuid.clone());
+            Ok(folder_list(&reg, Some(&uuid)))
+        }
+        Err(why) => {
+            *slot = Shown::Failed(why.clone());
+            Err(why)
+        }
     }
-    list_folders()
 }
 
 #[tauri::command]
