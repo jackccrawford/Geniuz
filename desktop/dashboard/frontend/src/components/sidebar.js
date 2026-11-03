@@ -159,6 +159,10 @@ function foldersSection(list, buttons) {
       btn.addEventListener('click', async () => {
         try {
           await api.useFolder(f.uuid);
+          // On Keep, a folder click chooses where this goes: stay there.
+          if (getState().currentSurface === 'remember') {
+            try { sessionStorage.setItem('geniuz.afterReload', 'remember'); } catch { /* lands on the folder */ }
+          }
           location.reload();
         } catch (e) {
           console.error('[geniuz] switching folder failed:', e);

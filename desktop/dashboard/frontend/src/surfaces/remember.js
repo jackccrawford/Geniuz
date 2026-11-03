@@ -5,20 +5,33 @@
 // from the first 200 chars of content. Submit calls `remember_memory` which
 // wraps `db::signal()` — same write path as the CLI and TUI.
 
-import { getState } from '../store.js';
 import * as su from '../stream-ui.js';
 import * as api from '../api.js';
-import { navigate, setState } from '../store.js';
+import { getState, navigate, setState } from '../store.js';
+
+// A draft outlives leaving this page, and the reload that switching folder does.
+// Nobody should lose what they typed to a click in the sidebar.
+const DRAFT_KEY = 'geniuz.keepDraft';
+function readDraft() {
+  try { return JSON.parse(sessionStorage.getItem(DRAFT_KEY)) || {}; } catch { return {}; }
+}
+function writeDraft(draft) {
+  try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft)); } catch { /* still works, without surviving */ }
+}
+function clearDraft() {
+  try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* nothing to clear */ }
+}
 
 export async function mount(container) {
   const root = document.createElement('main');
   root.className = 'main';
 
+  const folderName = (getState().folders?.folders || []).find((f) => f.current)?.name || 'your memory';
   const header = document.createElement('header');
   header.className = 'main-header';
   header.innerHTML = `
-    <h1 class="main-header__title">Keep</h1>
-    <p class="main-header__sub">Saving in ${su.esc((getState().folders?.folders || []).find((f) => f.current)?.name || 'your memory')}. Gist is a short shelf-label for retrieval. Content is the body.</p>
+    <h1 class="main-header__title">Keep in ${su.esc(folderName)}</h1>
+    <p class="main-header__sub">Gist is a short shelf-label for retrieval. Content is the body.</p>
   `;
   root.appendChild(header);
 
@@ -74,7 +87,16 @@ export async function mount(container) {
   };
   contentInput.addEventListener('input', updateSubmitState);
 
+  const draft = readDraft();
+  gistInput.value = draft.gist || '';
+  contentInput.value = draft.content || '';
+  updateSubmitState();
+  const saveDraft = () => writeDraft({ gist: gistInput.value, content: contentInput.value });
+  gistInput.addEventListener('input', saveDraft);
+  contentInput.addEventListener('input', saveDraft);
+
   cancelBtn.addEventListener('click', () => {
+    clearDraft();
     navigate('recent');
   });
 
@@ -87,6 +109,7 @@ export async function mount(container) {
     status.textContent = 'Saving…';
     try {
       const shortUuid = await api.rememberMemory(gist || null, content);
+      clearDraft();
       status.textContent = `Kept · ${shortUuid}`;
       // Navigate to Recent and select the new memory
       setTimeout(() => navigate('recent'), 300);

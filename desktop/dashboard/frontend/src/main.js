@@ -53,6 +53,11 @@ async function bootstrap() {
     }
   }
   setState({ appVersion: version, dataDir, folders });
+  try {
+    const surface = sessionStorage.getItem('geniuz.afterReload');
+    sessionStorage.removeItem('geniuz.afterReload');
+    if (surface) setState({ currentSurface: surface });
+  } catch { /* lands on the folder */ }
 
   // Sidebar
   const appShell = document.getElementById('app-shell');
