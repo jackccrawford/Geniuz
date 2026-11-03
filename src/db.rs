@@ -32,6 +32,25 @@ fn unembedded_share(limit: usize, semantic_hits: usize, unembedded_hits: usize) 
     free.max(limit / 2).min(unembedded_hits)
 }
 
+/// Products whose stores Geniuz wrote, under its names over time.
+pub const OWN_PRODUCTS: [&str; 3] = ["geniuz", "clawmark", "relay-for-claw"];
+
+/// Opening a store migrates it, so a store written by another product must be
+/// refused before anything touches it. A file with no `_meta` is new or empty.
+fn check_product(conn: &Connection, db_path: &str) -> Result<(), String> {
+    let product: Option<String> = conn
+        .query_row("SELECT value FROM _meta WHERE key = 'product'", [], |r| r.get(0))
+        .optional()
+        .unwrap_or(None);
+    match product {
+        Some(p) if !OWN_PRODUCTS.contains(&p.as_str()) => Err(format!(
+            "{} belongs to another product ({}), so Geniuz won't open it.",
+            db_path, p
+        )),
+        _ => Ok(()),
+    }
+}
+
 impl DatabaseManager {
     pub fn new(db_path: &str) -> Result<Self, String> {
         if let Some(parent) = Path::new(db_path).parent() {
@@ -41,6 +60,7 @@ impl DatabaseManager {
 
         let conn = Connection::open(db_path)
             .map_err(|e| format!("Failed to open database: {}", e))?;
+        check_product(&conn, db_path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")
             .map_err(|e| format!("Failed to enable WAL: {}", e))?;
         conn.busy_timeout(std::time::Duration::from_secs(30))
@@ -227,7 +247,7 @@ impl DatabaseManager {
             "SELECT memory_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
                     created_at, parent_uuid
-             FROM memories WHERE {cond} ORDER BY created_at DESC LIMIT ?1"
+             FROM memories WHERE {cond} ORDER BY created_at DESC, rowid DESC LIMIT ?1"
         )).map_err(|e| format!("Query failed: {}", e))?;
 
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = vec![Box::new(limit as i64)];
@@ -252,7 +272,7 @@ impl DatabaseManager {
             "SELECT memory_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
                     created_at, parent_uuid, json_extract(payload, '$.content')
-             FROM memories WHERE created_at > ?1 ORDER BY created_at ASC LIMIT ?2"
+             FROM memories WHERE created_at > ?1 ORDER BY created_at ASC, rowid ASC LIMIT ?2"
         ).map_err(|e| format!("Query failed: {}", e))?;
 
         let rows = stmt.query_map(rusqlite::params![timestamp, limit as i32], |row| {
@@ -335,7 +355,7 @@ impl DatabaseManager {
             "SELECT memory_uuid,
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
                     created_at, parent_uuid
-             FROM memories WHERE ({}) AND {} ORDER BY created_at DESC LIMIT ?{}",
+             FROM memories WHERE ({}) AND {} ORDER BY created_at DESC, rowid DESC LIMIT ?{}",
             where_clause, wcond, limit_param
         );
 
@@ -552,7 +572,7 @@ impl DatabaseManager {
              FROM memories m
              LEFT JOIN memory_embeddings e ON e.memory_uuid = m.memory_uuid
              WHERE e.memory_uuid IS NULL AND ({}) AND {}
-             ORDER BY m.created_at DESC LIMIT ?{}",
+             ORDER BY m.created_at DESC, m.rowid DESC LIMIT ?{}",
             where_clause, wcond, limit_param
         );
 

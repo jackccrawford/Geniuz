@@ -1,5 +1,6 @@
 mod adapter;
 mod cli;
+mod folder_cli;
 mod mcp;
 mod tui;
 
@@ -137,24 +138,20 @@ fn launch_dashboard() -> Result<(), String> {
     }
 }
 
-pub fn get_db() -> Result<db::DatabaseManager, String> {
-    // Precedence: GENIUZ_STATION (explicit DB file path) > GENIUZ_HOME-derived default
-    //             > legacy ~/.geniuz/station.db
-    let path = std::env::var("GENIUZ_STATION")
-        .unwrap_or_else(|_| {
-            let new_path = default_db_path();
-            let geniuz_legacy = home_dir().join(".geniuz").join("station.db");
+/// The `--in` flag, set once when the command line is parsed.
+static IN_FOLDER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
-            if new_path.exists() {
-                new_path.to_string_lossy().to_string()
-            } else if geniuz_legacy.exists() {
-                eprintln!("[geniuz] Using existing folder at ~/.geniuz/station.db");
-                geniuz_legacy.to_string_lossy().to_string()
-            } else {
-                new_path.to_string_lossy().to_string()
-            }
-        });
-    db::DatabaseManager::new(&path)
+/// Which database this command uses. One resolver for everything in this binary.
+pub fn resolve_db_path() -> Result<PathBuf, String> {
+    let flag = IN_FOLDER.get().and_then(|f| f.as_deref());
+    let env_station = std::env::var("GENIUZ_STATION").ok();
+    let cwd = std::env::current_dir().ok();
+    geniuz::folders::Registry::from_env().resolve(flag, env_station.as_deref(), cwd.as_deref())
+}
+
+pub fn get_db() -> Result<db::DatabaseManager, String> {
+    let path = resolve_db_path()?;
+    db::DatabaseManager::new(&path.to_string_lossy())
 }
 
 /// Convert a UTC timestamp string from SQLite into a human-readable
@@ -294,10 +291,13 @@ pub fn shorten_ts(ts: &str) -> String {
 }
 
 fn run(cli: Cli) -> Result<String, String> {
+    let _ = IN_FOLDER.set(cli.in_folder.clone());
     match cli.command {
         Command::Skill => {
             Ok(include_str!("../skills/SKILL.md").to_string())
         }
+
+        Command::Folder(cmd) => folder_cli::run(cmd),
 
         Command::Tui => {
             tui::run()?;
@@ -483,7 +483,7 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(lines.join("\n"))
         }
 
-        Command::Remember { content, gist, parent, json } => {
+        Command::Keep { content, gist, parent, json } => {
             // Resolve content: @file or stdin
             let resolved = if content == "-" {
                 use std::io::{IsTerminal, Read};
@@ -519,10 +519,10 @@ fn run(cli: Cli) -> Result<String, String> {
                     "ok": true, "action": "remember", "uuid": result.uuid, "embedded": result.embedded
                 })).unwrap())
             } else if result.embedded {
-                Ok(format!("✅ Remembered {}", result.uuid))
+                Ok(format!("✅ Kept {}", result.uuid))
             } else {
                 Ok(format!(
-                    "✅ Remembered {} (keyword search only — embedding unavailable, run 'geniuz backfill' later)",
+                    "✅ Kept {} (keyword search only — embedding unavailable, run 'geniuz backfill' later)",
                     result.uuid
                 ))
             }
@@ -847,8 +847,7 @@ fn run(cli: Cli) -> Result<String, String> {
             let db = get_db()?;
             let signals = db.count()?;
             let embeddings = db.embedding_count()?;
-            let path = std::env::var("GENIUZ_STATION")
-                .unwrap_or_else(|_| default_db_path().to_string_lossy().to_string());
+            let path = resolve_db_path()?.to_string_lossy().to_string();
 
             let mut lines = vec![
                 format!("Folder: {}", path),

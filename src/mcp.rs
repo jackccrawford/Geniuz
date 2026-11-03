@@ -1,10 +1,14 @@
-//! MCP server over stdio — exposes geniuz as remember/recall tools
+//! MCP server over stdio — exposes geniuz as keep, recall and folders tools
 //!
-//! Claude Desktop connects via stdio transport. The agent gets three
-//! human-friendly tools that wrap geniuz's signal/tune operations.
+//! Claude Desktop connects via stdio transport. Tool descriptions guide the
+//! model toward proactive memory use — recalling on startup, keeping during
+//! conversation.
 //!
-//! Tool descriptions guide the model toward proactive memory use —
-//! recalling on startup, remembering during conversation.
+//! The folder is resolved on every call, never held from startup: a long-lived
+//! server must follow `folder use`, and must not keep writing to a path a folder
+//! has moved away from, since opening that path would create an empty store.
+//! `remember` and `recall_recent` still answer for older configurations, but
+//! aren't listed.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -12,6 +16,7 @@ use std::io::{self, BufRead, Write};
 
 use geniuz::db::{DatabaseManager, SignalEntry};
 use geniuz::embedding::{self, EmbeddingBackend};
+use geniuz::folders::Registry;
 use geniuz::window::Window;
 
 // =============================================================================
@@ -61,11 +66,25 @@ fn tool_result(id: Value, text: &str, is_error: bool) -> JsonRpcResponse {
 // =============================================================================
 
 fn tool_definitions() -> Value {
+    let mut tools = base_tool_definitions();
+    let folder = json!({
+        "type": "string",
+        "description": "Optional. Which folder to use, by name or 8-character ID. Leave it out to use the current folder. An unknown name is an error, never a different folder."
+    });
+    for tool in tools["tools"].as_array_mut().into_iter().flatten() {
+        if tool["name"] != "folders" {
+            tool["inputSchema"]["properties"]["folder"] = folder.clone();
+        }
+    }
+    tools
+}
+
+fn base_tool_definitions() -> Value {
     json!({
         "tools": [
             {
-                "name": "remember",
-                "description": "Save something worth remembering for future sessions. Use this when you learn something important about the user — their preferences, decisions, client details, project context, or anything they would not want to repeat. Your future self will find it by meaning, not keywords. Signal more than you think you should — storage is free, forgetting is expensive.",
+                "name": "keep",
+                "description": "Keep something worth remembering for future sessions. Use this when you learn something important about the user — their preferences, decisions, client details, project context, or anything they would not want to repeat. Your future self will find it by meaning, not keywords. Keep more than you think you should — storage is free, forgetting is expensive.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -93,7 +112,7 @@ fn tool_definitions() -> Value {
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ. Proper names (a Capitalized word after the first, or anything in \"quotes\") must match exactly, and memories holding them come first. Required unless thread is given."
+                            "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ. Proper names (a Capitalized word after the first, or anything in \"quotes\") must match exactly, and memories holding them come first. Leave it out to get the most recent memories, which is how to orient yourself at the start of a conversation."
                         },
                         "grep": {
                             "type": ["string", "array"],
@@ -124,26 +143,14 @@ fn tool_definitions() -> Value {
                 }
             },
             {
-                "name": "recall_recent",
-                "description": "Get the most recent memories. Use this at the START of every conversation to see what happened in recent sessions. This is how you orient yourself — what was the user working on? What decisions were made? What context matters right now?",
+                "name": "folders",
+                "description": "List the folders you can use: each is a separate store of memories with its own purpose. Check a folder's description before writing to it, since it may say what belongs there. Pass a name to read one folder's whole description.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "limit": {
-                            "type": "integer",
-                            "description": "Number of recent memories to return. Default 5."
-                        },
-                        "full": {
-                            "type": "boolean",
-                            "description": "If true, returns full content. Default false (gist summaries only)."
-                        },
-                        "since": {
+                        "name": {
                             "type": "string",
-                            "description": "Optional. Only memories from this time on: '24h', '7d', '2w', a date ('2026-09-23'), a local time ('2026-09-23 14:00') or RFC 3339. Use it whenever the question has a time in it ('last week', 'yesterday') — without it, older memories outrank recent ones."
-                        },
-                        "until": {
-                            "type": "string",
-                            "description": "Optional. Only memories before this time. Same forms as since; a date includes that whole day."
+                            "description": "Optional. A folder's name or 8-character ID, to read it in full."
                         }
                     }
                 }
@@ -156,7 +163,7 @@ fn tool_definitions() -> Value {
 // Tool Execution
 // =============================================================================
 
-fn execute_remember(
+fn execute_keep(
     db: &DatabaseManager,
     backend: Option<&dyn EmbeddingBackend>,
     params: &Value,
@@ -169,7 +176,7 @@ fn execute_remember(
     let thread = params.get("thread").and_then(|t| t.as_str());
 
     match db.signal_with_backend(content, gist, thread, None, backend) {
-        Ok(result) if result.embedded => (format!("Remembered ({})", result.uuid), false),
+        Ok(result) if result.embedded => (format!("Kept ({})", result.uuid), false),
         // State, not instruction. This server exposes three tools and none of
         // them runs the CLI, so telling the caller to run `backfill` is a
         // command it may be unable to follow — while some hosts have a shell
@@ -177,7 +184,7 @@ fn execute_remember(
         // run it or relay it; the server cannot see the caller's capabilities.
         Ok(result) => (
             format!(
-                "Remembered ({}) — saved without a semantic embedding; keyword-searchable until 'geniuz backfill' runs.",
+                "Kept ({}) — saved without a semantic embedding; keyword-searchable until 'geniuz backfill' runs.",
                 result.uuid
             ),
             false,
@@ -210,9 +217,9 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
         let limit = params.get("limit").and_then(|l| l.as_u64()).unwrap_or(100).min(500) as usize;
         return execute_thread(db, id, &window, limit, full);
     }
-    let query = match params.get("query").and_then(|q| q.as_str()) {
+    let query = match params.get("query").and_then(|q| q.as_str()).map(str::trim).filter(|q| !q.is_empty()) {
         Some(q) => q,
-        None => return ("Error: query is required (or thread, to read a whole thread)".to_string(), true),
+        None => return execute_recall_recent(db, params),
     };
     let limit = params.get("limit").and_then(|l| l.as_u64()).unwrap_or(10).min(100) as usize;
 
@@ -281,6 +288,89 @@ fn execute_recall_recent(db: &DatabaseManager, params: &Value) -> (String, bool)
 }
 
 /// The `since` / `until` arguments of a recall call, parsed the CLI's way.
+/// One line per folder, clipped: the full list across many folders has to fit
+/// comfortably in a conversation. A name returns that folder whole.
+fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
+    const CLIPPED: usize = 90;
+    if let Some(q) = params.get("name").and_then(|n| n.as_str()) {
+        return match reg.find(q) {
+            Ok(f) => {
+                let (count, last) = f.stats().unwrap_or((0, None));
+                (
+                    format!(
+                        "{} ({})\n{} memories, last written {}\n\n{}",
+                        f.name,
+                        f.short_id(),
+                        count,
+                        last.as_deref().map(crate::shorten_ts).unwrap_or_else(|| "never".to_string()),
+                        f.description
+                    ),
+                    false,
+                )
+            }
+            Err(e) => (format!("Error: {}", e), true),
+        };
+    }
+    let scan = reg.scan();
+    let current = crate::resolve_db_path().ok();
+    let mut lines = Vec::new();
+    for f in &scan.folders {
+        let (count, last) = f.stats().unwrap_or((0, None));
+        let first = f.description.lines().next().unwrap_or("").trim();
+        let summary: String = first.chars().take(CLIPPED).collect();
+        let more = if first.chars().count() > CLIPPED { "…" } else { "" };
+        let mark = if current.as_ref() == Some(&f.db_path) { "* " } else { "" };
+        let noun = if count == 1 { "memory" } else { "memories" };
+        let mut line = format!(
+            "{}{} | {} | {} {} · {}",
+            mark, f.short_id(), f.name, count, noun,
+            last.as_deref().map(crate::shorten_ts).unwrap_or_else(|| "never".to_string())
+        );
+        if !summary.is_empty() {
+            line.push_str(&format!(" — {}{}", summary, more));
+        }
+        lines.push(line);
+    }
+    if !scan.blocked.is_empty() {
+        lines.push(format!("{} blocked as duplicates.", scan.blocked.len()));
+    }
+    (lines.join("\n"), false)
+}
+
+/// The store for this call: the named folder, or the one in use right now.
+fn open_for_call(reg: &Registry, params: &Value) -> Result<DatabaseManager, String> {
+    let named = params.get("folder").and_then(|f| f.as_str()).map(str::trim).filter(|f| !f.is_empty());
+    let path = match named {
+        // State, not instruction: this caller has the folders tool, not a shell.
+        Some(q) => reg.find(q).map_err(|_| format!("No folder called \"{}\". The folders tool lists them.", q))?.db_path,
+        None => crate::resolve_db_path()?,
+    };
+    DatabaseManager::new(&path.to_string_lossy())
+}
+
+fn call_tool(
+    reg: &Registry,
+    backend: Option<&dyn EmbeddingBackend>,
+    name: &str,
+    args: &Value,
+) -> (String, bool) {
+    if name == "folders" {
+        return execute_folders(reg, args);
+    }
+    if !matches!(name, "keep" | "remember" | "recall" | "recall_recent") {
+        return (format!("Unknown tool: {}", name), true);
+    }
+    let db = match open_for_call(reg, args) {
+        Ok(db) => db,
+        Err(e) => return (format!("Error: {}", e), true),
+    };
+    match name {
+        "keep" | "remember" => execute_keep(&db, backend, args),
+        "recall" => execute_recall(&db, args),
+        _ => execute_recall_recent(&db, args),
+    }
+}
+
 fn window_from(params: &Value) -> Result<Window, String> {
     Window::parse(
         params.get("since").and_then(|v| v.as_str()),
@@ -468,7 +558,55 @@ mod tests {
         assert!(!out.contains("elsewhere"), "{out}");
         assert!(out.ends_with(&format!("searched: thread {reply} · root {root} · 2 memories · all time · oldest first")), "{out}");
         let (out, is_err) = execute_recall(&db, &json!({}));
-        assert!(is_err && out.contains("or thread"), "{out}");
+        assert!(!is_err && out.contains("elsewhere"), "no query means recent: {out}");
+    }
+
+    #[test]
+    fn the_listed_tools_are_keep_recall_and_folders() {
+        let defs = tool_definitions();
+        let names: Vec<_> = defs["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
+        assert_eq!(names, vec!["keep", "recall", "folders"]);
+        assert!(defs["tools"][0]["inputSchema"]["properties"]["folder"].is_object());
+        assert!(defs["tools"][2]["inputSchema"]["properties"]["folder"].is_null());
+    }
+
+    #[test]
+    fn a_named_folder_is_used_and_a_wrong_name_is_an_error() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let reg = Registry::new(&home);
+        let work = reg.create("Work", "", None).unwrap();
+
+        let args = json!({ "folder": "work", "content": "in work", "gist": "g" });
+        let (text, is_error) = call_tool(&reg, None, "keep", &args);
+        assert!(!is_error, "{}", text);
+        assert_eq!(work.stats().unwrap().0, 1);
+
+        let (_, is_error) = call_tool(&reg, None, "remember", &json!({ "folder": "work", "content": "alias", "gist": "g" }));
+        assert!(!is_error);
+        assert_eq!(work.stats().unwrap().0, 2);
+
+        let (text, is_error) = call_tool(&reg, None, "keep", &json!({ "folder": "wrok", "content": "x", "gist": "g" }));
+        assert!(is_error);
+        assert!(text.contains("No folder"), "{}", text);
+        assert_eq!(work.stats().unwrap().0, 2);
+
+        let (text, _) = call_tool(&reg, None, "recall", &json!({ "folder": "Work" }));
+        assert!(text.contains("alias") || text.contains("g"), "{}", text);
+        let (text, _) = call_tool(&reg, None, "folders", &json!({}));
+        assert!(text.contains("Work"), "{}", text);
+    }
+
+    #[test]
+    fn the_newest_memory_comes_first_within_the_same_second() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
+        for gist in ["one", "two", "three", "four", "five"] {
+            db.signal("body", Some(gist), None, Some("2026-09-01 00:00:00")).unwrap();
+        }
+        let (out, _) = execute_recall(&db, &json!({ "limit": 1 }));
+        assert!(out.contains("five"), "{out}");
     }
 
     #[test]
@@ -484,13 +622,11 @@ mod tests {
 // =============================================================================
 
 pub fn serve() {
-    let db = match crate::get_db() {
-        Ok(db) => db,
-        Err(e) => {
-            eprintln!("[geniuz] Failed to open station: {}", e);
-            std::process::exit(1);
-        }
-    };
+    let reg = Registry::from_env();
+    // Fail early on a broken setup, but hold nothing: each call resolves afresh.
+    if let Err(e) = crate::get_db() {
+        eprintln!("[geniuz] Couldn't open your folder: {}", e);
+    }
 
     // Build the embedding backend once at startup and reuse it for every
     // remember call. Constructing a fresh ort::Session per call inside a
@@ -553,12 +689,7 @@ pub fn serve() {
                 let arguments = request.params.get("arguments")
                     .cloned().unwrap_or(json!({}));
 
-                let (text, is_error) = match tool_name {
-                    "remember" => execute_remember(&db, backend.as_deref(), &arguments),
-                    "recall" => execute_recall(&db, &arguments),
-                    "recall_recent" => execute_recall_recent(&db, &arguments),
-                    _ => (format!("Unknown tool: {}", tool_name), true),
-                };
+                let (text, is_error) = call_tool(&reg, backend.as_deref(), tool_name, &arguments);
 
                 tool_result(id, &text, is_error)
             }
@@ -706,7 +837,7 @@ pub fn install(env_args: &[String]) -> Result<String, String> {
             let count = db.count().unwrap_or(0);
             if count > 0 {
                 lines.push(String::new());
-                lines.push(format!("  Station has {} existing memories — Claude will find them.", count));
+                lines.push(format!("  Your folder has {} existing memories — Claude will find them.", count));
             }
         }
     }

@@ -1,15 +1,20 @@
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
     name = "geniuz",
     version,
     about = "Your AI remembers now",
-    long_about = "GENIUZ: Your AI remembers now.\n\nPersistent memory for AI agents. Three R's: remember, recall, recent.\nWorks with any agent framework — Claude Code, Cursor, Windsurf, Aider,\nor anything that can run a shell command.",
-    before_help = "Start here: 'geniuz recent' to see what's in your folder.",
-    after_help = "Examples:\n  geniuz tui                                 Browse memories in a terminal UI\n  geniuz remember -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recent                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nFolder: Defaults to .geniuz in your home directory\n  Override with GENIUZ_HOME to change the folder location\n  Override with GENIUZ_STATION for a specific memory.db file\n  Multiple agents can share a folder for shared memory.\n\nUse \"geniuz [command] --help\" for more information."
+    long_about = "GENIUZ: Your AI remembers now.\n\nPersistent memory for AI agents. Keep what matters, recall it later.\nWorks with any agent framework — Claude Code, Cursor, Windsurf, Aider,\nor anything that can run a shell command.",
+    before_help = "Start here: 'geniuz recall' to see what's in your folder.",
+    after_help = "Examples:\n  geniuz tui                                 Browse memories in a terminal UI\n  geniuz keep -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recall                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nFolder: Defaults to .geniuz in your home directory\n  Override with GENIUZ_HOME to change the folder location\n  Override with GENIUZ_STATION for a specific memory.db file\n  Multiple agents can share a folder for shared memory.\n\nUse \"geniuz [command] --help\" for more information."
 )]
 pub struct Cli {
+    /// Use this folder for the command: a name or its 8-character ID
+    #[arg(long = "in", global = true, value_name = "FOLDER")]
+    pub in_folder: Option<String>,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -33,12 +38,13 @@ impl Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Save a memory — what you learned, decided, or discovered
+    /// Keep a memory — what you learned, decided, or discovered
     #[command(
+        alias = "remember",
         arg_required_else_help = true,
-        after_help = "Examples:\n  geniuz remember -c \"Fixed the auth bug\"\n  geniuz remember -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz remember -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz remember -c - -g \"piped: from process\"\n\nTip: The gist is how future agents find this memory. Write for them."
+        after_help = "Examples:\n  geniuz keep -c \"Fixed the auth bug\"\n  geniuz keep -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz keep -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz keep -c - -g \"piped: from process\"\n\nTip: The gist is how future agents find this memory. Write for them."
     )]
-    Remember {
+    Keep {
         /// Content to save
         #[arg(short, long)]
         content: String,
@@ -105,8 +111,9 @@ pub enum Command {
         json: bool,
     },
 
-    /// Show recent memories
+    /// Show recent memories (same as `recall` with no search)
     #[command(
+        hide = true,
         after_help = "Examples:\n  geniuz recent                              Latest 20 memories\n  geniuz recent -l 5                         Latest 5\n  geniuz recent --full                       Include full content\n  geniuz recent --since 24h                  Everything from the last day\n  geniuz recent --json                       JSON output"
     )]
     Recent {
@@ -131,6 +138,10 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+
+    /// See and manage your folders
+    #[command(subcommand)]
+    Folder(FolderCommand),
 
     /// Capture files or directories into your folder
     #[command(
@@ -222,6 +233,90 @@ pub enum Command {
     /// User settings — read or change preferences
     #[command(subcommand)]
     Settings(SettingsCommand),
+}
+
+#[derive(Subcommand)]
+pub enum FolderCommand {
+    /// List your folders. The one in use is marked with *
+    List {
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Show one folder in full (the one in use if none is named)
+    Show {
+        /// Name or 8-character ID
+        name: Option<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Create a folder
+    #[command(after_help = "Examples:\n  geniuz folder create Work\n  geniuz folder create Clients -d \"One thread per client. No passwords here.\"\n  geniuz folder create Limen --at /Users/LIMEN")]
+    Create {
+        /// Its name
+        name: String,
+
+        /// What should whoever comes here next know?
+        #[arg(short, long, default_value = "")]
+        description: String,
+
+        /// Directory to create it in, which is also added to your list
+        #[arg(long, value_name = "DIR")]
+        at: Option<PathBuf>,
+    },
+
+    /// Make Geniuz look in a directory for folders. Refuses duplicates
+    Add {
+        /// The directory
+        path: PathBuf,
+    },
+
+    /// Stop looking in an added directory. Its files aren't touched
+    Remove {
+        /// The directory
+        path: PathBuf,
+    },
+
+    /// Use this folder whenever none is named
+    Use {
+        /// Name or 8-character ID
+        name: String,
+    },
+
+    /// Rename a folder. Its ID and addresses don't change
+    Rename {
+        /// Name or 8-character ID
+        name: String,
+        /// The new name
+        new_name: String,
+    },
+
+    /// Change what a folder says about itself. Earlier wording is kept
+    Describe {
+        /// Name or 8-character ID
+        name: String,
+        /// What should whoever comes here next know?
+        description: String,
+    },
+
+    /// Move a folder safely. Use this rather than copying the files: a copy of a live database can lose memories
+    Move {
+        /// Name or 8-character ID
+        name: String,
+        /// Directory to move it to
+        #[arg(long, value_name = "DIR")]
+        to: PathBuf,
+    },
+
+    /// Retire a folder: hide it and keep it. Nothing is deleted
+    Archive {
+        /// Name or 8-character ID
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]

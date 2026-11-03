@@ -1,6 +1,6 @@
 [package]
 name = "geniuz"
-version = "4.2.0"
+version = "5.0.0-dev"
 edition = "2021"
 description = "Your AI remembers now — persistent memory for AI agents"
 license = "MIT"
@@ -51,7 +51,7 @@ clap = { version = "4", features = ["derive"] }
 rusqlite = { version = "=0.32.1", features = ["bundled"] }  # pinned: SQLite 3.46, the fleet's engine (relay, Team, kith); 3.45 shifted datetime('now','utc') by the local offset
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "v5"] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1"
 dirs = "5"

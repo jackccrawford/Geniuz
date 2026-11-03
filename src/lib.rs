@@ -1,6 +1,7 @@
 pub mod embedding;
 pub mod embed_client;
 pub mod db;
+pub mod folders;
 pub mod settings;
 pub mod window;
 pub mod dig;

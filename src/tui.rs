@@ -82,7 +82,7 @@ struct App {
 
 impl App {
     fn new() -> Result<Self> {
-        let db_path = geniuz::data_dir().join("memory.db");
+        let db_path = crate::resolve_db_path().map_err(|e| anyhow::anyhow!(e))?;
         let db_path_str = db_path
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("memory.db path is not valid UTF-8"))?;
@@ -222,7 +222,7 @@ impl App {
                 self.status = format!(
                     "{} memories · db: {}",
                     count,
-                    geniuz::data_dir().join("memory.db").display()
+                    crate::resolve_db_path().map(|p| p.display().to_string()).unwrap_or_default()
                 );
             }
             "version" => {
@@ -641,7 +641,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::from(vec![Span::styled("  Esc           ", cmd), Span::raw("clear input · back from detail/help")]),
         Line::from(vec![Span::styled("  Ctrl-C        ", cmd), Span::raw("exit")]),
         Line::raw(""),
-        Line::from(vec![Span::styled("Memories live at ~/.geniuz/memory.db. Free and local.", dim)]),
+        Line::from(vec![Span::styled("Memories live in your folders. Free and local.", dim)]),
     ];
     let para = Paragraph::new(lines)
         .block(Block::default().title(" Help ").borders(Borders::ALL))
