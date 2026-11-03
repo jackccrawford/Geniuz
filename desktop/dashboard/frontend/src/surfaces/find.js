@@ -14,6 +14,7 @@
 import * as api from '../api.js';
 import * as fmt from '../format.js';
 import { getState, setState, navigate } from '../store.js';
+import { openMemory } from '../components/memoryModal.js';
 
 const MODES = {
   meaning: {
@@ -238,7 +239,7 @@ export async function mount(container) {
         <span class="memory-row__gist">${escapeHtml(l.line)}</span>
         <span class="memory-row__time">${fmt.ago(l.created_at)}</span>
       `;
-      row.addEventListener('click', () => navigate('detail', { selectedMemoryUuid: l.uuid }));
+      row.addEventListener('click', () => openMemory(l.uuid));
       list.appendChild(row);
     }
     for (const m of r.memories) {
@@ -251,7 +252,7 @@ export async function mount(container) {
         <span class="memory-row__gist">${formatGist(m.gist || '(no gist)')}</span>
         <span class="memory-row__time">${fmt.ago(m.created_at)}</span>
       `;
-      row.addEventListener('click', () => navigate('detail', { selectedMemoryUuid: m.uuid }));
+      row.addEventListener('click', () => openMemory(m.uuid));
       list.appendChild(row);
     }
     // Where to go next, at the top for a person reading down (agents get it
@@ -299,7 +300,7 @@ export async function mount(container) {
           if (here) {
             chip.type = 'button';
             chip.title = 'Open this memory';
-            chip.addEventListener('click', () => navigate('detail', { selectedMemoryUuid: p }));
+            chip.addEventListener('click', () => openMemory(p));
           }
           next.appendChild(chip);
         }

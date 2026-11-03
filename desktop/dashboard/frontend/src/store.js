@@ -3,17 +3,13 @@
 // to changes; surfaces dispatch via setState.
 
 const state = {
-  currentSurface: 'recent', // 'recent' | 'detail' | 'find' | 'status' | 'settings' | 'data'
-  selectedMemoryUuid: null, // when on 'detail' surface
+  currentSurface: 'recent', // 'recent' | 'remember' | 'find' | 'status' | 'settings' | 'data'
   searchQuery: '',          // active search query (empty = recent view)
   appVersion: null,         // set on bootstrap
   dataDir: null,            // set on bootstrap
   // Recent surface sort direction. 'desc' = newest first (default), 'asc' = oldest first.
   // Memory numbers stay stable per memory regardless of direction.
   sortDirection: 'desc',
-  // Where to return when the user backs out of detail. Set by `navigate()`
-  // before switching to detail; the Detail surface's back button reads it.
-  returnTo: 'recent',
 };
 
 const listeners = new Set();
@@ -32,16 +28,6 @@ export function subscribe(fn) {
   return () => listeners.delete(fn);
 }
 
-// navigate — when switching to 'detail', remember where we came from so the
-// Back button has somewhere to send the user. When leaving detail (or
-// navigating from sidebar), reset returnTo to the natural fallback.
 export function navigate(surface, extras = {}) {
-  const current = state.currentSurface;
-  let returnTo = state.returnTo;
-  if (surface === 'detail' && current !== 'detail') {
-    returnTo = current;
-  } else if (surface !== 'detail') {
-    returnTo = surface;
-  }
-  setState({ currentSurface: surface, returnTo, ...extras });
+  setState({ currentSurface: surface, ...extras });
 }

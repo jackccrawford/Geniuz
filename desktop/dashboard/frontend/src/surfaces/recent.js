@@ -12,6 +12,7 @@ import * as api from '../api.js';
 import * as fmt from '../format.js';
 import { navigate, getState, setState } from '../store.js';
 import * as su from '../stream-ui.js';
+import { openMemory } from '../components/memoryModal.js';
 
 export async function mount(container) {
   container.innerHTML = `<div class="surface-loading">Loading your memory…</div>`;
@@ -94,7 +95,6 @@ export async function mount(container) {
   // so flipping to oldest-first just reverses the visual list — each memory
   // keeps its number.
   const total = stats.total_memories ?? recent.length;
-  const selectedUuid = getState().selectedMemoryUuid;
 
   // Number each memory once based on its newest-first position. Then reverse
   // the working list if asc — numbers stay stable per memory.
@@ -145,7 +145,7 @@ export async function mount(container) {
       ? `<button type="button" class="stwisty${opened ? ' is-open' : ''}" data-twisty="${su.esc(m.uuid)}" aria-expanded="${opened}" aria-label="${opened ? 'Fold' : 'Open'} this thread"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4 2.5 8 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
       : `<span class="stwisty stwisty--leaf"></span>`;
     return `
-      <article class="smsg${depth ? ' smsg--child' : ''}${here ? ' is-here' : ''}${m.uuid === selectedUuid ? ' is-current' : ''}" data-uuid="${su.esc(m.uuid)}" tabindex="0">
+      <article class="smsg${depth ? ' smsg--child' : ''}${here ? ' is-here' : ''}" data-uuid="${su.esc(m.uuid)}" tabindex="0">
         <div class="smsg__gutter">${twisty}${su.mark(tag, depth ? 28 : 36)}</div>
         <div class="smsg__body">
           <div class="smsg__head">${head}
@@ -243,6 +243,13 @@ export async function mount(container) {
     }
   }
 
+  // The memory last read stays marked, so closing the modal leaves you placed.
+  function read(card) {
+    for (const x of stream.querySelectorAll('.smsg.is-read')) x.classList.remove('is-read');
+    card.classList.add('is-read');
+    openMemory(card.dataset.uuid);
+  }
+
   stream.addEventListener('click', (ev) => {
     const link = ev.target.closest('.slink');
     if (link) {
@@ -257,12 +264,13 @@ export async function mount(container) {
       return;
     }
     const c = ev.target.closest('.smsg');
-    if (c) navigate('detail', { selectedMemoryUuid: c.dataset.uuid });
+    // Selecting words to copy them is not asking to open the memory.
+    if (c && !String(window.getSelection() || '')) read(c);
   });
   stream.addEventListener('keydown', (ev) => {
     const c = ev.target.closest('.smsg');
     if (!c) return;
-    if (ev.key === 'Enter') navigate('detail', { selectedMemoryUuid: c.dataset.uuid });
+    if (ev.key === 'Enter') read(c);
     const tw = c.querySelector('[data-twisty]');
     if (tw && ((ev.key === 'ArrowRight' && tw.getAttribute('aria-expanded') === 'false') || (ev.key === 'ArrowLeft' && tw.getAttribute('aria-expanded') === 'true'))) {
       ev.preventDefault();

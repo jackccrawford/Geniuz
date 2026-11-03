@@ -3,6 +3,7 @@
 import { renderMd } from '../md.js';
 import { ago } from '../format.js';
 import { navigate } from '../store.js';
+import { openMemory } from './memoryModal.js';
 
 export function memoryItem(m) {
   const el = document.createElement('div');
@@ -21,7 +22,7 @@ export function memoryItem(m) {
     <div class="m-time">${ago(m.created_at)}</div>
   `;
   el.addEventListener('click', () => {
-    if (m.uuid) navigate('detail', { selectedMemoryUuid: m.uuid });
+    if (m.uuid) openMemory(m.uuid);
   });
   el.style.cursor = 'pointer';
   return el;

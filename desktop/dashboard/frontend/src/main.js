@@ -4,7 +4,6 @@ import * as api from './api.js';
 import { sidebar, wireCollapse } from './components/sidebar.js';
 import * as recent from './surfaces/recent.js';
 import * as remember from './surfaces/remember.js';
-import * as detail from './surfaces/detail.js';
 import * as find from './surfaces/find.js';
 import * as status from './surfaces/status.js';
 import * as settings from './surfaces/settings.js';
@@ -27,7 +26,6 @@ let toggleSidebar = () => {};
 const SURFACE_MOUNTS = {
   recent: recent.mount,
   remember: remember.mount,
-  detail: detail.mount,
   find: find.mount,
   status: status.mount,
   settings: settings.mount,
@@ -93,10 +91,10 @@ let lastRenderKey = null;
 async function renderSurface(mainHost) {
   const s = getState();
   // Re-render when surface OR a navigation input changes
-  // (selectedMemoryUuid for detail, sortDirection for memory list ordering).
+  // (sortDirection for memory list ordering).
   // searchQuery is deliberately NOT in the key — find is now submit-based, so
   // typing should mirror to state without triggering a remount + re-search.
-  const key = `${s.currentSurface}|${s.selectedMemoryUuid || ''}|${s.sortDirection || 'desc'}`;
+  const key = `${s.currentSurface}|${s.sortDirection || 'desc'}`;
   if (key === lastRenderKey) return;
   lastRenderKey = key;
   const myToken = ++renderToken;

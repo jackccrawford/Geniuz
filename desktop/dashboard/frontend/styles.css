@@ -672,50 +672,6 @@ button.find-next__chip:hover { border-color: var(--accent); }
    Detail surface
    ============================================================================ */
 
-.detail-meta {
-  display: flex;
-  gap: var(--s-3);
-  padding: var(--s-2) 0 var(--s-3) 0;
-  border-bottom: 1px solid var(--hairline-1);
-  font-size: var(--fs-micro);
-  color: var(--ink-3);
-  font-family: var(--font-mono);
-  flex-wrap: wrap;
-}
-.detail-meta__chip {
-  padding: 2px 6px;
-  background: var(--bg-surface);
-  border-radius: 3px;
-  border: 1px solid var(--hairline-1);
-}
-.detail-gist {
-  font-family: var(--font-display);
-  font-size: var(--fs-xl);
-  font-weight: 600;
-  color: var(--ink-1);
-  letter-spacing: -0.015em;
-  margin: var(--s-4) 0 var(--s-2) 0;
-}
-.detail-body {
-  font-size: var(--fs-medium);
-  line-height: 1.55;
-  color: var(--ink-1);
-  margin: var(--s-3) 0;
-  white-space: pre-wrap;
-}
-.detail-thread {
-  margin-top: var(--s-6);
-  padding-top: var(--s-4);
-  border-top: 1px solid var(--hairline-1);
-}
-.detail-thread__label {
-  font-size: var(--fs-micro);
-  font-weight: 500;
-  color: var(--ink-3);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin-bottom: var(--s-2);
-}
 
 /* ============================================================================
    Status surface
@@ -915,34 +871,7 @@ button.find-next__chip:hover { border-color: var(--accent); }
 }
 .sort-toggle:hover .sort-toggle__icon { opacity: 1; }
 
-/* ============================================================================
-   Back button — top-left of detail / drill-down surfaces.
-   ============================================================================ */
 
-.back-button {
-  appearance: none;
-  background: transparent;
-  border: 0;
-  padding: 4px 8px 4px 4px;
-  border-radius: 5px;
-  font-size: var(--fs-body);
-  color: var(--ink-2);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin: 0 0 var(--s-3) -4px;
-  transition: background-color var(--t-hover) var(--ease),
-              color var(--t-hover) var(--ease);
-}
-.back-button:hover {
-  background: var(--bg-elevated);
-  color: var(--ink-1);
-}
-.back-button__icon {
-  width: 16px;
-  height: 16px;
-}
 
 /* Gist category tag — the prefix before the first colon, bolded inline. */
 .memory-row__gist-tag {
