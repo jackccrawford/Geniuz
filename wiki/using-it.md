@@ -12,7 +12,17 @@
 curl -fsSL https://raw.githubusercontent.com/jackccrawford/geniuz/main/install.sh | bash
 ```
 
-The script installs to `~/.geniuz/bin/`. To build from source, see the [README](../README.md#from-source).
+The script installs to `~/.geniuz/bin/`. To build from source, see [below](#from-source).
+
+### From source
+
+```bash
+git clone https://github.com/jackccrawford/geniuz && cd geniuz
+cargo build --release --bin geniuz
+cp target/release/geniuz ~/.local/bin/
+```
+
+To build the dashboard as well: `cd desktop/dashboard && cargo tauri build`.
 
 ## Connect your AI
 

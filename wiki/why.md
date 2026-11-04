@@ -8,7 +8,7 @@ The cost is that a mistake stays on the record. In return, the history is hard t
 
 ## No server
 
-"There is no HTTP server in Geniuz", says the [README](../README.md#architecture). There is nothing to host, keep running or secure, and tools reach Geniuz by running it or through MCP.
+Geniuz has no HTTP server. There is nothing to host, keep running or secure, and tools reach Geniuz by running it or through MCP.
 
 ## One table
 
