@@ -90,6 +90,12 @@ xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$APP"
 
 echo "==> Step 10/10: Build DMG (custom layout) + sign + notarize + staple"
+# Another mounted "Geniuz" would push ours to "/Volumes/Geniuz 1", and the steps below would
+# write to the wrong disk.
+if [ -e /Volumes/Geniuz ]; then
+    echo "ERROR: /Volumes/Geniuz is already mounted. Eject it and run again." >&2
+    exit 1
+fi
 rm -rf "$DMG_STAGING" "$DMG" "$DMG_RW"
 mkdir -p "$DMG_STAGING"
 cp -R "$APP" "$DMG_STAGING/"
