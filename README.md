@@ -37,7 +37,7 @@ geniuz keep --in Work -c "Dana is the contact at Acme." -g "client: Acme contact
 geniuz recall --all "who do I talk to at Acme"
 ```
 
-The first `keep` downloads a small model (about 118 MB) that runs on your computer.
+The first `keep` downloads a small model (about 130 MB) that runs on your computer.
 
 ## What makes it different
 

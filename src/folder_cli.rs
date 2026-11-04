@@ -85,14 +85,16 @@ fn list(reg: &Registry, json: bool) -> Result<String, String> {
     let scan = reg.scan();
     let using = in_use();
     if json {
-        return list_json(&scan, &using);
+        return list_json(reg, &scan, &using);
     }
+    let pinned = reg.pinned();
     let mut lines = Vec::new();
     for f in &scan.folders {
         let mark = if is_in_use(f, &using) { "*" } else { " " };
         let (count, last) = f.stats().unwrap_or((0, None));
         let last = last.map(|t| crate::shorten_ts(&t)).unwrap_or_else(|| "never".to_string());
-        let mut line = format!("{} {} | {} | {} · {}", mark, f.short_id(), f.name, memories(count), last);
+        let pin = if pinned.contains(&f.uuid) { " · pinned" } else { "" };
+        let mut line = format!("{} {} | {} | {} · {}{}", mark, f.short_id(), f.name, memories(count), last, pin);
         let summary = clip(&f.description);
         if !summary.is_empty() {
             line.push_str(&format!(" — {}", summary));
@@ -130,8 +132,17 @@ fn list_archived(reg: &Registry, json: bool) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
-fn list_json(scan: &Scan, using: &Option<PathBuf>) -> Result<String, String> {
-    let folders: Vec<_> = scan.folders.iter().map(|f| folder_json(f, is_in_use(f, using))).collect();
+fn list_json(reg: &Registry, scan: &Scan, using: &Option<PathBuf>) -> Result<String, String> {
+    let pinned = reg.pinned();
+    let folders: Vec<_> = scan
+        .folders
+        .iter()
+        .map(|f| {
+            let mut row = folder_json(f, is_in_use(f, using));
+            row["pinned"] = serde_json::json!(pinned.contains(&f.uuid));
+            row
+        })
+        .collect();
     let blocked: Vec<_> = scan
         .blocked
         .iter()

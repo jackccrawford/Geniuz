@@ -406,6 +406,7 @@ impl Registry {
 
     fn add_unlocked(&self, dir: &Path) -> Result<Vec<Folder>, String> {
         let dir = std::fs::canonicalize(dir)
+            .map(plain_path)
             .map_err(|e| format!("Couldn't open {}: {}", dir.display(), e))?;
         if dir == canonical(&self.home) || self.added().iter().any(|d| canonical(d) == dir) {
             return Err(format!("{} is already added.", dir.display()));
@@ -1320,7 +1321,17 @@ fn directory_name(db: &Path) -> String {
 }
 
 fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    std::fs::canonicalize(path).map(plain_path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Windows answers canonicalize with `\\\\?\\C:\\...`, which nobody should have to read.
+/// A network path keeps its prefix: it isn't the same path without it.
+fn plain_path(path: PathBuf) -> PathBuf {
+    let text = path.to_string_lossy();
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with(r"UNC\") => PathBuf::from(rest),
+        _ => path,
+    }
 }
 
 fn now() -> String {
@@ -1387,6 +1398,13 @@ mod tests {
         crate::db::DatabaseManager::new(&reg.home.join(LEGACY_DB_FILE).to_string_lossy()).unwrap();
         assert_eq!(reg.ensure_default().unwrap().file_name().unwrap(), LEGACY_DB_FILE);
         assert!(!reg.home.join(DB_FILE).exists());
+    }
+
+    #[test]
+    fn plain_path_drops_only_the_windows_drive_prefix() {
+        assert_eq!(plain_path(PathBuf::from(r"\\?\C:\build\x")), PathBuf::from(r"C:\build\x"));
+        assert_eq!(plain_path(PathBuf::from(r"\\?\UNC\host\share")), PathBuf::from(r"\\?\UNC\host\share"));
+        assert_eq!(plain_path(PathBuf::from("/home/x")), PathBuf::from("/home/x"));
     }
 
     #[test]

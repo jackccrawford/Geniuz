@@ -196,6 +196,13 @@ class GeniuzService: ObservableObject {
         Bundle.main.path(forResource: "geniuz", ofType: nil) ?? "/usr/local/bin/geniuz"
     }
 
+    /// macOS runs a quarantined app from a random path that disappears when it quits,
+    /// and a disk image disappears when it's ejected. Nothing lasting may point there.
+    var runningFromTemporaryLocation: Bool {
+        let path = Bundle.main.bundlePath
+        return path.contains("/AppTranslocation/") || path.hasPrefix("/Volumes/")
+    }
+
     var claudeConfigPath: String {
         return "\(realHome)/Library/Application Support/Claude/claude_desktop_config.json"
     }
@@ -326,6 +333,7 @@ class GeniuzService: ObservableObject {
     /// bundled CLI into /usr/local/bin/geniuz. The user pastes into Terminal; the
     /// app never attempts privileged execution itself (sandbox-friendly).
     func copyCliInstallCommand() {
+        guard !runningFromTemporaryLocation else { return }
         let bundled = geniuzBinaryPath
         let command = "sudo ln -sf \"\(bundled)\" /usr/local/bin/geniuz"
         let pb = NSPasteboard.general
@@ -448,12 +456,19 @@ class GeniuzService: ObservableObject {
             NSLog("[geniuz-app] MCP config not readable at %@", path)
             return false
         }
-        let found = servers.keys.contains { $0.lowercased() == "geniuz" }
-        NSLog("[geniuz-app] MCP installed=%d", found ? 1 : 0)
-        return found
+        guard let entry = servers.first(where: { $0.key.lowercased() == "geniuz" })?.value as? [String: Any] else {
+            NSLog("[geniuz-app] MCP installed=0")
+            return false
+        }
+        // An entry isn't a connection: Claude can't start a program that's gone.
+        let command = entry["command"] as? String ?? ""
+        let usable = !command.hasPrefix("/") || FileManager.default.isExecutableFile(atPath: command)
+        NSLog("[geniuz-app] MCP installed=%d command=%@", usable ? 1 : 0, command)
+        return usable
     }
 
     func configureClaudeConnection() {
+        guard !runningFromTemporaryLocation else { return }
         let binary = geniuzBinaryPath
 
         var config: [String: Any]
@@ -467,7 +482,11 @@ class GeniuzService: ObservableObject {
         }
 
         var servers = config["mcpServers"] as? [String: Any] ?? [:]
-        servers["geniuz"] = [
+        // One entry, whatever older versions or the command line called it.
+        for key in servers.keys where key.lowercased() == "geniuz" {
+            servers.removeValue(forKey: key)
+        }
+        servers["Geniuz"] = [
             "command": binary,
             "args": ["mcp", "serve"]
         ]
@@ -542,25 +561,29 @@ class GeniuzService: ObservableObject {
         saveSettings(next)
     }
 
-    /// Launch the Geniuz Dashboard via the `geniuz://` URL scheme. The
-    /// dashboard .app registers itself as the handler for this scheme at
-    /// install time (CFBundleURLTypes in its Info.plist). The OS routes the
-    /// open call to the dashboard regardless of where it's installed, and
-    /// sandboxed callers can use this path freely — no entitlements needed.
+    /// Launch the dashboard nested inside this app. Asking by URL scheme could reach a
+    /// stale registration, since macOS remembers every temporary location an app ran from.
     func openDashboard() {
-        guard let url = URL(string: "geniuz://open") else { return }
+        guard let nested = Bundle.main.url(forResource: "Geniuz", withExtension: "app") else {
+            showDashboardError("This copy of Geniuz is missing its dashboard. Download it again from geniuz.life.")
+            return
+        }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
-        NSWorkspace.shared.open(url, configuration: config) { _, error in
+        NSWorkspace.shared.openApplication(at: nested, configuration: config) { [weak self] _, error in
             if let error = error {
-                DispatchQueue.main.async {
-                    let alert = NSAlert()
-                    alert.messageText = "Geniuz Dashboard not installed"
-                    alert.informativeText = "Couldn't open the dashboard. Make sure Geniuz Dashboard is installed (download at geniuz.life). Details: \(error.localizedDescription)"
-                    alert.alertStyle = .warning
-                    alert.runModal()
-                }
+                self?.showDashboardError("Try again in a moment. Details: \(error.localizedDescription)")
             }
+        }
+    }
+
+    private func showDashboardError(_ detail: String) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't open the dashboard"
+            alert.informativeText = detail
+            alert.alertStyle = .warning
+            alert.runModal()
         }
     }
 

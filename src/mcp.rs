@@ -159,13 +159,21 @@ fn base_tool_definitions() -> Value {
             },
             {
                 "name": "folders",
-                "description": "List the folders you can use: each is a separate store of memories with its own purpose. Check a folder's description before writing to it, since it may say what belongs there. Pass a name to read one folder's whole description.",
+                "description": "List the folders you can use: each is a separate store of memories with its own purpose. Check a folder's description before writing to it, since it may say what belongs there. Pass a name to read one folder's whole description. Pass create to make a new folder, when the person wants memories kept apart.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "name": {
                             "type": "string",
                             "description": "Optional. A folder's name or 8-character ID, to read it in full."
+                        },
+                        "create": {
+                            "type": "string",
+                            "description": "Optional. The name of a new folder to create, such as Work."
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Optional, with create. What belongs in the folder, for whoever comes here next."
                         }
                     }
                 }
@@ -308,6 +316,13 @@ fn execute_recall_recent(db: &DatabaseManager, params: &Value) -> (String, bool)
 fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
     // By length, not by line: a rule on a folder's second line is still a rule.
     const CLIPPED: usize = 300;
+    if let Some(name) = params.get("create").and_then(|n| n.as_str()) {
+        let description = params.get("description").and_then(|d| d.as_str()).unwrap_or("");
+        return match reg.create(name, description, None) {
+            Ok(f) => (format!("Created {} ({}). To keep a memory there, pass folder: \"{}\".", f.name, f.short_id(), f.name), false),
+            Err(e) => (format!("Error: {}", e), true),
+        };
+    }
     if let Some(q) = params.get("name").and_then(|n| n.as_str()) {
         return match reg.find(q) {
             Ok(f) => {
@@ -452,6 +467,7 @@ fn execute_recall_all(reg: &Registry, backend: Option<&dyn EmbeddingBackend>, ar
         return execute_grep_all(reg, &grep, &window, args);
     }
     let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10).min(100) as usize;
+    let full = args.get("full").and_then(|f| f.as_bool()).unwrap_or(false);
     let query = args.get("query").and_then(|q| q.as_str()).map(str::trim).filter(|q| !q.is_empty());
     let search = match query {
         None => Search::Recent,
@@ -464,7 +480,14 @@ fn execute_recall_all(reg: &Registry, backend: Option<&dyn EmbeddingBackend>, ar
         .iter()
         .map(|h| {
             let score = h.entry.score.map(|s| format!(" ({:.3})", s)).unwrap_or_default();
-            format!("{} | {} | {} | {}{}", h.address(), h.folder.name, crate::shorten_ts(&h.entry.created_at), h.entry.gist, score)
+            let line = format!("{} | {} | {} | {}{}", h.address(), h.folder.name, crate::shorten_ts(&h.entry.created_at), h.entry.gist, score);
+            let content = full
+                .then(|| DatabaseManager::open_existing(&h.folder.db_path.to_string_lossy()).ok()?.get_full_content(&h.entry.memory_uuid).ok().flatten())
+                .flatten();
+            match content {
+                Some(c) => format!("{}\n{}\n", line, c),
+                None => line,
+            }
         })
         .collect();
     if !found.skipped.is_empty() {
@@ -781,6 +804,55 @@ mod tests {
     }
 
     #[test]
+    fn folders_can_create_a_folder() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let reg = Registry::new(&home);
+        let (out, is_err) = call_tool(&reg, None, "folders", &json!({ "create": "Work", "description": "Notes for work" }));
+        assert!(!is_err && out.contains("Created Work"), "{out}");
+        assert_eq!(reg.find("Work").unwrap().description, "Notes for work");
+        let (out, is_err) = call_tool(&reg, None, "folders", &json!({ "create": "Work" }));
+        assert!(is_err, "a second Work is refused: {out}");
+    }
+
+    #[test]
+    fn recall_all_with_full_returns_the_whole_memory() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let reg = Registry::new(&home);
+        let work = reg.create("Work", "", None).unwrap();
+        let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
+        db.signal("the whole body", Some("the gist"), None, None).unwrap();
+        let (out, _) = call_tool(&reg, None, "recall", &json!({ "all": true, "full": true }));
+        assert!(out.contains("the gist") && out.contains("the whole body"), "{out}");
+        let (out, _) = call_tool(&reg, None, "recall", &json!({ "all": true }));
+        assert!(out.contains("the gist") && !out.contains("the whole body"), "{out}");
+    }
+
+    #[test]
+    fn install_replaces_any_spelling_of_the_entry() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = tmp.path().join("claude_desktop_config.json");
+        std::fs::write(&config, r#"{"mcpServers":{"geniuz":{"command":"/gone"},"other":{"command":"x"}}}"#).unwrap();
+        install_to_path(&config, "/Applications/Geniuz.app/geniuz", &serde_json::Map::new()).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+        let servers = v["mcpServers"].as_object().unwrap();
+        assert_eq!(servers.len(), 2, "{servers:?}");
+        assert!(servers.contains_key("other"));
+        assert_eq!(servers["Geniuz"]["command"], "/Applications/Geniuz.app/geniuz");
+    }
+
+    #[test]
+    fn a_temporary_location_is_recognized() {
+        assert!(is_temporary_location("/private/var/folders/h6/T/AppTranslocation/ABC/d/Geniuz.app/Contents/Resources/geniuz"));
+        assert!(is_temporary_location("/Volumes/Geniuz/Geniuz.app/Contents/Resources/geniuz"));
+        assert!(!is_temporary_location("/Applications/Geniuz.app/Contents/Resources/geniuz"));
+        assert!(!is_temporary_location("/usr/local/bin/geniuz"));
+    }
+
+    #[test]
     fn an_address_opens_its_own_folder_from_anywhere() {
         let tmp = tempfile::TempDir::new().unwrap();
         let home = tmp.path().join("home");
@@ -1026,6 +1098,20 @@ fn geniuz_binary_path() -> String {
         .unwrap_or_else(|_| "geniuz".to_string())
 }
 
+/// macOS runs a quarantined app from a random path that disappears when it quits,
+/// and a disk image disappears when it's ejected. A connection saved there breaks.
+fn is_temporary_location(path: &str) -> bool {
+    path.contains("/AppTranslocation/") || path.starts_with("/Volumes/")
+}
+
+/// The one entry Geniuz keeps in a Claude Desktop config. Older versions and the
+/// menubar app wrote other spellings, so match them all when reading or replacing.
+const SERVER_KEY: &str = "Geniuz";
+
+fn is_server_key(key: &str) -> bool {
+    key.eq_ignore_ascii_case(SERVER_KEY)
+}
+
 /// Parse `KEY=VALUE` strings into a JSON object suitable for the MCP
 /// server entry's `env` block. Skips malformed entries with a warning.
 fn parse_env_args(env_args: &[String]) -> serde_json::Map<String, serde_json::Value> {
@@ -1042,6 +1128,10 @@ fn parse_env_args(env_args: &[String]) -> serde_json::Map<String, serde_json::Va
 
 pub fn install(env_args: &[String]) -> Result<String, String> {
     let binary = geniuz_binary_path();
+    if is_temporary_location(&binary) {
+        return Err("Geniuz is running from a temporary location, so a connection saved now would break. \
+Drag Geniuz to Applications, open it from there, and run this again.".to_string());
+    }
     let env_map = parse_env_args(env_args);
     let paths = config_paths();
     let mut written = Vec::new();
@@ -1076,7 +1166,7 @@ pub fn install(env_args: &[String]) -> Result<String, String> {
     lines.push(format!("  Binary: {}", binary));
     lines.push(String::new());
     lines.push("  Restart Claude Desktop to activate.".to_string());
-    lines.push("  Your Claude will have: remember, recall, recall_recent".to_string());
+    lines.push("  Your Claude will have: keep, recall, folders".to_string());
 
     if !errors.is_empty() {
         lines.push(String::new());
@@ -1131,7 +1221,10 @@ fn install_to_path(
     if !env_map.is_empty() {
         entry["env"] = serde_json::Value::Object(env_map.clone());
     }
-    config["mcpServers"]["Geniuz"] = entry;
+    if let Some(servers) = config["mcpServers"].as_object_mut() {
+        servers.retain(|key, _| !is_server_key(key));
+    }
+    config["mcpServers"][SERVER_KEY] = entry;
 
     let formatted = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("serialize failed: {}", e))?;
@@ -1168,17 +1261,27 @@ pub fn status() -> Result<String, String> {
             }
         };
 
-        let installed = config.get("mcpServers")
-            .and_then(|s| s.get("Geniuz"))
-            .is_some();
+        let entry = config.get("mcpServers")
+            .and_then(|s| s.as_object())
+            .and_then(|s| s.iter().find(|(key, _)| is_server_key(key)))
+            .map(|(_, v)| v);
+        let command = entry.and_then(|e| e.get("command")).and_then(|c| c.as_str());
+        // A path that's gone means Claude can't start Geniuz, whatever the config says.
+        let missing = command.is_some_and(|c| c.contains('/') && !std::path::Path::new(c).exists());
+        let installed = entry.is_some() && !missing;
         if installed { any_installed = true; }
 
         lines.push(format!("Config: {}", config_file.display()));
-        lines.push(format!("  Geniuz: {}", if installed { "installed" } else { "not installed" }));
-        if installed {
-            if let Some(cmd) = config["mcpServers"]["Geniuz"].get("command").and_then(|c| c.as_str()) {
-                lines.push(format!("  Binary: {}", cmd));
-            }
+        let state = if installed {
+            "installed"
+        } else if missing {
+            "broken: its program is gone. Run 'geniuz mcp install' to repair it"
+        } else {
+            "not installed"
+        };
+        lines.push(format!("  Geniuz: {}", state));
+        if let Some(cmd) = command {
+            lines.push(format!("  Binary: {}", cmd));
         }
     }
 
@@ -1195,10 +1298,10 @@ pub fn status() -> Result<String, String> {
         if let Ok(db) = crate::get_db() {
             let count = db.count().unwrap_or(0);
             let embeddings = db.embedding_count().unwrap_or(0);
-            lines.push(format!("Station: {} ({} memories, {}/{} embedded)", station.display(), count, embeddings, count));
+            lines.push(format!("Folder: {} ({} memories, {}/{} embedded)", station.display(), count, embeddings, count));
         }
     } else {
-        lines.push("Station: not created yet (will be created on first remember)".to_string());
+        lines.push("Folder: not created yet (will be created on first keep)".to_string());
     }
 
     if !any_installed {

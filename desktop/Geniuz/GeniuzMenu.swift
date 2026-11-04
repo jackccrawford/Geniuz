@@ -16,11 +16,15 @@ struct GeniuzMenu: View {
             }
 
             Divider()
-            connectionStatus
+            if service.runningFromTemporaryLocation {
+                moveToApplicationsNotice
+            } else {
+                connectionStatus
 
-            if !service.cliOnPath {
-                Divider()
-                cliInstallSection
+                if !service.cliOnPath {
+                    Divider()
+                    cliInstallSection
+                }
             }
 
             Divider()
@@ -246,6 +250,21 @@ struct GeniuzMenu: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Running from a temporary location
+
+    private var moveToApplicationsNotice: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Move Geniuz to Applications")
+                .font(.system(size: 12, weight: .semibold))
+            Text("It's running from a temporary location, so connections to Claude wouldn't last. Quit, drag Geniuz to Applications in Finder, and open it from there.")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Connection status (footer row above Quit)
