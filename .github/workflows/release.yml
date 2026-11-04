@@ -98,3 +98,6 @@ jobs:
             geniuz-*.tar.gz
             geniuz-*.tar.gz.sha256
           generate_release_notes: true
+          # A tag like v5.0.0-rc.1 is a pre-release: "latest" and every download link stay put.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
