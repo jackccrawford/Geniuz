@@ -16,6 +16,18 @@ Free and open source. No account, no cloud, no telemetry.
 curl -fsSL https://raw.githubusercontent.com/jackccrawford/geniuz/main/install.sh | bash
 ```
 
+### Coming from an earlier version
+
+Remove the old version first, then install this one as above. Your memories aren't stored in the app, so they stay where they are and appear in a folder called My memory.
+
+| You have | Remove it with |
+|---|---|
+| A Mac | Quit Geniuz and drag it to the Trash |
+| Windows 11 | Settings → Apps → Geniuz → Uninstall. If you picked your own data folder, pick it again when you install |
+| Linux | Nothing to remove: the install command replaces the old version |
+
+Don't delete `.geniuz` in your home directory. That's where your memories live.
+
 ## Connect your AI
 
 | You use | Do this |

@@ -294,4 +294,4 @@ elif [ "$os" = "darwin" ]; then
 fi
 
 echo ""
-echo "    First memory:       geniuz remember -c \"Hello from Geniuz\" -g \"first memory\""
+echo "    First memory:       geniuz keep -c \"Hello from Geniuz\" -g \"first memory\""
