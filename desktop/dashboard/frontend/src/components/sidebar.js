@@ -121,7 +121,7 @@ const FILTER_FROM = 10;
 /** On hover: what it's for, and whether it's alive. */
 function folderTip(f) {
   const lines = [];
-  if (f.description) lines.push(f.description.split('\n')[0]);
+  if (f.description) lines.push(f.description);
   lines.push(f.last_written ? `Last written ${su.timeFull(f.last_written)}` : 'Nothing kept here yet');
   return lines.join('\n');
 }

@@ -74,7 +74,7 @@ geniuz status
 
 ## Folders
 
-Memories live in folders, each with a name and a description. Read a folder's description before writing to it: it may say what belongs there, what must not go there, and how to use it.
+Memories live in folders, each with a name and a description. Choose the folder before you keep, because a memory can't be moved afterwards. Read its description first: it may say what belongs there, what must not go there, and how to use it.
 
 ```bash
 geniuz folder list                     # all of them; * is the one in use

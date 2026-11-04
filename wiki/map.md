@@ -9,7 +9,7 @@ The ways in.
 | Part | What it does | Guardrail | Source |
 |---|---|---|---|
 | CLI | Every command, for people, scripts and agents. | `capture` refuses files that are not prose unless you pass `--force`. | [`src/cli.rs`](../src/cli.rs), [`src/main.rs`](../src/main.rs) |
-| MCP | A stdio server with three tools: `keep`, `recall`, `folders`. | Finds the folder on every call. Falls back to keyword search if search by meaning fails or finds nothing. | [`src/mcp.rs`](../src/mcp.rs) |
+| MCP | A stdio server with three tools: `keep`, `recall`, `folders`. | Tells a connecting agent when to use it. Finds the folder on every call. Falls back to keyword search if search by meaning fails or finds nothing. | [`src/mcp.rs`](../src/mcp.rs) |
 | Terminal UI | Browse and compose in a terminal. | Refuses to start without a real terminal. | [`src/tui.rs`](../src/tui.rs) |
 | Dashboard | The desktop app, for browsing, search and settings. | Opens and reveals files only under your home folder. | [`desktop/dashboard`](../desktop/dashboard) |
 | Menubar | Always-on status on a Mac, and a tray menu on Windows and Linux. | The Mac menubar opens the database read-only, and asks the CLI which folder is in use. | [`desktop/Geniuz`](../desktop/Geniuz), [`desktop/dashboard`](../desktop/dashboard) |

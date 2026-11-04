@@ -4,7 +4,7 @@ use crate::cli::FolderCommand;
 use geniuz::folders::{Folder, Registry, Scan};
 use std::path::PathBuf;
 
-const CLIPPED: usize = 90;
+const CLIPPED: usize = 200;
 
 pub fn run(cmd: FolderCommand) -> Result<String, String> {
     let reg = Registry::from_env();
@@ -202,12 +202,13 @@ fn plural(n: usize) -> String {
     if n == 1 { "1 folder".to_string() } else { format!("{} folders", n) }
 }
 
-/// A description's first line, on one line, short enough for a list.
+/// A description on one line, short enough for a list. By length, not by line:
+/// a rule on its second line is still a rule, and agents read this list too.
 fn clip(text: &str) -> String {
-    let first = text.lines().next().unwrap_or("").trim();
-    if first.chars().count() <= CLIPPED {
-        return first.to_string();
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= CLIPPED {
+        return flat;
     }
-    let cut: String = first.chars().take(CLIPPED).collect();
+    let cut: String = flat.chars().take(CLIPPED).collect();
     format!("{}…", cut.trim_end())
 }

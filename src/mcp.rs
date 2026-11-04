@@ -65,11 +65,22 @@ fn tool_result(id: Value, text: &str, is_error: bool) -> JsonRpcResponse {
 // Tool Definitions
 // =============================================================================
 
+/// What an agent is told when it connects. Tool descriptions alone weren't enough:
+/// in testing, agents with no other guidance used Geniuz in 0 of 8 sessions, and
+/// with this in 4 of 4. They ignore "use this at the start" on a tool they aren't
+/// yet thinking of calling.
+const INSTRUCTIONS: &str = "Geniuz is your memory across sessions; without it, the next session starts knowing nothing. \
+At the start of a conversation, call recall with no query, then search for the topic at hand. \
+Before you finish a task, call keep for what a future session would need and could not get from the files: \
+decisions and why, people, preferences, constraints. Skip what the code or files already say. \
+Before your first keep in a conversation, call folders and choose the one that fits, then follow what its description says. \
+A memory can't be moved or removed afterwards.";
+
 fn tool_definitions() -> Value {
     let mut tools = base_tool_definitions();
     let folder = json!({
         "type": "string",
-        "description": "Optional. Which folder to use, by name or 8-character ID. Leave it out to use the current folder. An unknown name is an error, never a different folder."
+        "description": "Which folder to use, by name or 8-character ID. Choose one with the folders tool. Left out, this uses the current folder. An unknown name is an error, never a different folder."
     });
     for tool in tools["tools"].as_array_mut().into_iter().flatten() {
         if tool["name"] != "folders" {
@@ -295,7 +306,8 @@ fn execute_recall_recent(db: &DatabaseManager, params: &Value) -> (String, bool)
 /// One line per folder, clipped: the full list across many folders has to fit
 /// comfortably in a conversation. A name returns that folder whole.
 fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
-    const CLIPPED: usize = 90;
+    // By length, not by line: a rule on a folder's second line is still a rule.
+    const CLIPPED: usize = 300;
     if let Some(q) = params.get("name").and_then(|n| n.as_str()) {
         return match reg.find(q) {
             Ok(f) => {
@@ -320,9 +332,9 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
     let mut lines = Vec::new();
     for f in &scan.folders {
         let (count, last) = f.stats().unwrap_or((0, None));
-        let first = f.description.lines().next().unwrap_or("").trim();
-        let summary: String = first.chars().take(CLIPPED).collect();
-        let more = if first.chars().count() > CLIPPED { "…" } else { "" };
+        let flat = f.description.split_whitespace().collect::<Vec<_>>().join(" ");
+        let summary: String = flat.chars().take(CLIPPED).collect();
+        let more = if flat.chars().count() > CLIPPED { "…" } else { "" };
         let mark = if current.as_ref() == Some(&f.db_path) { "* " } else { "" };
         let noun = if count == 1 { "memory" } else { "memories" };
         let mut line = format!(
@@ -387,11 +399,58 @@ fn recall_by_address(reg: &Registry, args: &Value) -> Option<(String, bool)> {
     Some(execute_recall(&db, &rewritten))
 }
 
+/// Exact words across every folder: the matching lines, newest first, each with
+/// the address that opens its memory.
+fn execute_grep_all(reg: &Registry, grep: &[String], window: &Window, args: &Value) -> (String, bool) {
+    let terms = match geniuz::dig::Terms::parse(grep) {
+        Ok(t) => t,
+        Err(e) => return (format!("Error: {}", e), true),
+    };
+    let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(50).min(500) as usize;
+    let (mut hits, mut searched, mut skipped) = (Vec::new(), 0, Vec::new());
+    for f in reg.scan().folders {
+        let found = DatabaseManager::open_existing(&f.db_path.to_string_lossy())
+            .and_then(|db| db.grep_in(&terms, window, None, limit));
+        match found {
+            Ok(dig) => {
+                searched += 1;
+                for h in dig.hits {
+                    let address = format!("{}:{}", f.short_id(), h.memory_uuid.chars().take(8).collect::<String>().to_uppercase());
+                    hits.push((h.created_at, address, f.name.clone(), h.line));
+                }
+            }
+            Err(_) => skipped.push(f.name),
+        }
+    }
+    hits.sort_by(|a, b| b.0.cmp(&a.0));
+    hits.truncate(limit);
+    let mut lines: Vec<String> = hits
+        .iter()
+        .map(|(at, address, folder, line)| format!("{} | {} | {} | {}", address, folder, crate::shorten_ts(at), line))
+        .collect();
+    if !skipped.is_empty() {
+        lines.push(format!("Couldn't read: {}", skipped.join(", ")));
+    }
+    lines.push(format!("searched: {} folders · grep \"{}\"", searched, grep.join(" ")));
+    (lines.join("\n"), false)
+}
+
 fn execute_recall_all(reg: &Registry, backend: Option<&dyn EmbeddingBackend>, args: &Value) -> (String, bool) {
     let window = match window_from(args) {
         Ok(w) => w,
         Err(e) => return (format!("Error: {}", e), true),
     };
+    if args.get("thread").and_then(|t| t.as_str()).is_some_and(|t| !t.trim().is_empty()) {
+        return ("Error: a thread lives in one folder, so all can't be combined with thread.".to_string(), true);
+    }
+    let grep: Vec<String> = match args.get("grep") {
+        Some(Value::String(t)) => vec![t.clone()],
+        Some(Value::Array(a)) => a.iter().filter_map(|v| v.as_str().map(String::from)).collect(),
+        _ => Vec::new(),
+    };
+    if !grep.is_empty() {
+        return execute_grep_all(reg, &grep, &window, args);
+    }
     let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10).min(100) as usize;
     let query = args.get("query").and_then(|q| q.as_str()).map(str::trim).filter(|q| !q.is_empty());
     let search = match query {
@@ -428,11 +487,12 @@ fn call_tool(
         return (format!("Unknown tool: {}", name), true);
     }
     if name == "recall" {
-        if args.get("all").and_then(|a| a.as_bool()).unwrap_or(false) {
-            return execute_recall_all(reg, backend, args);
-        }
+        // An address names one memory, so it wins over searching everything.
         if let Some(found) = recall_by_address(reg, args) {
             return found;
+        }
+        if args.get("all").and_then(|a| a.as_bool()).unwrap_or(false) {
+            return execute_recall_all(reg, backend, args);
         }
     }
     let db = match open_for_call(reg, args) {
@@ -440,9 +500,45 @@ fn call_tool(
         Err(e) => return (format!("Error: {}", e), true),
     };
     match name {
-        "keep" | "remember" => execute_keep(&db, backend, args),
-        "recall" => execute_recall(&db, args),
-        _ => execute_recall_recent(&db, args),
+        "keep" | "remember" => {
+            let (text, is_error) = execute_keep(&db, backend, args);
+            if is_error {
+                return (text, is_error);
+            }
+            // Say where it went: a memory can't be moved, so this is worth knowing.
+            let here = std::fs::canonicalize(&db.db_path).ok();
+            let folder = reg.scan().folders.into_iter().find(|f| std::fs::canonicalize(&f.db_path).ok() == here);
+            (folder.map(|f| format!("{} In folder: {}.", text, f.name)).unwrap_or(text), false)
+        }
+        "recall" | "recall_recent" => {
+            let (text, is_error) = if name == "recall" {
+                execute_recall(&db, args)
+            } else {
+                execute_recall_recent(&db, args)
+            };
+            // "Nothing here" mustn't read as "nothing anywhere".
+            if !is_error && db.count().unwrap_or(1) == 0 {
+                let here = std::fs::canonicalize(&db.db_path).ok();
+                let elsewhere: Vec<String> = reg
+                    .scan()
+                    .folders
+                    .iter()
+                    .filter(|f| std::fs::canonicalize(&f.db_path).ok() != here)
+                    .filter_map(|f| {
+                        let (count, _) = f.stats().ok()?;
+                        (count > 0).then(|| format!("{} ({})", f.name, count))
+                    })
+                    .collect();
+                if !elsewhere.is_empty() {
+                    return (
+                        format!("This folder is empty. Other folders hold memories: {}.", elsewhere.join(", ")),
+                        false,
+                    );
+                }
+            }
+            (text, is_error)
+        }
+        _ => (format!("Unknown tool: {}", name), true),
     }
 }
 
@@ -709,6 +805,64 @@ mod tests {
         assert!(!is_err && out.contains(&address), "{out}");
     }
 
+    fn registry_with_work() -> (tempfile::TempDir, Registry, geniuz::folders::Folder) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let reg = Registry::new(&home);
+        let work = reg.create("Work", "Client work.\nNo passwords here.", None).unwrap();
+        (tmp, reg, work)
+    }
+
+    #[test]
+    fn folders_shows_a_rule_on_a_descriptions_second_line() {
+        let (_tmp, reg, _work) = registry_with_work();
+        let (text, _) = call_tool(&reg, None, "folders", &json!({}));
+        assert!(text.contains("Client work. No passwords here."), "{text}");
+    }
+
+    #[test]
+    fn grep_across_folders_searches_and_shows_addresses() {
+        let (_tmp, reg, work) = registry_with_work();
+        let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
+        let id = db.signal("first line\nThe Cubic review passed.", Some("g"), None, None).unwrap().uuid;
+
+        let (text, is_err) = call_tool(&reg, None, "recall", &json!({ "all": true, "grep": "cubic" }));
+        assert!(!is_err, "{text}");
+        assert!(text.contains("The Cubic review passed."), "{text}");
+        assert!(text.contains(&format!("{}:{}", work.short_id(), &id[..8])), "{text}");
+        assert!(!text.contains("first line"), "only the matching line: {text}");
+
+        let (text, is_err) = call_tool(&reg, None, "recall", &json!({ "all": true, "thread": &id[..8] }));
+        assert!(is_err, "{text}");
+    }
+
+    #[test]
+    fn an_address_opens_even_when_all_is_set() {
+        let (_tmp, reg, work) = registry_with_work();
+        let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
+        let id = db.signal("the whole body", Some("g"), None, None).unwrap().uuid;
+        let address = format!("{}:{}", work.short_id(), &id[..8]);
+        let (text, _) = call_tool(&reg, None, "recall", &json!({ "query": address, "all": true }));
+        assert!(text.contains("the whole body"), "{text}");
+    }
+
+    #[test]
+    fn an_empty_folder_says_where_the_memories_are() {
+        let (_tmp, reg, work) = registry_with_work();
+        let empty = reg.create("Empty", "", None).unwrap();
+        DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap().signal("x", Some("g"), None, None).unwrap();
+        let (text, _) = call_tool(&reg, None, "recall", &json!({ "folder": empty.name }));
+        assert!(text.contains("Work (1)"), "{text}");
+    }
+
+    #[test]
+    fn keep_says_which_folder_it_went_to() {
+        let (_tmp, reg, _work) = registry_with_work();
+        let (text, _) = call_tool(&reg, None, "keep", &json!({ "folder": "Work", "content": "x", "gist": "y" }));
+        assert!(text.contains("In folder: Work."), "{text}");
+    }
+
     #[test]
     fn root_line_has_no_arrow() {
         let line = entry_line(&entry(None, None));
@@ -775,7 +929,8 @@ pub fn serve() {
                     "serverInfo": {
                         "name": "Geniuz",
                         "version": env!("CARGO_PKG_VERSION")
-                    }
+                    },
+                    "instructions": INSTRUCTIONS
                 }))
             }
 
