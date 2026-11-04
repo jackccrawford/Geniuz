@@ -4,7 +4,7 @@
 
 | You have | Do this |
 |---|---|
-| A Mac | Download [Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg) and drag it to Applications. To use `geniuz` in a terminal, use **Copy Install Command** in the menubar. |
+| A Mac | Download [Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg) and drag it to Applications. To use `geniuz` in a terminal, use **Settings → Copy Install Command** in the menubar. |
 | Windows 11 | Download [Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe). It installs per user, with no admin prompt. |
 | Linux | Run the command below, or see the [releases](https://github.com/jackccrawford/geniuz/releases/latest) for `.deb`, AppImage and tarballs (x86_64 and arm64). |
 
@@ -28,7 +28,7 @@ To build the dashboard as well: `cd desktop/dashboard && cargo tauri build`.
 
 | You use | Next step |
 |---|---|
-| Claude Desktop | **Configure Claude Connection** in the menubar, or `geniuz mcp install`, then restart Claude Desktop |
+| Claude Desktop | Connects by itself when Geniuz opens. Restart Claude Desktop once. To connect by hand: `geniuz mcp install` |
 | Claude Code, Cursor, Windsurf | `geniuz skill` prints instructions to give your agent |
 | Your own agents | Call `geniuz keep` and `geniuz recall` from a shell, or run `geniuz mcp serve` |
 

@@ -63,6 +63,10 @@ class GeniuzService: ObservableObject {
     @Published var recentGists: [String] = []
     @Published var recentMemories: [RecentMemory] = []
     @Published var mcpInstalled: Bool = false
+    @Published var claudeFound: Bool = true
+    @Published var claudeConfigUnreadable: Bool = false
+    @Published var claudeCodeConnected: Bool = false
+    @Published var claudeCodeFailed: Bool = false
     @Published var stationExists: Bool = false
     @Published var recentExpanded: Bool = false
     @Published var restartRequired: Bool = false
@@ -89,6 +93,7 @@ class GeniuzService: ObservableObject {
     private var timer: Timer?
     private var claudeAtConfigureTime: Set<pid_t> = []
     private var claudeSeenAfterConfigure: Set<pid_t> = []
+    private var verifiedThisLaunch = false
     private var settingsWindowController: NSWindowController?
 
     private let claudeBundleID = "com.anthropic.claudefordesktop"
@@ -235,7 +240,10 @@ class GeniuzService: ObservableObject {
             guard let self = self else { return }
             let folders = self.readFolders()
             let station = self.readStation()
-            let mcp = self.checkMcpInstalled()
+            // The full check runs the registered program, so once per launch is enough.
+            let entry = self.readClaudeEntry(runIt: !self.verifiedThisLaunch)
+            self.verifiedThisLaunch = true
+            let claudeCode = self.checkClaudeCodeConnected()
             let onPath = self.checkCliOnPath()
             let s = self.loadSettings()
 
@@ -245,7 +253,8 @@ class GeniuzService: ObservableObject {
                 self.memoryCount = station.memories
                 self.recentMemories = station.recentMemories
                 self.recentGists = station.recentGists
-                self.mcpInstalled = mcp
+                self.settleClaudeConnection(entry)
+                self.claudeCodeConnected = claudeCode
                 self.cliOnPath = onPath
                 self.settings = s
                 self.onStateChange?()
@@ -448,67 +457,209 @@ class GeniuzService: ObservableObject {
 
     // MARK: - MCP config
 
-    func checkMcpInstalled() -> Bool {
-        let path = claudeConfigPath
-        guard let data = FileManager.default.contents(atPath: path),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let servers = json["mcpServers"] as? [String: Any] else {
-            NSLog("[geniuz-app] MCP config not readable at %@", path)
+    private enum ClaudeEntry {
+        case absent, broken, healthy, unreadable
+    }
+
+    private var claudeIsPresent: Bool {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: claudeBundleID) != nil
+            || FileManager.default.fileExists(atPath: (claudeConfigPath as NSString).deletingLastPathComponent)
+    }
+
+    /// Set once Geniuz has connected to Claude Desktop. If the entry is gone after that,
+    /// the person removed it, and it stays removed until they ask again.
+    private var connectedOnceMarker: String { "\(dataDir)/claude-connected" }
+    private var welcomedMarker: String { "\(dataDir)/welcomed" }
+
+    private func writeMarker(_ path: String) {
+        try? FileManager.default.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: path, contents: Data())
+    }
+
+    private func answers(_ command: String) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: command)
+        process.arguments = ["--version"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+            return process.terminationStatus == 0
+        } catch {
             return false
         }
+    }
+
+    /// An entry isn't a connection: Claude can't start a program that's gone.
+    private func readClaudeEntry(runIt: Bool) -> ClaudeEntry {
+        guard let data = FileManager.default.contents(atPath: claudeConfigPath) else { return .absent }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return .unreadable }
+        let servers = json["mcpServers"] as? [String: Any] ?? [:]
         guard let entry = servers.first(where: { $0.key.lowercased() == "geniuz" })?.value as? [String: Any] else {
-            NSLog("[geniuz-app] MCP installed=0")
-            return false
+            return .absent
         }
-        // An entry isn't a connection: Claude can't start a program that's gone.
         let command = entry["command"] as? String ?? ""
-        let usable = !command.hasPrefix("/") || FileManager.default.isExecutableFile(atPath: command)
-        NSLog("[geniuz-app] MCP installed=%d command=%@", usable ? 1 : 0, command)
-        return usable
+        guard command.hasPrefix("/") else { return .healthy }
+        guard FileManager.default.isExecutableFile(atPath: command) else { return .broken }
+        return !runIt || answers(command) ? .healthy : .broken
+    }
+
+    /// Connect without asking, repair without asking, and leave alone anything the
+    /// person removed themselves. Runs on the main thread after each refresh.
+    private func settleClaudeConnection(_ entry: ClaudeEntry) {
+        claudeFound = claudeIsPresent
+        claudeConfigUnreadable = false
+        guard !runningFromTemporaryLocation else { return }
+        let fm = FileManager.default
+        switch entry {
+        case .healthy:
+            mcpInstalled = true
+            if !fm.fileExists(atPath: connectedOnceMarker) { writeMarker(connectedOnceMarker) }
+        case .broken:
+            mcpInstalled = false
+            connectClaude(thenOfferRestart: true)
+        case .absent:
+            mcpInstalled = false
+            if claudeFound && !fm.fileExists(atPath: connectedOnceMarker) {
+                connectClaude(thenOfferRestart: true)
+            }
+        case .unreadable:
+            mcpInstalled = false
+            claudeConfigUnreadable = true
+        }
     }
 
     func configureClaudeConnection() {
-        guard !runningFromTemporaryLocation else { return }
-        let binary = geniuzBinaryPath
+        connectClaude(thenOfferRestart: false)
+    }
 
-        var config: [String: Any]
-        if let data = FileManager.default.contents(atPath: claudeConfigPath),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+    private func connectClaude(thenOfferRestart: Bool) {
+        guard !runningFromTemporaryLocation else { return }
+
+        var config: [String: Any] = [:]
+        if let data = FileManager.default.contents(atPath: claudeConfigPath) {
+            // Never replace settings we can't read: they're Claude's, and may be someone's work.
+            guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                claudeConfigUnreadable = true
+                return
+            }
             config = json
         } else {
-            config = [:]
             let dir = (claudeConfigPath as NSString).deletingLastPathComponent
             try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         }
 
         var servers = config["mcpServers"] as? [String: Any] ?? [:]
-        // One entry, whatever older versions or the command line called it.
+        // One entry, whatever older versions or the command line called it. Keep its env.
+        var entry: [String: Any] = [:]
         for key in servers.keys where key.lowercased() == "geniuz" {
+            if let old = servers[key] as? [String: Any] { entry = old }
             servers.removeValue(forKey: key)
         }
-        servers["Geniuz"] = [
-            "command": binary,
-            "args": ["mcp", "serve"]
-        ]
+        entry["command"] = geniuzBinaryPath
+        entry["args"] = ["mcp", "serve"]
+        servers["Geniuz"] = entry
         config["mcpServers"] = servers
 
-        if let data = try? JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys]) {
-            try? data.write(to: URL(fileURLWithPath: claudeConfigPath))
+        guard let data = try? JSONSerialization.data(withJSONObject: config, options: [.prettyPrinted, .sortedKeys]),
+              (try? data.write(to: URL(fileURLWithPath: claudeConfigPath), options: .atomic)) != nil else {
+            NSLog("[geniuz-app] couldn't write the Claude Desktop config")
+            return
         }
+        writeMarker(connectedOnceMarker)
+        mcpInstalled = true
 
         // Snapshot Claude Desktop PIDs at configure time; banner clears when they all exit
-        // and at least one replacement has launched.
+        // and at least one replacement has launched. If Claude isn't open, it'll load Geniuz when it opens.
         let runningClaudes = NSWorkspace.shared.runningApplications
             .filter { $0.bundleIdentifier == claudeBundleID }
             .map { $0.processIdentifier }
         claudeAtConfigureTime = Set(runningClaudes)
         claudeSeenAfterConfigure = []
-        restartRequired = true
+        restartRequired = !runningClaudes.isEmpty
 
         NSLog("[geniuz-app] configured — Claude PIDs at configure time: %@",
               claudeAtConfigureTime.map(String.init).joined(separator: ","))
 
-        refresh()
+        if thenOfferRestart && restartRequired {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.offerClaudeRestart() }
+        }
+    }
+
+    private func offerClaudeRestart() {
+        guard restartRequired else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Geniuz is connected to Claude Desktop"
+        alert.informativeText = "Restart Claude once to start using it."
+        alert.addButton(withTitle: "Restart Claude")
+        alert.addButton(withTitle: "Later")
+        if alert.runModal() == .alertFirstButtonReturn {
+            restartClaude()
+        }
+    }
+
+    func restartClaude() {
+        let running = NSWorkspace.shared.runningApplications.filter { $0.bundleIdentifier == claudeBundleID }
+        guard let url = running.first?.bundleURL
+                ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: claudeBundleID) else { return }
+        running.forEach { $0.terminate() }
+        reopen(url, attempts: 40)
+    }
+
+    /// Claude may ask to save or take a moment to quit, so wait for it rather than guess.
+    private func reopen(_ url: URL, attempts: Int) {
+        let stillOpen = NSWorkspace.shared.runningApplications.contains { $0.bundleIdentifier == claudeBundleID }
+        if stillOpen {
+            guard attempts > 0 else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.reopen(url, attempts: attempts - 1)
+            }
+            return
+        }
+        NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration()) { _, _ in }
+    }
+
+    /// A menubar app shows nothing when it opens, so the first launch opens the dashboard.
+    func welcomeOnFirstLaunch() {
+        guard !runningFromTemporaryLocation,
+              !FileManager.default.fileExists(atPath: welcomedMarker) else { return }
+        writeMarker(welcomedMarker)
+        openDashboard()
+    }
+
+    // MARK: - Claude Code
+
+    var claudeCodePresent: Bool {
+        FileManager.default.fileExists(atPath: "\(realHome)/.claude")
+    }
+
+    func checkClaudeCodeConnected() -> Bool {
+        guard let data = FileManager.default.contents(atPath: "\(realHome)/.claude.json"),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let servers = json["mcpServers"] as? [String: Any] else { return false }
+        return servers.keys.contains { $0.lowercased() == "geniuz" }
+    }
+
+    /// Only when asked: this reaches every Claude Code session on the computer.
+    func connectClaudeCode() {
+        let binary = geniuzBinaryPath
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+            process.arguments = ["-lc", "claude mcp add --scope user Geniuz -- \"$GENIUZ_BIN\" mcp serve"]
+            var env = ProcessInfo.processInfo.environment
+            env["GENIUZ_BIN"] = binary
+            process.environment = env
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            let ok = (try? process.run()) != nil && { process.waitUntilExit(); return process.terminationStatus == 0 }()
+            DispatchQueue.main.async {
+                self?.claudeCodeConnected = ok && (self?.checkClaudeCodeConnected() ?? false)
+                self?.claudeCodeFailed = !ok
+            }
+        }
     }
 
     // MARK: - Claude Desktop lifecycle
@@ -607,5 +758,70 @@ class GeniuzService: ObservableObject {
         }
         settingsWindowController?.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+}
+
+
+// MARK: - Move to Applications
+
+/// macOS runs a downloaded app that hasn't been dragged to Applications from a random
+/// path that disappears when it quits. Offer to fix that before anything points there.
+enum ApplicationsMover {
+    private static let destination = "/Applications/Geniuz.app"
+
+    static var isNeeded: Bool {
+        let path = Bundle.main.bundlePath
+        return path.contains("/AppTranslocation/") || path.hasPrefix("/Volumes/")
+    }
+
+    static func offer() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Move Geniuz to Applications?"
+        alert.informativeText = "Geniuz needs to be in Applications to stay connected to Claude."
+        alert.addButton(withTitle: "Move to Applications")
+        alert.addButton(withTitle: "Quit")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            NSApp.terminate(nil)
+            return
+        }
+        do {
+            try move()
+            run("/usr/bin/open", ["-n", destination])
+        } catch {
+            let failed = NSAlert()
+            failed.messageText = "Couldn't move Geniuz"
+            failed.informativeText = "Drag Geniuz to Applications in Finder, then open it from there. Details: \(error.localizedDescription)"
+            failed.runModal()
+        }
+        NSApp.terminate(nil)
+    }
+
+    private static func move() throws {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: destination) {
+            // An older copy goes to the Trash, so it can still be recovered. Memories aren't in it.
+            let me = NSRunningApplication.current.processIdentifier
+            NSWorkspace.shared.runningApplications
+                .filter { $0.bundleIdentifier == Bundle.main.bundleIdentifier && $0.processIdentifier != me }
+                .forEach { $0.terminate() }
+            try fm.trashItem(at: URL(fileURLWithPath: destination), resultingItemURL: nil)
+        }
+        guard run("/usr/bin/ditto", [Bundle.main.bundlePath, destination]) == 0 else {
+            throw CocoaError(.fileWriteNoPermission)
+        }
+        run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", destination])
+    }
+
+    @discardableResult
+    private static func run(_ tool: String, _ arguments: [String]) -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: tool)
+        process.arguments = arguments
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return -1 }
+        process.waitUntilExit()
+        return process.terminationStatus
     }
 }

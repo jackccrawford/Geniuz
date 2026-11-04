@@ -20,7 +20,7 @@ curl -fsSL https://raw.githubusercontent.com/jackccrawford/geniuz/main/install.s
 
 | You use | Do this |
 |---|---|
-| Claude Desktop | **Configure Claude Connection** in the menubar, or `geniuz mcp install`, then restart Claude Desktop |
+| Claude Desktop | Connects by itself when Geniuz opens. Restart Claude Desktop once. To connect by hand: `geniuz mcp install` |
 | Anything else that speaks MCP | Add `geniuz mcp serve` as a server |
 | Anything that can run a command | `geniuz skill` prints a guide to give your agent |
 

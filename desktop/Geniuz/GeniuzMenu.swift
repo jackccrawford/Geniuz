@@ -16,16 +16,7 @@ struct GeniuzMenu: View {
             }
 
             Divider()
-            if service.runningFromTemporaryLocation {
-                moveToApplicationsNotice
-            } else {
-                connectionStatus
-
-                if !service.cliOnPath {
-                    Divider()
-                    cliInstallSection
-                }
-            }
+            connectionStatus
 
             Divider()
             openDashboardRow
@@ -252,21 +243,6 @@ struct GeniuzMenu: View {
         .padding(.vertical, 4)
     }
 
-    // MARK: - Running from a temporary location
-
-    private var moveToApplicationsNotice: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Move Geniuz to Applications")
-                .font(.system(size: 12, weight: .semibold))
-            Text("It's running from a temporary location, so connections to Claude wouldn't last. Quit, drag Geniuz to Applications in Finder, and open it from there.")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
     // MARK: - Connection status (footer row above Quit)
 
     private var connectionStatus: some View {
@@ -275,14 +251,15 @@ struct GeniuzMenu: View {
                 Image(systemName: service.mcpInstalled ? "checkmark.circle.fill" : "xmark.circle")
                     .foregroundColor(service.mcpInstalled ? .green : .orange)
                     .font(.system(size: 13))
-                Text(service.mcpInstalled ? "Claude Desktop connected" : "Claude Desktop not configured")
+                Text(connectionText)
                     .font(.system(size: 12))
                     .foregroundColor(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
             }
 
-            if !service.mcpInstalled {
-                Button("Configure Claude Connection") {
+            if !service.mcpInstalled && service.claudeFound && !service.claudeConfigUnreadable {
+                Button("Connect to Claude Desktop") {
                     service.configureClaudeConnection()
                 }
                 .buttonStyle(.borderedProminent)
@@ -291,19 +268,23 @@ struct GeniuzMenu: View {
             }
 
             if service.mcpInstalled && service.restartRequired {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.yellow)
-                        .font(.caption)
-                    Text("Restart Claude Desktop to activate Geniuz.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                Button("Restart Claude to finish") {
+                    service.restartClaude()
                 }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.orange)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    private var connectionText: String {
+        if service.mcpInstalled { return "Claude Desktop connected" }
+        if service.claudeConfigUnreadable { return "Claude Desktop's settings file couldn't be read, so Geniuz left it alone." }
+        if !service.claudeFound { return "Geniuz will connect when Claude Desktop is installed." }
+        return "Claude Desktop not connected"
     }
 
     // MARK: - Quit row (Mac convention: last menu-style item)
@@ -323,47 +304,6 @@ struct GeniuzMenu: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-    }
-
-    // MARK: - CLI install section (kept from prior layout)
-
-    private var cliInstallSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 6) {
-                Image(systemName: "terminal")
-                    .foregroundColor(.secondary)
-                    .font(.caption)
-                Text("Use Geniuz from Terminal")
-                    .font(.caption)
-            }
-
-            if service.cliCopyConfirmation {
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.green)
-                        .font(.caption)
-                    Text("Command copied. Paste into Terminal and press Return.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.top, 2)
-            } else {
-                Button("Copy Install Command") {
-                    service.copyCliInstallCommand()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                Text("Copies a one-line `sudo` command. Paste into Terminal to add `geniuz` to your PATH.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 2)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
     }
 
     // MARK: - Helpers
@@ -389,6 +329,40 @@ struct GeniuzSettingsView: View {
         Form {
             Section("General") {
                 Toggle("Launch at login", isOn: launchAtLoginBinding)
+            }
+
+            if service.claudeCodePresent {
+                Section("Claude Code") {
+                    if service.claudeCodeConnected {
+                        Label("Connected", systemImage: "checkmark.circle.fill")
+                    } else {
+                        Button("Connect Claude Code") { service.connectClaudeCode() }
+                        Text("Gives every Claude Code session on this computer access to your memories.")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        if service.claudeCodeFailed {
+                            Text("That didn't work. In Terminal, run: claude mcp add --scope user Geniuz -- \"\(service.geniuzBinaryPath)\" mcp serve")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+
+            Section("Command line") {
+                if service.cliOnPath {
+                    Label("The geniuz command is ready", systemImage: "checkmark.circle.fill")
+                } else if service.cliCopyConfirmation {
+                    Text("Command copied. Paste it into Terminal and press Return.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                } else {
+                    Button("Copy Install Command") { service.copyCliInstallCommand() }
+                    Text("Optional, for using geniuz in Terminal. Connecting your AI doesn't need it.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Section("Display") {

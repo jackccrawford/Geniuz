@@ -52,6 +52,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // open, leaving the menubar item as the always-on Geniuz presence.
         NSApp.setActivationPolicy(.accessory)
 
+        if ApplicationsMover.isNeeded {
+            ApplicationsMover.offer()
+            return
+        }
+
         service = GeniuzService()
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -86,6 +91,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self = self, self.popover.isShown else { return }
             self.popover.performClose(nil)
         }
+
+        service.welcomeOnFirstLaunch()
     }
 
     @objc func togglePopover() {
