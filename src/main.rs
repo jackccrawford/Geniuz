@@ -142,16 +142,22 @@ fn launch_dashboard() -> Result<(), String> {
 static IN_FOLDER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
 
 /// Which database this command uses. One resolver for everything in this binary.
+/// One specific memory file. `GENIUZ_STATION` is its older name, still honored
+/// because fleet scripts may set it.
+fn explicit_db_env() -> Option<String> {
+    std::env::var("GENIUZ_DB").or_else(|_| std::env::var("GENIUZ_STATION")).ok()
+}
+
 pub fn resolve_db_path() -> Result<PathBuf, String> {
     let flag = IN_FOLDER.get().and_then(|f| f.as_deref());
-    let env_station = std::env::var("GENIUZ_STATION").ok();
+    let env_station = explicit_db_env();
     let cwd = std::env::current_dir().ok();
     geniuz::folders::Registry::from_env().resolve(flag, env_station.as_deref(), cwd.as_deref())
 }
 
 pub fn get_db() -> Result<db::DatabaseManager, String> {
     // An explicit file path may name a store to be created, as it always could.
-    if std::env::var("GENIUZ_STATION").is_ok_and(|s| !s.is_empty()) && IN_FOLDER.get().and_then(|f| f.as_deref()).is_none() {
+    if explicit_db_env().is_some_and(|s| !s.is_empty()) && IN_FOLDER.get().and_then(|f| f.as_deref()).is_none() {
         return db::DatabaseManager::new(&resolve_db_path()?.to_string_lossy());
     }
     open_resolved(resolve_db_path)
@@ -211,7 +217,7 @@ fn recall_grep(
     )).collect();
     let found: Vec<&str> = dig.hits.iter().map(|h| h.line.as_str()).collect();
     let own: Vec<String> = dig.hits.iter().map(|h| h.memory_uuid.clone()).collect();
-    lines.extend(geniuz::dig::Harvest::of(&found, &terms.describe(), &own).lines());
+    lines.extend(geniuz::dig::Harvest::of(&found, &terms.describe(), &own).resolving(db).lines());
     lines.push(scope);
     Ok(lines.join("\n"))
 }
@@ -345,7 +351,7 @@ fn recall_all(
     if !found.skipped.is_empty() {
         lines.push(format!("Couldn't read: {}", found.skipped.join(", ")));
     }
-    lines.push(format!("searched: {} folders · {} memories · {}", found.searched, found.memories, mode));
+    lines.push(format!("searched: {} · {} · {}", geniuz::dig::count(found.searched, "folder", "folders"), geniuz::dig::count(found.memories, "memory", "memories"), mode));
     Ok(lines.join("\n"))
 }
 

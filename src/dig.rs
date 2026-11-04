@@ -208,6 +208,9 @@ pub struct Harvest {
     pub names: Vec<(String, usize)>,
     /// `XXXXXXXX:YYYYYYYY` signal pointers and bare 8-hex memory ids.
     pub pointers: Vec<String>,
+    /// Addresses in the text that lead nowhere here. They may name a station elsewhere,
+    /// so they're labeled and not hidden.
+    pub not_found: Vec<String>,
 }
 
 impl Harvest {
@@ -266,7 +269,31 @@ impl Harvest {
         names.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
         names.truncate(8);
         pointers.truncate(12);
-        Harvest { names, pointers }
+        Harvest { names, pointers, not_found: Vec::new() }
+    }
+
+    /// Separate the pointers that lead somewhere from those that don't. A memory can't be
+    /// edited, so an address in its text outlives whatever it named.
+    pub fn resolving(mut self, db: &crate::db::DatabaseManager) -> Self {
+        if self.pointers.is_empty() {
+            return self;
+        }
+        let folders = crate::folders::Registry::from_env().scan().folders;
+        let in_db = |db: &crate::db::DatabaseManager, id: &str| {
+            db.get_by_uuid_prefix(&id.to_lowercase()).ok().flatten().is_some()
+        };
+        let resolves = |p: &String| match p.split_once(':') {
+            Some((folder, memory)) => folders
+                .iter()
+                .find(|f| f.short_id().eq_ignore_ascii_case(folder))
+                .and_then(|f| crate::db::DatabaseManager::open_existing(&f.db_path.to_string_lossy()).ok())
+                .is_some_and(|other| in_db(&other, memory)),
+            None => in_db(db, p) || folders.iter().any(|f| f.short_id().eq_ignore_ascii_case(p)),
+        };
+        let (live, dead) = std::mem::take(&mut self.pointers).into_iter().partition(resolves);
+        self.pointers = live;
+        self.not_found = dead;
+        self
     }
 
     /// The closing lines, before the scope: `names seen: Cubic (3), Devin (2)`
@@ -280,8 +307,16 @@ impl Harvest {
         if !self.pointers.is_empty() {
             out.push(format!("pointers: {}", self.pointers.join(", ")));
         }
+        if !self.not_found.is_empty() {
+            out.push(format!("pointers not found here: {}", self.not_found.join(", ")));
+        }
         out
     }
+}
+
+/// `1 folder`, `2 folders`.
+pub fn count(n: usize, one: &str, many: &str) -> String {
+    format!("{} {}", n, if n == 1 { one } else { many })
 }
 
 /// Whether `w` looks like a proper name and not code: a capital, then

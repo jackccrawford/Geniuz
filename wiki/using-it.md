@@ -133,7 +133,7 @@ Read the schema freely, and write through Geniuz, which keeps embeddings and ide
 | Variable | What it does |
 |---|---|
 | `GENIUZ_HOME` | Where Geniuz keeps its files |
-| `GENIUZ_STATION` | Use one specific memory file, for the CLI and MCP |
+| `GENIUZ_DB` | Use one specific memory file, for the CLI and MCP |
 | `GENIUZ_MODELS_PATH` | Where the model is stored |
 | `GENIUZ_EMBED_URL`, `GENIUZ_EMBED_MODEL` | The embedding service to try if the built-in model fails to load |
 | `GENIUZ_EMBED_SOCKET`, `GENIUZ_EMBED_SPAWN`, `GENIUZ_EMBED_IDLE` | Control the embed helper |

@@ -296,7 +296,7 @@ impl Registry {
     }
 
     /// Which database a command should use. In order: the `--in` flag, the
-    /// `GENIUZ_STATION` file path, a `.geniuz-folder` file here or in a parent
+    /// `GENIUZ_DB` file path, a `.geniuz-folder` file here or in a parent
     /// directory, the current folder, then the first folder.
     pub fn resolve(
         &self,

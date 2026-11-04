@@ -12,7 +12,7 @@
 | Allow list | The directories you added, where Geniuz looks for folders besides its own data directory. |
 | Pin | Keeping a folder at the top of every list. |
 | Archive | Hiding a folder by moving it into `archive/`. Nothing is deleted, and it can be restored. |
-| Station | The older name for a folder. It survives in `GENIUZ_STATION` and in `station.db`, which Geniuz still reads. |
+| Station | The older name for a folder. It survives in `station.db`, which Geniuz still reads. |
 | Embedding | Numbers representing a memory's meaning, used to search by meaning. |
 | Backfill | Embedding memories that do not have one yet. |
 | Capture | Loading existing files into memory in bulk. |

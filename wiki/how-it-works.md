@@ -20,7 +20,7 @@ The same file serves many uses: a project, a standard, a knowledge base, persona
 
 Geniuz looks in two places: its data directory, and directories you added on purpose. It reads each one level down and never searches your disk. That decides what Geniuz shows. Your file permissions decide who can read, so a file it can't read is simply left out. The rules are in [`src/folders.rs`](../src/folders.rs).
 
-A command uses the first of these that applies: `--in <name>`, the `GENIUZ_STATION` file path, a `.geniuz-folder` file in this directory or a parent, the folder chosen with `geniuz folder use`, then "My memory". A name that matches nothing is an error, so a typo can't send a memory somewhere else. In the dashboard, Keep has a pulldown for the folder, and an open window stays with the folder it shows.
+A command uses the first of these that applies: `--in <name>`, the `GENIUZ_DB` file path, a `.geniuz-folder` file in this directory or a parent, the folder chosen with `geniuz folder use`, then "My memory". A name that matches nothing is an error, so a typo can't send a memory somewhere else. In the dashboard, Keep has a pulldown for the folder, and an open window stays with the folder it shows.
 
 ### One of each
 

@@ -88,7 +88,7 @@ html.os-linux .sidebar {
 .smsg__tag--plain { white-space: normal; }
 .smsg__gist { font-size: 15px; color: var(--s-ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .smsg__head time { font-size: 12px; color: var(--s-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.smsg__num { margin-left: auto; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+.smsg__num { margin-left: auto; flex-shrink: 0; white-space: nowrap; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
 .smsg__re { margin-top: 2px; font-size: 12.5px; color: var(--s-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .smsg__text {

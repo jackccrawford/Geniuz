@@ -8,7 +8,7 @@ use std::path::PathBuf;
     about = "Your AI remembers now",
     long_about = "GENIUZ: Your AI remembers now.\n\nPersistent memory for AI agents. Keep what matters, recall it later.\nWorks with any agent framework — Claude Code, Cursor, Windsurf, Aider,\nor anything that can run a shell command.",
     before_help = "Start here: 'geniuz recall' to see what's in your folder.",
-    after_help = "Examples:\n  geniuz tui                                 Browse memories in a terminal UI\n  geniuz keep -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recall                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nFolders: 'geniuz folder list' shows them, and --in <name> uses one for a command.\n  Multiple agents can share a folder for shared memory.\n\nData: Kept in .geniuz in your home directory\n  Override with GENIUZ_HOME to change where Geniuz keeps its data\n  Override with GENIUZ_STATION for a specific memory.db file\n\nUse \"geniuz [command] --help\" for more information."
+    after_help = "Examples:\n  geniuz tui                                 Browse memories in a terminal UI\n  geniuz keep -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recall                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nFolders: 'geniuz folder list' shows them, and --in <name> uses one for a command.\n  Multiple agents can share a folder for shared memory.\n\nData: Kept in .geniuz in your home directory\n  Override with GENIUZ_HOME to change where Geniuz keeps its data\n  Override with GENIUZ_DB for a specific memory.db file\n\nUse \"geniuz [command] --help\" for more information."
 )]
 pub struct Cli {
     /// Use this folder for the command: a name or its 8-character ID
@@ -230,7 +230,7 @@ pub enum Command {
     )]
     Dashboard,
 
-    /// MCP server for Claude Desktop — run, install, or check status
+    /// MCP server — run, install, or check status
     #[command(subcommand)]
     Mcp(McpCommand),
 

@@ -13,7 +13,7 @@
 ; mkdir failure.
 
 #define MyAppName "Geniuz"
-#define MyAppVersion "5.0.0"
+#define MyAppVersion "5.0.1"
 #define MyAppPublisher "Managed Ventures LLC"
 #define MyAppURL "https://geniuz.life"
 #define MyAppExeName "geniuz.exe"
@@ -166,6 +166,17 @@ begin
   Result := Pos(';' + LowerCase(Param) + ';', ';' + LowerCase(OrigPath) + ';') = 0;
 end;
 
+// A running copy would lock the files this installer has to replace.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM {#MyAppTrayExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM geniuz.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM geniuz-embed.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   OrigPath: string;
@@ -182,6 +193,10 @@ begin
     // name, geniuz-tray.exe, lingered here after the rename and left the
     // dashboard running through uninstall.
     Exec('taskkill.exe', '/F /IM {#MyAppTrayExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    // Claude Desktop may be running geniuz.exe mcp serve. Left alone, the exe stays
+    // behind and the old version keeps answering, with no uninstall entry.
+    Exec('taskkill.exe', '/F /IM geniuz.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Exec('taskkill.exe', '/F /IM geniuz-embed.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
     // PATH cleanup
     if RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', OrigPath) then
     begin

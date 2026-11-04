@@ -446,7 +446,7 @@ fn execute_grep_all(reg: &Registry, grep: &[String], window: &Window, args: &Val
     if !skipped.is_empty() {
         lines.push(format!("Couldn't read: {}", skipped.join(", ")));
     }
-    lines.push(format!("searched: {} folders · grep \"{}\"", searched, grep.join(" ")));
+    lines.push(format!("searched: {} · grep \"{}\"", geniuz::dig::count(searched, "folder", "folders"), grep.join(" ")));
     (lines.join("\n"), false)
 }
 
@@ -493,7 +493,7 @@ fn execute_recall_all(reg: &Registry, backend: Option<&dyn EmbeddingBackend>, ar
     if !found.skipped.is_empty() {
         lines.push(format!("Couldn't read: {}", found.skipped.join(", ")));
     }
-    lines.push(format!("searched: {} folders · {} memories", found.searched, found.memories));
+    lines.push(format!("searched: {} · {}", geniuz::dig::count(found.searched, "folder", "folders"), geniuz::dig::count(found.memories, "memory", "memories")));
     (lines.join("\n"), false)
 }
 
@@ -600,7 +600,7 @@ fn execute_grep(
     )).collect();
     let found: Vec<&str> = dig.hits.iter().map(|h| h.line.as_str()).collect();
     let own: Vec<String> = dig.hits.iter().map(|h| h.memory_uuid.clone()).collect();
-    lines.extend(geniuz::dig::Harvest::of(&found, &terms.describe(), &own).lines());
+    lines.extend(geniuz::dig::Harvest::of(&found, &terms.describe(), &own).resolving(db).lines());
     lines.push(scope);
     (lines.join("\n"), false)
 }
@@ -717,8 +717,19 @@ mod tests {
         let lines: Vec<&str> = out.lines().collect();
         let n = lines.len();
         assert_eq!(lines[n - 3], "names seen: Devin (2)", "{out}");
-        assert_eq!(lines[n - 2], "pointers: 00000000:87C1FADC", "{out}");
+        assert_eq!(lines[n - 2], "pointers not found here: 00000000:87C1FADC", "{out}");
         assert!(lines[n - 1].starts_with("searched: "), "{out}");
+    }
+
+    #[test]
+    fn a_pointer_to_a_memory_here_is_offered_as_live() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
+        let first = db.signal("the original", Some("first"), None, None).unwrap().uuid;
+        let id = first[..8].to_uppercase();
+        db.signal(&format!("see {id}"), Some("second"), None, None).unwrap();
+        let (out, _) = execute_recall(&db, &json!({ "query": "second", "limit": 1 }));
+        assert!(!out.contains("not found here"), "{out}");
     }
 
     /// recall with `grep` returns lines, and the terms can be a string or a list.

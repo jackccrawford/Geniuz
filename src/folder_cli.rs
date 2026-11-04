@@ -180,7 +180,7 @@ fn show(reg: &Registry, name: Option<&str>, json: bool) -> Result<String, String
             .folders
             .into_iter()
             .find(|f| is_in_use(f, &using))
-            .ok_or_else(|| "The database in use isn't one of your folders. GENIUZ_STATION may be set.".to_string())?,
+            .ok_or_else(|| "The database in use isn't one of your folders. GENIUZ_DB may be set.".to_string())?,
     };
     if json {
         return serde_json::to_string_pretty(&folder_json(&folder, is_in_use(&folder, &using)))

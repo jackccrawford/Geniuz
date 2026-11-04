@@ -3,6 +3,7 @@ import SQLite3
 import Combine
 import AppKit
 import SwiftUI
+import ServiceManagement
 
 // MARK: - Settings model
 //
@@ -71,7 +72,7 @@ class GeniuzService: ObservableObject {
     @Published var recentExpanded: Bool = false
     @Published var restartRequired: Bool = false
     @Published var cliOnPath: Bool = false
-    @Published var cliCopyConfirmation: Bool = false
+    @Published var cliInstallFailed: Bool = false
     @Published var settings: GeniuzSettings = GeniuzSettings()
 
     /// Optional callback fired after each state refresh so non-SwiftUI surfaces
@@ -141,6 +142,7 @@ class GeniuzService: ObservableObject {
         process.currentDirectoryURL = URL(fileURLWithPath: "/")
         var env = ProcessInfo.processInfo.environment
         env["GENIUZ_HOME"] = dataDir
+        env.removeValue(forKey: "GENIUZ_DB")
         env.removeValue(forKey: "GENIUZ_STATION")
         process.environment = env
         let out = Pipe()
@@ -336,24 +338,73 @@ class GeniuzService: ObservableObject {
         let fm = FileManager.default
         return fm.isExecutableFile(atPath: "/usr/local/bin/geniuz")
             || fm.isExecutableFile(atPath: "/opt/homebrew/bin/geniuz")
+            || fm.isExecutableFile(atPath: "\(realHome)/.local/bin/geniuz")
     }
 
-    /// Copies a ready-to-paste sudo command to the clipboard that symlinks the
-    /// bundled CLI into /usr/local/bin/geniuz. The user pastes into Terminal; the
-    /// app never attempts privileged execution itself (sandbox-friendly).
-    func copyCliInstallCommand() {
+    /// A folder on the person's PATH that's theirs needs no password. Otherwise macOS
+    /// asks for one, in its own dialog. No Terminal either way.
+    func installCommand() {
         guard !runningFromTemporaryLocation else { return }
         let bundled = geniuzBinaryPath
-        let command = "sudo ln -sf \"\(bundled)\" /usr/local/bin/geniuz"
-        let pb = NSPasteboard.general
-        pb.clearContents()
-        pb.setString(command, forType: .string)
-        NSLog("[geniuz-app] copied CLI install command: %@", command)
-
-        cliCopyConfirmation = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
-            self?.cliCopyConfirmation = false
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            let ok = self.linkIntoUserPath(bundled) || self.linkWithAdminPrompt(bundled)
+            DispatchQueue.main.async {
+                self.cliInstallFailed = !ok
+                self.cliOnPath = self.checkCliOnPath()
+            }
         }
+    }
+
+    private func linkIntoUserPath(_ bundled: String) -> Bool {
+        let fm = FileManager.default
+        let path = loginShellPath()
+        for dir in ["\(realHome)/.local/bin", "/opt/homebrew/bin"] {
+            guard fm.isWritableFile(atPath: dir), path?.contains(dir) ?? true else { continue }
+            let link = "\(dir)/geniuz"
+            // Replace an old link, but never a real file that isn't ours.
+            if (try? fm.destinationOfSymbolicLink(atPath: link)) != nil {
+                try? fm.removeItem(atPath: link)
+            } else if fm.fileExists(atPath: link) {
+                continue
+            }
+            if (try? fm.createSymbolicLink(atPath: link, withDestinationPath: bundled)) != nil {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func linkWithAdminPrompt(_ bundled: String) -> Bool {
+        let command = "mkdir -p /usr/local/bin && ln -sf '\(bundled)' /usr/local/bin/geniuz"
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", "do shell script \"\(command)\" with administrator privileges"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return false }
+        process.waitUntilExit()
+        return process.terminationStatus == 0
+    }
+
+    /// GUI apps don't read shell profiles, so ask the shell what PATH a terminal would have.
+    private func loginShellPath() -> [String]? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
+        process.arguments = ["-ilc", "print -r -- $PATH"]
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        process.standardInput = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return nil }
+        let timeout = DispatchWorkItem { process.terminate() }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 3, execute: timeout)
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        timeout.cancel()
+        guard process.terminationStatus == 0, let text = String(data: data, encoding: .utf8) else { return nil }
+        let lines = text.split(separator: "\n")
+        return lines.last.map { $0.split(separator: ":").map(String.init) }
     }
 
     // MARK: - Direct SQLite station read
@@ -623,10 +674,32 @@ class GeniuzService: ObservableObject {
 
     /// A menubar app shows nothing when it opens, so the first launch opens the dashboard.
     func welcomeOnFirstLaunch() {
-        guard !runningFromTemporaryLocation,
-              !FileManager.default.fileExists(atPath: welcomedMarker) else { return }
+        guard !runningFromTemporaryLocation else { return }
+        guard !FileManager.default.fileExists(atPath: welcomedMarker) else {
+            // Say what's true: someone may have turned this off in System Settings.
+            let enabled = SMAppService.mainApp.status == .enabled
+            if settings.launchAtLogin != enabled {
+                var next = settings
+                next.launchAtLogin = enabled
+                saveSettings(next)
+            }
+            return
+        }
         writeMarker(welcomedMarker)
+        applyLaunchAtLogin(settings.launchAtLogin)
         openDashboard()
+    }
+
+    private func applyLaunchAtLogin(_ on: Bool) {
+        do {
+            if on {
+                if SMAppService.mainApp.status != .enabled { try SMAppService.mainApp.register() }
+            } else if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            }
+        } catch {
+            NSLog("[geniuz-app] launch at login: %@", error.localizedDescription)
+        }
     }
 
     // MARK: - Claude Code
@@ -642,21 +715,36 @@ class GeniuzService: ObservableObject {
         return servers.keys.contains { $0.lowercased() == "geniuz" }
     }
 
+    /// Claude Code installs itself outside the PATH a GUI app gets.
+    private var claudeCodeBinary: String? {
+        let fm = FileManager.default
+        return ["\(realHome)/.local/bin/claude", "\(realHome)/.claude/local/claude",
+                "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
+            .first { fm.isExecutableFile(atPath: $0) }
+    }
+
     /// Only when asked: this reaches every Claude Code session on the computer.
     func connectClaudeCode() {
         let binary = geniuzBinaryPath
+        guard let claude = claudeCodeBinary else {
+            NSLog("[geniuz-app] Claude Code: no claude program in the usual places")
+            claudeCodeFailed = true
+            return
+        }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-            process.arguments = ["-lc", "claude mcp add --scope user Geniuz -- \"$GENIUZ_BIN\" mcp serve"]
-            var env = ProcessInfo.processInfo.environment
-            env["GENIUZ_BIN"] = binary
-            process.environment = env
+            process.executableURL = URL(fileURLWithPath: claude)
+            process.arguments = ["mcp", "add", "--scope", "user", "Geniuz", "--", binary, "mcp", "serve"]
             process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            let ok = (try? process.run()) != nil && { process.waitUntilExit(); return process.terminationStatus == 0 }()
+            let err = Pipe()
+            process.standardError = err
+            let ran = (try? process.run()) != nil
+            let detail = ran ? err.fileHandleForReading.readDataToEndOfFile() : Data()
+            if ran { process.waitUntilExit() }
+            let ok = ran && process.terminationStatus == 0
+            if !ok { NSLog("[geniuz-app] Claude Code connect failed: %@", String(decoding: detail, as: UTF8.self)) }
             DispatchQueue.main.async {
-                self?.claudeCodeConnected = ok && (self?.checkClaudeCodeConnected() ?? false)
+                self?.claudeCodeConnected = self?.checkClaudeCodeConnected() ?? false
                 self?.claudeCodeFailed = !ok
             }
         }
@@ -710,6 +798,9 @@ class GeniuzService: ObservableObject {
         var next = settings
         mutate(&next)
         saveSettings(next)
+        if next.launchAtLogin != settings.launchAtLogin || next.launchAtLogin {
+            applyLaunchAtLogin(next.launchAtLogin)
+        }
     }
 
     /// Launch the dashboard nested inside this app. Asking by URL scheme could reach a

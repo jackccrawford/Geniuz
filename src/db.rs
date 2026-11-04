@@ -659,7 +659,7 @@ impl DatabaseManager {
         }).collect();
         let refs: Vec<&str> = texts.iter().map(String::as_str).collect();
         let own: Vec<String> = entries.iter().map(|e| e.memory_uuid.clone()).collect();
-        crate::dig::Harvest::of(&refs, query, &own)
+        crate::dig::Harvest::of(&refs, query, &own).resolving(self)
     }
 
     /// How many memories lie inside `window` — the pool a windowed search drew from.

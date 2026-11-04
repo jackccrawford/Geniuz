@@ -353,13 +353,11 @@ struct GeniuzSettingsView: View {
             Section("Command line") {
                 if service.cliOnPath {
                     Label("The geniuz command is ready", systemImage: "checkmark.circle.fill")
-                } else if service.cliCopyConfirmation {
-                    Text("Command copied. Paste it into Terminal and press Return.")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
                 } else {
-                    Button("Copy Install Command") { service.copyCliInstallCommand() }
-                    Text("Optional, for using geniuz in Terminal. Connecting your AI doesn't need it.")
+                    Button("Install the geniuz command") { service.installCommand() }
+                    Text(service.cliInstallFailed
+                         ? "That didn't work. Connecting your AI doesn't need this command."
+                         : "Optional, for using geniuz in Terminal. Connecting your AI doesn't need it.")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }
@@ -383,7 +381,7 @@ struct GeniuzSettingsView: View {
                         .textSelection(.enabled)
                         .multilineTextAlignment(.trailing)
                 }
-                Text("Override by setting GENIUZ_HOME in your shell profile, then restart Geniuz.")
+                Text("The app always uses this location. GENIUZ_HOME in a shell changes where only the command line looks.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
             }
