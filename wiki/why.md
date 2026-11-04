@@ -22,6 +22,12 @@ A project, a knowledge base and a conversation between agents are the same file 
 
 Memories point at each other by address, so an ID that changes breaks every memory that mentions it. That is why a folder can be moved but not copied, and why Geniuz would rather refuse than guess.
 
+If a copy turns up anyway, every copy stops working until one is moved. Nothing can tell which is the original, and carrying on with the wrong one would split the history in two. That's disruptive when it happens, and we chose it knowingly: an error you can fix beats a loss you can't see.
+
+## The AI has to be told
+
+A memory nobody uses is worth nothing. In our tests, agents with good tools and no other guidance used Geniuz in 0 of 8 sessions. With a few sentences on when to recall and keep, all of them did, in the right folders. So the server says so when an AI connects. It is a small sample on one model, and the point stands: being available isn't the same as being used.
+
 ## Local by default
 
 Your memory is files on your computer. You can move them, back them up or read the code that touches them, and no account or API key stands between you and them.

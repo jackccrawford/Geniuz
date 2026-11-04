@@ -10,12 +10,14 @@
 | Folder | A directory holding one `memory.db`, with its own permanent UUID, name and description. |
 | Address | Two short IDs that open one memory from anywhere: `13625F6B:3487B9B0`, folder then memory. |
 | Allow list | The directories you added, where Geniuz looks for folders besides its own data directory. |
+| Pin | Keeping a folder at the top of every list. |
 | Archive | Hiding a folder by moving it into `archive/`. Nothing is deleted, and it can be restored. |
 | Station | The older name for a folder. It survives in `GENIUZ_STATION` and in `station.db`, which Geniuz still reads. |
 | Embedding | Numbers representing a memory's meaning, used to search by meaning. |
 | Backfill | Embedding memories that do not have one yet. |
 | Capture | Loading existing files into memory in bulk. |
-| Recall | Searching your memories, by meaning or exactly. |
+| Keep | Saving a memory. `remember` still works as another name for it. |
+| Recall | Searching your memories, by meaning or exactly. With nothing to search for, it shows the newest. |
 | Harvest | What a recall's results point onward to, read from those memories. |
 | MCP | Model Context Protocol, a standard way for AI tools to call other programs. |
 | Embed helper | `geniuz-embed`, which keeps the model loaded between calls. |

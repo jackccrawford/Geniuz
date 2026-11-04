@@ -18,9 +18,11 @@ The script installs to `~/.geniuz/bin/`. To build from source, see the [README](
 
 | You use | Next step |
 |---|---|
-| Claude Desktop | `geniuz mcp install`, then restart Claude Desktop |
+| Claude Desktop | **Configure Claude Connection** in the menubar, or `geniuz mcp install`, then restart Claude Desktop |
 | Claude Code, Cursor, Windsurf | `geniuz skill` prints instructions to give your agent |
 | Your own agents | Call `geniuz keep` and `geniuz recall` from a shell, or run `geniuz mcp serve` |
+
+Then keep talking. Your AI saves what matters as you go. Tomorrow, in a new chat, ask it what you told it today.
 
 ## Commands
 
@@ -77,9 +79,30 @@ geniuz folder pin Clients
 geniuz folder unpin Clients
 ```
 
-In the dashboard, folders are in the sidebar and in the Folders menu, where the first nine have a shortcut. Pinned folders come first in every list. Keep has a pulldown for choosing a folder, and Find can search any selection of them. You can change the keyboard shortcuts in Settings. To give a project its own folder, put the folder's name in a `.geniuz-folder` file in the project.
+In the dashboard, folders are in the sidebar and in the Folders menu. Click the pin beside a name to keep it at the top of every list. Keep has a pulldown for choosing a folder, and Find can search any selection of them. To give a project its own folder, put the folder's name in a `.geniuz-folder` file in the project.
 
 Editing a description keeps the old wording. Your first folder, "My memory", can be renamed, but it can't be moved or archived, because other files live beside it.
+
+## Keyboard shortcuts
+
+In the dashboard. Change any of these under Settings, and the menu follows at once.
+
+| Keys, on a Mac | What they do |
+|---|---|
+| ⌘N | Keep |
+| ⌘K | Find |
+| ⌘0 | Memories in this folder |
+| ⌘1 to ⌘9 | Your first nine folders, in sidebar order (not changeable) |
+| ⇧⌘N | New folder |
+| ⌘B | Show or hide the sidebar |
+| ⇧⌘S | Status |
+| ⌘, | Settings |
+| ⇧⌘E | Export this folder |
+| ⌘R | Refresh |
+
+On Windows and Linux, use Ctrl in place of ⌘.
+
+## Good to know
 
 **Note on `geniuz watch --exec`.** Your command runs through the shell with your own rights. `{gist}`, `{content}` and `{json}` reach it as shell variables, so put them in double quotes, not single. Shell syntax in a memory does not run.
 
@@ -87,7 +110,7 @@ Editing a description keeps the old wording. Your first folder, "My memory", can
 
 ## Where your data lives
 
-Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory per folder you made, `archive/`, `models/`, `settings.json` and `bin/`. Two small files say where to look: `current`, the folder in use, and `added-folders`, your allow list.
+Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory per folder you made, `archive/`, `models/`, `settings.json` and `bin/`. A few small files hold your choices: `current`, `added-folders`, `pinned-folders` and `shortcuts.json`.
 
 **To back up**, use Export under Data & Export in the dashboard, which saves the folder in use as one complete file. Time Machine and similar tools are fine too. A backup is a file to keep, not a folder to use: it holds the same permanent IDs, so Geniuz refuses it while the original is present.
 

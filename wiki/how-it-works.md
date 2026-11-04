@@ -1,6 +1,10 @@
 # How it works
 
-Geniuz is a Rust core and SQLite files. Everything else is a way of reaching them.
+Your AI saves what matters as you work, and finds it again in the next conversation. Underneath, Geniuz is a Rust core and SQLite files, and everything else is a way of reaching them.
+
+## How your AI knows to use it
+
+When an AI tool connects, Geniuz tells it what to do: recall at the start of a conversation, and before finishing a task, keep what a future session would need and could not get from the files, such as decisions and why, people, preferences and constraints. This is part of the [MCP server](../src/mcp.rs). Tool descriptions alone weren't enough: in our tests, agents ignored them until they had this guidance.
 
 ## What a memory is
 
@@ -10,13 +14,13 @@ Memories are stored in the `memories` table of [`schema/schema.sql`](../schema/s
 
 ## What a folder is
 
-A folder is a directory holding one `memory.db`. Its identity is inside that file: a UUID, a name, a description and when it was made, in the `_meta` table of [`schema/schema.sql`](../schema/schema.sql). So a folder can be renamed, or moved anywhere, and is still the same folder. The first one is `~/.geniuz/memory.db`, called "My memory", and it stays where it is.
+A folder is a directory holding one `memory.db`. Its identity is inside that file: a UUID, a name, a description and when it was made, in the `_meta` table of [`schema/schema.sql`](../schema/schema.sql). So a folder can be renamed, or moved anywhere, and is still the same folder. The first one is `~/.geniuz/memory.db`, called "My memory", and it stays where it is. Pinned folders come first in every list.
 
 The same file serves many uses: a project, a standard, a knowledge base, personal notes, what an agent keeps between sessions, messages between agents. There are no folder types. The description says what a folder is for, and the prompt for writing one is "What should whoever comes here next know?"
 
-Geniuz looks in two kinds of place: its data directory, and directories you added on purpose. It reads each one level down and never searches your disk. That list decides what Geniuz shows. Your file permissions decide who can read, so a file it can't read is simply left out. The rules are in [`src/folders.rs`](../src/folders.rs).
+Geniuz looks in two places: its data directory, and directories you added on purpose. It reads each one level down and never searches your disk. That decides what Geniuz shows. Your file permissions decide who can read, so a file it can't read is simply left out. The rules are in [`src/folders.rs`](../src/folders.rs).
 
-A command uses the first of these that applies: `--in <name>`, the `GENIUZ_STATION` file path, a `.geniuz-folder` file in this directory or a parent, the folder chosen with `geniuz folder use`, then "My memory". A name that matches nothing is an error, so a typo can't send a memory somewhere else.
+A command uses the first of these that applies: `--in <name>`, the `GENIUZ_STATION` file path, a `.geniuz-folder` file in this directory or a parent, the folder chosen with `geniuz folder use`, then "My memory". A name that matches nothing is an error, so a typo can't send a memory somewhere else. In the dashboard, Keep has a pulldown for the folder, and an open window stays with the folder it shows.
 
 ### One of each
 
@@ -51,7 +55,7 @@ Other kinds of recall skip meaning entirely:
 | `--keyword "exact words"` | Keyword search |
 | `--random` | Something you may have forgotten |
 
-Two more forms reach across folders. `recall --all "topic"` searches every folder and shows each result with its address. `recall 13625F6B:3487B9B0` opens that memory in full, whichever folder it is in.
+Two more forms reach across folders. `recall --all "topic"` searches every folder and shows each result with its address. `recall 13625F6B:3487B9B0` opens that memory in full, whichever folder it is in. In the dashboard, Find can search any selection of folders, and an address in a memory's text can be clicked.
 
 The reason is in [`src/dig.rs`](../src/dig.rs): "Semantic search is for discovery; exact search is for recall".
 
