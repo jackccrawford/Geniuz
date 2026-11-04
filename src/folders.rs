@@ -1402,11 +1402,11 @@ mod tests {
     #[test]
     fn create_elsewhere_goes_on_the_list() {
         let (tmp, reg) = setup();
-        let at = tmp.path().join("LIMEN");
-        let f = reg.create("Limen", "", Some(&at)).unwrap();
+        let at = tmp.path().join("notes");
+        let f = reg.create("Notes", "", Some(&at)).unwrap();
         assert!(f.db_path.starts_with(&at));
         assert_eq!(reg.added(), vec![canonical(&at)]);
-        assert_eq!(reg.find("limen").unwrap().uuid, f.uuid);
+        assert_eq!(reg.find("notes").unwrap().uuid, f.uuid);
     }
 
     #[test]
