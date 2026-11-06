@@ -61,7 +61,6 @@ struct RecentMemory {
     gist: String,
     content: Option<String>,
     created_at: String,
-    category: Option<String>,
     parent_uuid: Option<String>,
     /// Which folder it came from, when a search covered more than the one on screen.
     folder: Option<String>,
@@ -112,7 +111,6 @@ struct MemoryDetail {
     content: Option<String>,
     created_at: String,
     parent_uuid: Option<String>,
-    category: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -723,35 +721,15 @@ fn get_data_dir() -> String {
 // Helpers
 // -------------------------------------------------------------------------
 
-/// Extract a category from a gist by splitting on the earliest separator
-/// (`|`, `;`, or `:`). Returns `None` when no separator is present, the
-/// prefix is empty, or the prefix is too long to be a shelf label (>= 40
-/// chars). Matches the TUI's `split_gist` discipline so the dashboard chip
-/// and the TUI category render the same way.
-/// The gist's leading field, the same rule as splitGist in stream-ui.js: a
-/// separator within the first 40 characters, and at most three words before it.
-/// A reading aid only; nothing groups or filters on it.
-fn extract_category(gist: &str) -> Option<String> {
-    let positions = [gist.find('|'), gist.find(';'), gist.find(':')];
-    let earliest = positions.into_iter().flatten().filter(|&i| i > 0).min()?;
-    if gist[..earliest].chars().count() >= 40 {
-        return None;
-    }
-    let cat = gist[..earliest].trim().to_string();
-    if cat.is_empty() || cat.split_whitespace().count() > 3 {
-        return None;
-    }
-    Some(cat)
-}
+// No category is read out of a gist. Meaning is the writer's, in the words,
+// and the app shows the gist whole (Jack, 2026-11-06).
 
 fn map_recent(e: SignalEntry) -> RecentMemory {
-    let category = extract_category(&e.gist);
     RecentMemory {
         uuid: e.memory_uuid,
         gist: e.gist,
         content: e.content,
         created_at: e.created_at,
-        category,
         parent_uuid: e.parent_uuid,
         folder: None,
         folder_name: None,
@@ -759,14 +737,12 @@ fn map_recent(e: SignalEntry) -> RecentMemory {
 }
 
 fn map_detail(e: SignalEntry) -> MemoryDetail {
-    let category = extract_category(&e.gist);
     MemoryDetail {
         uuid: e.memory_uuid,
         gist: e.gist,
         content: e.content,
         created_at: e.created_at,
         parent_uuid: e.parent_uuid,
-        category,
     }
 }
 

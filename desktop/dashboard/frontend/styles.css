@@ -1034,8 +1034,6 @@ html.os-linux {
   overflow-wrap: anywhere;
 }
 .reply-chosen__gist { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.reply-result__gist b,
-.reply-chosen__gist b { font-weight: 700; }
 .reply-result__meta,
 .reply-chosen__id {
   font-size: var(--fs-meta);

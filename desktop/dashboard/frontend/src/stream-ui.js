@@ -1,7 +1,7 @@
-// stream-ui.js — the pieces the memory stream draws with: a mark per
-// category, the words of a memory, and times. The same hand as Geniuz
-// Team's room (exchange-ui.js), without the people: Free's memories have no
-// speakers, so a memory's category wears the colour a member would.
+// stream-ui.js — the pieces the memory stream draws with: a memory's place
+// in its tree, its words, and times. The same hand as Geniuz Team's room
+// (exchange-ui.js), without the people. Nothing here reads a category or a
+// speaker out of the words: those belong to the writer.
 
 import { parseSqliteIso } from './format.js';
 
@@ -14,17 +14,6 @@ export function esc(s) {
     .replace(/'/g, '&#39;');
 }
 
-
-/** The short tag before the gist's first separator, if it reads as one. */
-export function splitGist(gist) {
-  const g = String(gist || '');
-  const at = ['|', ';', ':'].map((c) => g.indexOf(c)).filter((i) => i > 0 && i < 40);
-  if (!at.length) return { tag: null, rest: g };
-  const i = Math.min(...at);
-  const tag = g.slice(0, i).trim();
-  if (!tag || tag.split(/\s+/).length > 3) return { tag: null, rest: g };
-  return { tag, rest: g.slice(i + 1).trim() };
-}
 
 /**
  * A memory's body, without repeating its gist. A gist left blank is taken from

@@ -84,8 +84,6 @@ html.os-linux .sidebar {
 .snode--reply { color: color-mix(in oklab, var(--s-teal) 60%, var(--s-paper)); }
 
 .smsg__head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.smsg__tag { font-family: var(--s-name); font-weight: 700; font-size: 15px; color: var(--s-ink); white-space: nowrap; }
-.smsg__tag--plain { white-space: normal; }
 .smsg__gist { font-size: 15px; color: var(--s-ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .smsg__head time { font-size: 12px; color: var(--s-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .smsg__num { margin-left: auto; flex-shrink: 0; white-space: nowrap; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
@@ -148,7 +146,7 @@ html.os-linux .sidebar {
   border-top: 1px solid var(--s-line);
 }
 .smsg--child { grid-template-columns: 48px minmax(0, 1fr); padding-top: 6px; padding-bottom: 6px; }
-.smsg--child .smsg__tag, .smsg--child .smsg__gist, .smsg--child .smsg__text { font-size: 14px; }
+.smsg--child .smsg__gist, .smsg--child .smsg__text { font-size: 14px; }
 .smsg__gutter .stwisty { margin-top: 0; }
 .smsg.is-here { background: color-mix(in oklab, var(--s-teal) 12%, var(--s-paper)); box-shadow: inset 2px 0 0 var(--s-teal); }
 .s-tree-err { margin: 4px 0 8px 52px; color: var(--s-terra); font-size: 13px; }
@@ -213,7 +211,6 @@ html.os-linux .sidebar {
 .memory-modal__head { display: flex; gap: 12px; align-items: flex-start; padding-right: 28px; }
 .memory-modal__head .snode { flex: none; margin-top: 2px; }
 .memory-modal__titles { min-width: 0; display: grid; gap: 3px; }
-.memory-modal__tag { font-size: 13px; font-weight: 700; color: var(--s-ink); }
 .memory-modal__gist {
   margin: 0;
   font-family: "Newsreader", Georgia, serif;

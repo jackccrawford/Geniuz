@@ -34,14 +34,12 @@ const SHORT_ID = /^[0-9a-f]{8}$/i;
 
 const address = (folder, uuid) => `${String(folder).slice(0, 8)}:${String(uuid).slice(0, 8)}`.toUpperCase();
 
-// A gist as written, with its leading field in bold as the memory list shows it.
-// Only a reading aid: a gist is written for the next reader, often an agent in
-// thoughtform ("fix | auth_middleware | bug:token_refresh"), where every field
-// carries weight. So it is shown whole, never sorted or filtered by.
+// A gist exactly as written, nothing singled out, as everywhere in the app.
+// It is written for the next reader, often an agent in thoughtform
+// ("fix | auth_middleware | bug:token_refresh"), where every field carries
+// weight. So it is shown whole, never parsed, sorted or filtered by.
 function gistHtml(gist) {
-  const { tag, rest } = su.splitGist(gist || '');
-  if (!gist) return '(no gist)';
-  return tag ? `<b>${su.esc(tag)}</b> ${su.esc(rest)}` : su.esc(gist);
+  return gist ? su.esc(gist) : '(no gist)';
 }
 
 /**
@@ -202,7 +200,7 @@ export async function mount(container) {
   const setGistHint = () => {
     gistHint.textContent = reply
       ? '· your answer in a line. The memory you\'re replying to is who this wakes'
-      : '· who it\'s for and what it asks, e.g. "Pen: please check the 0.620 score"';
+      : '· who it\'s for and what it asks, e.g. "Pen, please check the 0.620 score"';
   };
 
   const setReply = (m) => {

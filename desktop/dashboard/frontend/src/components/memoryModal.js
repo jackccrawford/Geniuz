@@ -64,7 +64,6 @@ export async function openMemory(uuid, { onClose, folder = null } = {}) {
     return;
   }
 
-  const { tag, rest } = su.splitGist(m.gist || '');
   const text = su.bodyAfterGist(m.content, m.gist);
   // The full address works from any folder, so that's what gets copied.
   const folderId = folder || (getState().folders?.folders || []).find((f) => f.current)?.uuid || '';
@@ -73,8 +72,7 @@ export async function openMemory(uuid, { onClose, folder = null } = {}) {
     <header class="memory-modal__head">
       ${su.node(!!m.parent_uuid && String(m.parent_uuid).toUpperCase() !== String(m.uuid).toUpperCase())}
       <div class="memory-modal__titles">
-        ${tag ? `<div class="memory-modal__tag">${su.esc(tag)}</div>` : ''}
-        <h2 class="memory-modal__gist">${su.esc(tag ? rest : (m.gist || '(no gist)'))}</h2>
+        <h2 class="memory-modal__gist">${su.esc(m.gist || '(no gist)')}</h2>
       </div>
     </header>
     <div class="memory-modal__text">${text ? su.renderText(text) : ''}</div>
