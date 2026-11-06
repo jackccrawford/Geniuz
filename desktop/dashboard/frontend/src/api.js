@@ -85,8 +85,8 @@ export function getRecentMemories(limit = 24) {
  * auto-derives one from the first 200 chars of content. Returns the short
  * (8-char) UUID prefix of the new memory.
  */
-export function rememberMemory(gist, content, folder) {
-  return invoke('remember_memory', { gist: gist || null, content, folder: folder || null });
+export function rememberMemory(gist, content, folder, parent = null) {
+  return invoke('remember_memory', { gist: gist || null, content, folder: folder || null, parent: parent || null });
 }
 
 export function getActivity(days = 14) {

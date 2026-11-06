@@ -14,16 +14,6 @@ export function esc(s) {
     .replace(/'/g, '&#39;');
 }
 
-const TINTS = ['#2F94A6', '#1A6E7C', '#E0A43B', '#CF5535', '#6E8B3D', '#7A5C99', '#B5654A', '#3E7CB1'];
-
-export function tintOf(key) {
-  let h = 2166136261;
-  for (const c of String(key || '')) {
-    h ^= c.charCodeAt(0);
-    h = Math.imul(h, 16777619);
-  }
-  return TINTS[(h >>> 0) % TINTS.length];
-}
 
 /** The short tag before the gist's first separator, if it reads as one. */
 export function splitGist(gist) {
@@ -52,14 +42,16 @@ export function bodyAfterGist(text, gist) {
 }
 
 /**
- * A memory's mark: its category's first letter on the category's colour. With
- * no category, the first letter of its gist, on the one colour that says so.
+ * Where a memory sits in its folder's tree: a dot starts a thread, a hook
+ * answers one. Structure only, from the parent the substrate records (Jack,
+ * 2026-11-06: "a folder contains a tree with 0 to n levels and 0 to n
+ * nodes"). Meaning is the writer's, in the words, so no colour or icon here
+ * stands for a kind of memory. The menu bar draws the same two marks.
  */
-export function mark(tag, size = 36, gist = '') {
-  const key = (tag || 'memory').toLowerCase();
-  const initial = (String(gist).match(/\p{L}|\p{N}/u) || ['·'])[0];
-  const letter = tag ? tag.trim()[0].toUpperCase() : initial.toUpperCase();
-  return `<span class="sm" style="--sm:${size}px;--st:${tintOf(key)}" aria-hidden="true">${esc(letter)}</span>`;
+export function node(isReply) {
+  return isReply
+    ? `<span class="snode snode--reply" title="A reply" aria-label="A reply"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M4 2.5v6.5a2 2 0 0 0 2 2h6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><circle cx="12.5" cy="11" r="1.7" fill="currentColor"/></svg></span>`
+    : `<span class="snode snode--root" title="Starts a thread" aria-label="Starts a thread"><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="3.5" fill="currentColor"/></svg></span>`;
 }
 
 export function timeShort(at) {

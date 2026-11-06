@@ -157,7 +157,7 @@ export async function mount(container) {
       : `<span class="stwisty stwisty--leaf"></span>`;
     return `
       <article class="smsg${depth ? ' smsg--child' : ''}${here ? ' is-here' : ''}" data-uuid="${su.esc(m.uuid)}" tabindex="0">
-        <div class="smsg__gutter">${twisty}${su.mark(tag, depth ? 28 : 36, rest)}</div>
+        <div class="smsg__gutter">${twisty}${su.node(!!parentOf(m))}</div>
         <div class="smsg__body">
           <div class="smsg__head">${head}
             <time datetime="${su.esc(m.created_at)}" title="${su.esc(su.timeFull(m.created_at))}">${su.esc(su.timeShort(m.created_at))}</time>

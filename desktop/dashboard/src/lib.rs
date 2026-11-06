@@ -146,14 +146,30 @@ fn get_app_version() -> &'static str {
 /// auto-derives one from the first 200 chars of content. Returns the short
 /// (8-char) UUID prefix of the new memory.
 #[tauri::command]
-fn remember_memory(gist: Option<String>, content: String, folder: Option<String>) -> Result<String, String> {
+fn remember_memory(
+    gist: Option<String>,
+    content: String,
+    folder: Option<String>,
+    parent: Option<String>,
+) -> Result<String, String> {
     // The folder chosen on the page, or the one on screen.
     let db = match folder {
         Some(uuid) => DatabaseManager::open_existing(&Registry::from_env().find(&uuid)?.db_path.to_string_lossy())?,
         None => open_db()?,
     };
+    // A reply goes under a memory in this same folder. db.signal starts a new
+    // thread when the parent doesn't resolve; here that would quietly lose the
+    // reply the person asked for, so say so instead.
+    let parent = match parent.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => Some(
+            db.get_by_uuid_prefix(p)?
+                .ok_or_else(|| format!("No memory {} in this folder to reply to", &p[..p.len().min(8)]))?
+                .memory_uuid,
+        ),
+        None => None,
+    };
     let gist_trimmed = gist.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty());
-    db.signal(content.trim(), gist_trimmed, None, None)
+    db.signal(content.trim(), gist_trimmed, parent.as_deref(), None)
         .map(|r| r.uuid)
 }
 
@@ -712,11 +728,17 @@ fn get_data_dir() -> String {
 /// prefix is empty, or the prefix is too long to be a shelf label (>= 40
 /// chars). Matches the TUI's `split_gist` discipline so the dashboard chip
 /// and the TUI category render the same way.
+/// The gist's leading field, the same rule as splitGist in stream-ui.js: a
+/// separator within the first 40 characters, and at most three words before it.
+/// A reading aid only; nothing groups or filters on it.
 fn extract_category(gist: &str) -> Option<String> {
     let positions = [gist.find('|'), gist.find(';'), gist.find(':')];
-    let earliest = positions.into_iter().flatten().min()?;
+    let earliest = positions.into_iter().flatten().filter(|&i| i > 0).min()?;
+    if gist[..earliest].chars().count() >= 40 {
+        return None;
+    }
     let cat = gist[..earliest].trim().to_string();
-    if cat.is_empty() || cat.len() >= 40 {
+    if cat.is_empty() || cat.split_whitespace().count() > 3 {
         return None;
     }
     Some(cat)
