@@ -162,8 +162,24 @@ begin
     Result := True;
     exit;
   end;
+  // Inno doesn't expand constants in a Check parameter, so {app} arrives as written.
   // Treat case-insensitively, match exact entry boundaries
-  Result := Pos(';' + LowerCase(Param) + ';', ';' + LowerCase(OrigPath) + ';') = 0;
+  Result := Pos(';' + LowerCase(ExpandConstant(Param)) + ';', ';' + LowerCase(OrigPath) + ';') = 0;
+end;
+
+// Earlier installers added another PATH entry on every upgrade. Collapse those.
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Path, Entry: string;
+begin
+  if CurStep <> ssPostInstall then exit;
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path) then exit;
+  Entry := ';' + ExpandConstant('{app}') + ';';
+  Path := ';' + Path + ';';
+  if Pos(Entry + Copy(Entry, 2, Length(Entry) - 1), Path) = 0 then exit;
+  while Pos(Entry + Copy(Entry, 2, Length(Entry) - 1), Path) > 0 do
+    StringChangeEx(Path, Entry + Copy(Entry, 2, Length(Entry) - 1), Entry, True);
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Copy(Path, 2, Length(Path) - 2));
 end;
 
 // A running copy would lock the files this installer has to replace.
