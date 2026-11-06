@@ -109,7 +109,7 @@ fn base_tool_definitions() -> Value {
                         },
                         "thread": {
                             "type": "string",
-                            "description": "Optional. Short UUID of a previous memory to thread this to. Builds chains — prospect to client, draft to final, problem to solution."
+                            "description": "Optional. Short UUID or address of a memory in the same folder to thread this to. Builds chains — prospect to client, draft to final, problem to solution. A memory in another folder can't be threaded to: keep this in that folder, or put its address in the content instead."
                         }
                     },
                     "required": ["content", "gist"]

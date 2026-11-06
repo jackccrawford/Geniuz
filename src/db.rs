@@ -189,8 +189,48 @@ impl DatabaseManager {
         let payload_str = serde_json::to_string(&payload)
             .map_err(|e| format!("Failed to serialize: {}", e))?;
 
+        // A reply goes under a memory in this same folder, or not at all. This
+        // used to fall back to starting a new thread, which quietly dropped the
+        // link an agent asked for (6 Nov: a keep threaded to a memory in another
+        // folder saved without error and stood alone). A full address is
+        // accepted, and one naming another folder is refused with the reason.
         let parent_uuid = if let Some(p) = parent {
-            self.resolve_uuid(p)?.unwrap_or(uuid.clone())
+            let p = p.trim();
+            let (folder_part, memory_part) = match p.split_once(':') {
+                Some((f, m)) => (Some(f.trim()), m.trim()),
+                None => (None, p),
+            };
+            let short = |s: &str| s.chars().take(8).collect::<String>().to_uppercase();
+            let elsewhere = || format!(
+                "Can't reply to {}: it isn't in this folder. A reply stays in the folder of the memory it answers. \
+                 To refer to a memory in another folder, put its address in the words instead.",
+                p.to_uppercase()
+            );
+            if let Some(f) = folder_part {
+                let here: Option<String> = self.conn()?
+                    .query_row("SELECT value FROM _meta WHERE key = 'folder_uuid'", [], |r| r.get(0))
+                    .ok();
+                if here.is_some_and(|h| !h.to_uppercase().starts_with(&f.to_uppercase())) {
+                    return Err(elsewhere());
+                }
+            }
+            // resolve_uuid takes a full 36-character ID on trust; a parent has to exist here.
+            let found = self.resolve_uuid(memory_part)?.filter(|id| {
+                self.conn()
+                    .and_then(|c| c.query_row(
+                        "SELECT 1 FROM memories WHERE memory_uuid = ?1", [id], |_| Ok(())
+                    ).map_err(|e| e.to_string()))
+                    .is_ok()
+            });
+            match found {
+                Some(found) => found,
+                None if folder_part.is_some() => return Err(elsewhere()),
+                None => return Err(format!(
+                    "No memory {} in this folder to reply to. If it's in another folder, keep this there, \
+                     or put its address in the words instead.",
+                    short(memory_part)
+                )),
+            }
         } else {
             uuid.clone()
         };
@@ -1114,6 +1154,36 @@ mod tests {
         let db = DatabaseManager::new(db_path.to_str().unwrap())
             .expect("DatabaseManager::new on fresh path");
         (db, dir)
+    }
+
+    /// A reply links to a memory in this folder, or is refused with the reason.
+    /// It never quietly becomes a new thread (6 Nov: a link to another folder's
+    /// memory was dropped without a word).
+    #[test]
+    fn a_reply_to_a_memory_not_in_this_folder_is_refused_not_dropped() {
+        let (db, _dir) = fresh_db();
+        let root = db.signal_with_backend("root", Some("root"), None, None, Some(&MockBackend)).unwrap().uuid;
+        let conn = db.conn().unwrap();
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT); \
+            INSERT OR REPLACE INTO _meta VALUES ('folder_uuid', 'AFEA772B-E060-5D19-BEB9-925128692FAE');").unwrap();
+        drop(conn);
+        let reply = |parent: &str| db.signal_with_backend("reply", Some("reply"), Some(parent), None, Some(&MockBackend));
+
+        // Missing here, by prefix and by full ID.
+        assert!(reply("6B3F7B38").unwrap_err().contains("No memory 6B3F7B38 in this folder"));
+        assert!(reply("6B3F7B38-0000-0000-0000-000000000000").is_err());
+        // An address naming another folder.
+        assert!(reply("13625F6B:6B3F7B38").unwrap_err().contains("isn't in this folder"));
+        // Nothing was written by any refusal.
+        assert_eq!(db.count().unwrap(), 1);
+
+        // The memory here, by prefix and by this folder's address, links.
+        let a = reply(&root).unwrap();
+        let b = reply(&format!("AFEA772B:{}", root)).unwrap();
+        for id in [a.uuid, b.uuid] {
+            let e = db.get_by_uuid_prefix(&id).unwrap().unwrap();
+            assert!(e.parent_uuid.unwrap().starts_with(&root));
+        }
     }
 
     /// Shortcut: insert a signal with the mock backend and return its short UUID.
