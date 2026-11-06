@@ -78,13 +78,97 @@ struct App {
     compose_content: String,
     compose_focus: ComposeFocus,
     sort_desc: bool,
+    /// For the recent list, each row's (depth in its thread, memory number),
+    /// parallel to `memories`. Empty for search results, which stay flat in
+    /// the order they ranked.
+    rows: Vec<(usize, usize)>,
+}
+
+/// The recent list as threads, the way the dashboard draws them: a thread's
+/// first memory at the top level, ordered by the thread's latest activity,
+/// and each reply under what it answers, oldest first, one level deeper.
+/// A reply whose thread began before the window stays at the top level.
+/// Numbers are each memory's place in time, so they don't move with the tree.
+fn thread_order(
+    entries: Vec<SignalEntry>,
+    total: usize,
+    newest_first: bool,
+) -> (Vec<SignalEntry>, Vec<(usize, usize)>) {
+    use std::collections::{HashMap, HashSet};
+    let key = |u: &str| u.to_ascii_uppercase();
+    // recent() is newest first, so the i-th entry is memory number total - i.
+    let nums: Vec<usize> = (0..entries.len()).map(|i| total.saturating_sub(i)).collect();
+    let index: HashMap<String, usize> =
+        entries.iter().enumerate().map(|(i, e)| (key(&e.memory_uuid), i)).collect();
+    let parent_of = |e: &SignalEntry| -> Option<usize> {
+        let p = e.parent_uuid.as_deref()?;
+        if p.eq_ignore_ascii_case(&e.memory_uuid) {
+            return None;
+        }
+        index.get(&key(p)).copied()
+    };
+    let mut kids: HashMap<usize, Vec<usize>> = HashMap::new();
+    let mut top = Vec::new();
+    for (i, e) in entries.iter().enumerate() {
+        match parent_of(e) {
+            Some(p) => kids.entry(p).or_default().push(i),
+            None => top.push(i),
+        }
+    }
+    for list in kids.values_mut() {
+        list.sort_by(|a, b| entries[*a].created_at.cmp(&entries[*b].created_at));
+    }
+    fn latest(i: usize, entries: &[SignalEntry], kids: &HashMap<usize, Vec<usize>>, seen: &mut HashSet<usize>) -> String {
+        if !seen.insert(i) {
+            return String::new();
+        }
+        let mut at = entries[i].created_at.clone();
+        for &c in kids.get(&i).map(|v| v.as_slice()).unwrap_or(&[]) {
+            let x = latest(c, entries, kids, seen);
+            if x > at {
+                at = x;
+            }
+        }
+        at
+    }
+    let mut keyed: Vec<(String, usize)> =
+        top.iter().map(|&i| (latest(i, &entries, &kids, &mut HashSet::new()), i)).collect();
+    keyed.sort_by(|a, b| if newest_first { b.0.cmp(&a.0) } else { a.0.cmp(&b.0) });
+
+    let mut order: Vec<(usize, usize)> = Vec::new(); // (index, depth)
+    let mut seen = HashSet::new();
+    fn walk(i: usize, d: usize, kids: &HashMap<usize, Vec<usize>>, seen: &mut HashSet<usize>, out: &mut Vec<(usize, usize)>) {
+        if !seen.insert(i) {
+            return;
+        }
+        out.push((i, d));
+        for &c in kids.get(&i).map(|v| v.as_slice()).unwrap_or(&[]) {
+            walk(c, d + 1, kids, seen, out);
+        }
+    }
+    for (_, i) in keyed {
+        walk(i, 0, &kids, &mut seen, &mut order);
+    }
+    let rows = order.iter().map(|&(i, d)| (d, nums[i])).collect();
+    let mut slots: Vec<Option<SignalEntry>> = entries.into_iter().map(Some).collect();
+    let ordered = order.iter().filter_map(|&(i, _)| slots[i].take()).collect();
+    (ordered, rows)
 }
 
 impl App {
+    /// Load the newest memories and lay them out as threads.
+    fn load_recent(&mut self, limit: usize) -> Result<()> {
+        let entries = self.db.recent(limit).map_err(|e| anyhow::anyhow!(e))?;
+        let (ordered, rows) = thread_order(entries, self.total, self.sort_desc);
+        self.memories = ordered;
+        self.rows = rows;
+        Ok(())
+    }
+
     fn new() -> Result<Self> {
         let db = crate::open_resolved(crate::resolve_db_path).map_err(|e| anyhow::anyhow!(e))?;
-        let memories = db.recent(24).map_err(|e| anyhow::anyhow!(e))?;
         let total = db.count().map_err(|e| anyhow::anyhow!(e))?;
+        let (memories, rows) = thread_order(db.recent(24).map_err(|e| anyhow::anyhow!(e))?, total, true);
         let mut list_state = ListState::default();
         if !memories.is_empty() {
             list_state.select(Some(0));
@@ -104,6 +188,7 @@ impl App {
             compose_content: String::new(),
             compose_focus: ComposeFocus::Gist,
             sort_desc: true,
+            rows,
         })
     }
 
@@ -129,8 +214,8 @@ impl App {
             "quit" | "q" | "exit" => self.should_quit = true,
             "recent" => {
                 let limit: usize = arg.parse().unwrap_or(24);
-                self.memories = self.db.recent(limit).map_err(|e| anyhow::anyhow!(e))?;
                 self.sort_desc = true;
+                self.load_recent(limit)?;
                 self.mode = Mode::List;
                 self.detail = None;
                 self.list_state
@@ -145,6 +230,7 @@ impl App {
                         .db
                         .keyword_search(arg, 24)
                         .map_err(|e| anyhow::anyhow!(e))?;
+                    self.rows.clear();
                     self.mode = Mode::Search;
                     self.detail = None;
                     self.list_state
@@ -160,6 +246,7 @@ impl App {
                         .db
                         .semantic_search(arg, 24)
                         .map_err(|e| anyhow::anyhow!(e))?;
+                    self.rows.clear();
                     self.mode = Mode::Search;
                     self.detail = None;
                     self.list_state
@@ -233,10 +320,21 @@ impl App {
                 self.handle_remember(arg)?;
             }
             "reorder" | "sort" | "reverse" => {
-                self.memories.reverse();
+                self.sort_desc = !self.sort_desc;
+                if self.rows.is_empty() {
+                    // Search results: flip the ranking.
+                    self.memories.reverse();
+                } else {
+                    // Threads: reorder the threads, keep each one's shape.
+                    let entries = std::mem::take(&mut self.memories);
+                    let mut by_time = entries;
+                    by_time.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                    let (ordered, rows) = thread_order(by_time, self.total, self.sort_desc);
+                    self.memories = ordered;
+                    self.rows = rows;
+                }
                 self.list_state
                     .select(if self.memories.is_empty() { None } else { Some(0) });
-                self.sort_desc = !self.sort_desc;
                 self.status = if self.sort_desc {
                     format!("sort: newest first · {} shown", self.memories.len())
                 } else {
@@ -278,8 +376,8 @@ impl App {
             .db
             .signal(&content, gist_opt, None, None)
             .map_err(|e| anyhow::anyhow!(e))?;
-        self.memories = self.db.recent(24).map_err(|e| anyhow::anyhow!(e))?;
         self.total = self.db.count().map_err(|e| anyhow::anyhow!(e))?;
+        self.load_recent(24)?;
         self.list_state
             .select(if self.memories.is_empty() { None } else { Some(0) });
         self.compose_cancel_state();
@@ -498,22 +596,27 @@ fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
         .iter()
         .enumerate()
         .map(|(i, m)| {
-            let n = if sort_desc { total - i } else { i + 1 };
-            let (category, body) = split_gist(&m.gist);
+            let (depth, n) = app
+                .rows
+                .get(i)
+                .copied()
+                .unwrap_or((0, if sort_desc { total - i } else { i + 1 }));
+            // Indent like the dashboard's tree, and stop growing after a few
+            // levels so a deep thread keeps room for its words.
+            let indent = "  ".repeat(depth.min(6));
             let when = m.created_at.get(..16).unwrap_or(&m.created_at);
             let header = Line::from(vec![
                 Span::styled(format!("#{:<4}", n), Style::default().fg(Color::DarkGray)),
-                Span::raw(" · "),
+                Span::raw(format!(" {}", indent)),
+                node_mark(m),
+                Span::raw(" "),
                 Span::raw(when.to_string()),
-                Span::raw(" · "),
-                Span::styled(
-                    category.to_string(),
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-                ),
             ]);
+            // The gist as written. Its first words are the writer's, not a
+            // category (Jack, 2026-11-06: "the app just shows the gist").
             let body_line = Line::from(vec![
-                Span::raw("    "),
-                Span::styled(truncate(body, 240), Style::default().fg(Color::Gray)),
+                Span::raw(format!("    {}", indent)),
+                Span::styled(truncate(m.gist.trim(), 240), Style::default().fg(Color::Gray)),
             ]);
             ListItem::new(vec![header, body_line, Line::raw("")])
         })
@@ -539,14 +642,10 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
     let Some((entry, content)) = &app.detail else {
         return;
     };
-    let (category, gist_body) = split_gist(&entry.gist);
     let mut lines: Vec<Line> = vec![
         Line::from(vec![
-            Span::styled(
-                category.to_string(),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("   "),
+            node_mark(entry),
+            Span::raw(" "),
             Span::styled(
                 entry.created_at.clone(),
                 Style::default().fg(Color::DarkGray),
@@ -554,7 +653,7 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::raw(""),
         Line::from(vec![Span::styled(
-            gist_body.to_string(),
+            entry.gist.trim().to_string(),
             Style::default().fg(Color::White),
         )]),
         Line::raw(""),
@@ -708,17 +807,18 @@ fn render_compose(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(content_para, split[1]);
 }
 
-fn split_gist(gist: &str) -> (&str, &str) {
-    // First separator wins: |, ;, or :
-    let candidates = [
-        gist.find('|'),
-        gist.find(';'),
-        gist.find(':'),
-    ];
-    let earliest = candidates.into_iter().flatten().min();
-    match earliest {
-        Some(i) => (gist[..i].trim(), gist[i + 1..].trim()),
-        None => ("", gist.trim()),
+/// Where a memory sits in its folder's tree, the only mark beside it: a dot
+/// starts a thread, a hook answers one, as in the dashboard and the menu bar.
+/// From the parent the store records; nothing is read out of the words.
+fn node_mark(e: &SignalEntry) -> Span<'static> {
+    let reply = e
+        .parent_uuid
+        .as_deref()
+        .is_some_and(|p| !p.eq_ignore_ascii_case(&e.memory_uuid));
+    if reply {
+        Span::styled("↳", Style::default().fg(Color::Cyan))
+    } else {
+        Span::styled("•", Style::default().fg(Color::Cyan))
     }
 }
 
@@ -730,5 +830,49 @@ fn truncate(s: &str, n: usize) -> String {
         let mut t: String = s.chars().take(n.saturating_sub(1)).collect();
         t.push('…');
         t
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn e(id: &str, parent: Option<&str>, at: &str) -> SignalEntry {
+        SignalEntry {
+            memory_uuid: id.into(),
+            gist: id.into(),
+            created_at: at.into(),
+            parent_uuid: parent.map(Into::into),
+            content: None,
+            score: None,
+        }
+    }
+
+    #[test]
+    fn recent_list_is_drawn_as_threads() {
+        // Newest first, as recent() returns them. B answers A, C answers B,
+        // D stands alone, R answers a memory older than the window.
+        let entries = vec![
+            e("C", Some("B"), "2026-11-06 13:00"),
+            e("D", Some("D"), "2026-11-06 12:50"),
+            e("R", Some("OLD"), "2026-11-06 12:45"),
+            e("B", Some("A"), "2026-11-06 12:40"),
+            e("A", None, "2026-11-06 12:30"),
+        ];
+        let (ordered, rows) = thread_order(entries, 20, true);
+        let ids: Vec<&str> = ordered.iter().map(|m| m.memory_uuid.as_str()).collect();
+        // A's thread is newest by its latest reply (13:00), so it leads.
+        assert_eq!(ids, ["A", "B", "C", "D", "R"]);
+        let depths: Vec<usize> = rows.iter().map(|r| r.0).collect();
+        assert_eq!(depths, [0, 1, 2, 0, 0]);
+        // Numbers are places in time, unmoved by the tree.
+        let nums: Vec<usize> = rows.iter().map(|r| r.1).collect();
+        assert_eq!(nums, [16, 17, 20, 19, 18]);
+
+        // Oldest first reorders the threads, not their shape.
+        let (ordered, rows) = thread_order(ordered, 20, false);
+        let ids: Vec<&str> = ordered.iter().map(|m| m.memory_uuid.as_str()).collect();
+        assert_eq!(ids, ["R", "D", "A", "B", "C"]);
+        assert_eq!(rows.iter().map(|r| r.0).collect::<Vec<_>>(), [0, 0, 0, 1, 2]);
     }
 }
