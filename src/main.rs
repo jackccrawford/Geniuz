@@ -908,8 +908,12 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
 
                 if once {
+                    // The help promises 0 = new memories, 1 = none, so a script
+                    // or cron can wake only when there is something to read.
+                    // Returning it as Err sends the note to stderr and exits 1;
+                    // it's an answer, not a failure.
                     if entries.is_empty() {
-                        return Ok("No new memories.".to_string());
+                        return Err("No new memories.".to_string());
                     } else {
                         return Ok(String::new());
                     }

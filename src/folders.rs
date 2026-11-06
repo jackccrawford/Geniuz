@@ -708,6 +708,15 @@ impl Registry {
         if was_added_directly {
             let _ = self.remove_unlocked(&dir);
         }
+        // The directory it moved out of stays on the list only while it still
+        // holds a folder. Otherwise the list keeps an empty entry, which reads
+        // as "unavailable" the day someone deletes that directory.
+        if let Some(old_parent) = dir.parent() {
+            let listed = self.added().iter().any(|d| canonical(d) == canonical(old_parent));
+            if listed && candidates(old_parent).is_empty() {
+                let _ = self.remove_unlocked(old_parent);
+            }
+        }
         Ok(Relocated { folder: self.find(&folder.uuid)?, left_behind })
     }
 
@@ -1618,6 +1627,29 @@ mod tests {
         assert_eq!(reg.added(), vec![canonical(&dest)]);
         assert!(reg.scan().blocked.is_empty());
         assert_eq!(canonical(&reg.resolve(None, None, None).unwrap()), canonical(&moved.folder.db_path));
+    }
+
+    #[test]
+    fn a_move_takes_an_emptied_directory_off_the_list_and_keeps_one_still_in_use() {
+        let (tmp, reg) = setup();
+        let projects = tmp.path().join("projects");
+        let shared = tmp.path().join("shared");
+        reg.create("Work", "", Some(&projects)).unwrap();
+        reg.create("Home", "", Some(&shared)).unwrap();
+        reg.create("Garden", "", Some(&shared)).unwrap();
+        let dest = tmp.path().join("moved");
+
+        // projects held only Work, so once Work leaves, projects leaves the list.
+        reg.relocate("Work", &dest).unwrap();
+        let listed: Vec<_> = reg.added().iter().map(|d| canonical(d)).collect();
+        assert!(!listed.contains(&canonical(&projects)));
+        assert!(listed.contains(&canonical(&dest)));
+
+        // shared still holds Garden after Home moves, so it stays on the list.
+        reg.relocate("Home", &dest).unwrap();
+        let listed: Vec<_> = reg.added().iter().map(|d| canonical(d)).collect();
+        assert!(listed.contains(&canonical(&shared)));
+        assert!(reg.find("Garden").is_ok());
     }
 
     #[test]

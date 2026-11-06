@@ -68,6 +68,12 @@ WizardSmallImageFile=WizardSmallImage.bmp
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
+[Messages]
+; Claude Desktop reads its MCP servers only when it starts, and closing its
+; window leaves it running in the tray, so say how to restart it for real.
+FinishedLabel=Setup has finished installing [name] on your computer.%n%nIf Claude Desktop is open, restart it so it can use Geniuz: right-click the Claude icon near the clock, choose Quit, then open Claude again.
+FinishedLabelNoIcons=Setup has finished installing [name] on your computer.%n%nIf Claude Desktop is open, restart it so it can use Geniuz: right-click the Claude icon near the clock, choose Quit, then open Claude again.
+
 [Files]
 Source: "geniuz.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "geniuz-embed.exe"; DestDir: "{app}"; Flags: ignoreversion
