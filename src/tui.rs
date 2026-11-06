@@ -78,26 +78,19 @@ struct App {
     compose_content: String,
     compose_focus: ComposeFocus,
     sort_desc: bool,
-    /// For the recent list, each row's (depth in its thread, memory number),
-    /// parallel to `memories`. Empty for search results, which stay flat in
-    /// the order they ranked.
-    rows: Vec<(usize, usize)>,
+    /// For the recent list, each row's depth in its thread, parallel to
+    /// `memories`. Empty for search results, which stay flat in the order
+    /// they ranked.
+    rows: Vec<usize>,
 }
 
 /// The recent list as threads, the way the dashboard draws them: a thread's
 /// first memory at the top level, ordered by the thread's latest activity,
 /// and each reply under what it answers, oldest first, one level deeper.
 /// A reply whose thread began before the window stays at the top level.
-/// Numbers are each memory's place in time, so they don't move with the tree.
-fn thread_order(
-    entries: Vec<SignalEntry>,
-    total: usize,
-    newest_first: bool,
-) -> (Vec<SignalEntry>, Vec<(usize, usize)>) {
+fn thread_order(entries: Vec<SignalEntry>, newest_first: bool) -> (Vec<SignalEntry>, Vec<usize>) {
     use std::collections::{HashMap, HashSet};
     let key = |u: &str| u.to_ascii_uppercase();
-    // recent() is newest first, so the i-th entry is memory number total - i.
-    let nums: Vec<usize> = (0..entries.len()).map(|i| total.saturating_sub(i)).collect();
     let index: HashMap<String, usize> =
         entries.iter().enumerate().map(|(i, e)| (key(&e.memory_uuid), i)).collect();
     let parent_of = |e: &SignalEntry| -> Option<usize> {
@@ -149,17 +142,31 @@ fn thread_order(
     for (_, i) in keyed {
         walk(i, 0, &kids, &mut seen, &mut order);
     }
-    let rows = order.iter().map(|&(i, d)| (d, nums[i])).collect();
+    let rows = order.iter().map(|&(_, d)| d).collect();
     let mut slots: Vec<Option<SignalEntry>> = entries.into_iter().map(Some).collect();
     let ordered = order.iter().filter_map(|&(i, _)| slots[i].take()).collect();
     (ordered, rows)
 }
 
+/// What is on screen, apart from the input line: which view, which row is
+/// selected, which list or memory. When it changes, the screen is repainted.
+type ViewKey = (std::mem::Discriminant<Mode>, Option<usize>, usize, Option<String>, Option<String>);
+
 impl App {
+    fn view_key(&self) -> ViewKey {
+        (
+            std::mem::discriminant(&self.mode),
+            self.list_state.selected(),
+            self.memories.len(),
+            self.memories.first().map(|m| m.memory_uuid.clone()),
+            self.detail.as_ref().map(|(e, _)| e.memory_uuid.clone()),
+        )
+    }
+
     /// Load the newest memories and lay them out as threads.
     fn load_recent(&mut self, limit: usize) -> Result<()> {
         let entries = self.db.recent(limit).map_err(|e| anyhow::anyhow!(e))?;
-        let (ordered, rows) = thread_order(entries, self.total, self.sort_desc);
+        let (ordered, rows) = thread_order(entries, self.sort_desc);
         self.memories = ordered;
         self.rows = rows;
         Ok(())
@@ -168,7 +175,7 @@ impl App {
     fn new() -> Result<Self> {
         let db = crate::open_resolved(crate::resolve_db_path).map_err(|e| anyhow::anyhow!(e))?;
         let total = db.count().map_err(|e| anyhow::anyhow!(e))?;
-        let (memories, rows) = thread_order(db.recent(24).map_err(|e| anyhow::anyhow!(e))?, total, true);
+        let (memories, rows) = thread_order(db.recent(24).map_err(|e| anyhow::anyhow!(e))?, true);
         let mut list_state = ListState::default();
         if !memories.is_empty() {
             list_state.select(Some(0));
@@ -329,7 +336,7 @@ impl App {
                     let entries = std::mem::take(&mut self.memories);
                     let mut by_time = entries;
                     by_time.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-                    let (ordered, rows) = thread_order(by_time, self.total, self.sort_desc);
+                    let (ordered, rows) = thread_order(by_time, self.sort_desc);
                     self.memories = ordered;
                     self.rows = rows;
                 }
@@ -452,8 +459,27 @@ impl App {
 
 fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> {
     let mut app = App::new()?;
+    let mut last_view = None;
     while !app.should_quit {
+        // Ratatui redraws only the cells that changed. Some terminal fonts draw
+        // an underscore a little below its own cell, and the cell beneath it,
+        // blank before and after, is never repainted, so fragments of the last
+        // screen linger (Jack, 6 Nov, after thoughtform gists). Repaint the
+        // whole screen when the view changes; typing doesn't count, so the
+        // input line doesn't flicker. The clear and the redraw go out as one
+        // synchronised update, so a terminal that supports it never shows the
+        // blank in between (one that doesn't ignores the markers).
+        let view = app.view_key();
+        let repaint = last_view.as_ref() != Some(&view);
+        if repaint {
+            crossterm::execute!(io::stdout(), crossterm::terminal::BeginSynchronizedUpdate)?;
+            terminal.clear()?;
+            last_view = Some(view);
+        }
         terminal.draw(|f| ui(f, &mut app))?;
+        if repaint {
+            crossterm::execute!(io::stdout(), crossterm::terminal::EndSynchronizedUpdate)?;
+        }
         if let Event::Key(key) = event::read()? {
             if key.kind != KeyEventKind::Press {
                 continue;
@@ -590,27 +616,21 @@ fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
         f.render_widget(para, area);
         return;
     }
-    let sort_desc = app.sort_desc;
     let items: Vec<ListItem> = app
         .memories
         .iter()
         .enumerate()
         .map(|(i, m)| {
-            let (depth, n) = app
-                .rows
-                .get(i)
-                .copied()
-                .unwrap_or((0, if sort_desc { total - i } else { i + 1 }));
+            let depth = app.rows.get(i).copied().unwrap_or(0);
             // Indent like the dashboard's tree, and stop growing after a few
             // levels so a deep thread keeps room for its words.
             let indent = "  ".repeat(depth.min(6));
-            let when = m.created_at.get(..16).unwrap_or(&m.created_at);
+            // The mark, then the time, quiet: the gist below is what to read.
             let header = Line::from(vec![
-                Span::styled(format!("#{:<4}", n), Style::default().fg(Color::DarkGray)),
                 Span::raw(format!(" {}", indent)),
                 node_mark(m),
                 Span::raw(" "),
-                Span::raw(when.to_string()),
+                Span::styled(local_time(&m.created_at, false), Style::default().fg(Color::DarkGray)),
             ]);
             // The gist as written. Its first words are the writer's, not a
             // category (Jack, 2026-11-06: "the app just shows the gist").
@@ -632,7 +652,8 @@ fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
         .block(Block::default().title(title).borders(Borders::ALL))
         .highlight_style(
             Style::default()
-                .bg(Color::DarkGray)
+                // Darker than the dark-grey date, so the selected row keeps it.
+                .bg(Color::Indexed(236))
                 .add_modifier(Modifier::BOLD),
         );
     f.render_stateful_widget(list, area, &mut app.list_state);
@@ -647,7 +668,7 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
             node_mark(entry),
             Span::raw(" "),
             Span::styled(
-                entry.created_at.clone(),
+                local_time(&entry.created_at, true),
                 Style::default().fg(Color::DarkGray),
             ),
         ]),
@@ -807,6 +828,73 @@ fn render_compose(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(content_para, split[1]);
 }
 
+/// A stored time (UTC, "YYYY-MM-DD HH:MM:SS") in this machine's time zone and
+/// clock style (Jack, 6 Nov: "match local time and localization of the
+/// machine ... am/pm in USA"). The date stays year first, so the order reads.
+fn local_time(stamp: &str, seconds: bool) -> String {
+    use chrono::{Local, NaiveDateTime, TimeZone, Utc};
+    let Ok(at) = NaiveDateTime::parse_from_str(stamp.trim(), "%Y-%m-%d %H:%M:%S") else {
+        return stamp.to_string();
+    };
+    let local = Utc.from_utc_datetime(&at).with_timezone(&Local);
+    let fmt = match (clock_12h(), seconds) {
+        (true, false) => "%Y-%m-%d %-I:%M %p",
+        (true, true) => "%Y-%m-%d %-I:%M:%S %p",
+        (false, false) => "%Y-%m-%d %H:%M",
+        (false, true) => "%Y-%m-%d %H:%M:%S",
+    };
+    local.format(fmt).to_string()
+}
+
+/// Whether this machine reads the time on a 12-hour clock. Asked once.
+/// Mac: an explicit 12/24-hour choice in System Settings wins, then the
+/// region. Windows: the time format chosen in Region settings. Elsewhere, the
+/// region in LC_ALL, LC_TIME or LANG. Unknown: 24-hour.
+fn clock_12h() -> bool {
+    static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ANSWER.get_or_init(|| {
+        let run = |cmd: &str, args: &[&str]| -> Option<String> {
+            let out = std::process::Command::new(cmd).args(args).output().ok()?;
+            out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+        };
+        if cfg!(target_os = "macos") {
+            if run("defaults", &["read", "-g", "AppleICUForce24HourTime"]).as_deref() == Some("1") {
+                return false;
+            }
+            if run("defaults", &["read", "-g", "AppleICUForce12HourTime"]).as_deref() == Some("1") {
+                return true;
+            }
+            if let Some(locale) = run("defaults", &["read", "-g", "AppleLocale"]) {
+                return region_uses_12h(&locale);
+            }
+        }
+        if cfg!(windows) {
+            // e.g. "sTimeFormat    REG_SZ    h:mm:ss tt": "tt" is the AM/PM marker.
+            if let Some(out) = run("reg", &["query", r"HKCU\Control Panel\International", "/v", "sTimeFormat"]) {
+                if let Some(fmt) = out.lines().find(|l| l.contains("sTimeFormat")) {
+                    return fmt.contains("tt");
+                }
+            }
+        }
+        ["LC_ALL", "LC_TIME", "LANG"]
+            .iter()
+            .filter_map(|k| std::env::var(k).ok())
+            .find(|v| !v.is_empty() && v != "C" && v != "POSIX")
+            .is_some_and(|v| region_uses_12h(&v))
+    })
+}
+
+/// Regions where the 12-hour clock is the everyday default, from a locale
+/// such as "en_US", "en_US.UTF-8" or "en-IN".
+fn region_uses_12h(locale: &str) -> bool {
+    let base = locale.split(['.', '@']).next().unwrap_or("");
+    let region = base.split(['_', '-']).nth(1).unwrap_or("").to_ascii_uppercase();
+    matches!(
+        region.as_str(),
+        "US" | "CA" | "AU" | "NZ" | "IN" | "PH" | "PK" | "BD" | "EG" | "SA" | "MY" | "CO" | "SV" | "HN" | "NI"
+    )
+}
+
 /// Where a memory sits in its folder's tree, the only mark beside it: a dot
 /// starts a thread, a hook answers one, as in the dashboard and the menu bar.
 /// From the parent the store records; nothing is read out of the words.
@@ -859,20 +947,26 @@ mod tests {
             e("B", Some("A"), "2026-11-06 12:40"),
             e("A", None, "2026-11-06 12:30"),
         ];
-        let (ordered, rows) = thread_order(entries, 20, true);
+        let (ordered, depths) = thread_order(entries, true);
         let ids: Vec<&str> = ordered.iter().map(|m| m.memory_uuid.as_str()).collect();
         // A's thread is newest by its latest reply (13:00), so it leads.
         assert_eq!(ids, ["A", "B", "C", "D", "R"]);
-        let depths: Vec<usize> = rows.iter().map(|r| r.0).collect();
         assert_eq!(depths, [0, 1, 2, 0, 0]);
-        // Numbers are places in time, unmoved by the tree.
-        let nums: Vec<usize> = rows.iter().map(|r| r.1).collect();
-        assert_eq!(nums, [16, 17, 20, 19, 18]);
 
         // Oldest first reorders the threads, not their shape.
-        let (ordered, rows) = thread_order(ordered, 20, false);
+        let (ordered, depths) = thread_order(ordered, false);
         let ids: Vec<&str> = ordered.iter().map(|m| m.memory_uuid.as_str()).collect();
         assert_eq!(ids, ["R", "D", "A", "B", "C"]);
-        assert_eq!(rows.iter().map(|r| r.0).collect::<Vec<_>>(), [0, 0, 0, 1, 2]);
+        assert_eq!(depths, [0, 0, 0, 1, 2]);
+    }
+
+    #[test]
+    fn twelve_hour_regions() {
+        assert!(region_uses_12h("en_US"));
+        assert!(region_uses_12h("en_US.UTF-8"));
+        assert!(region_uses_12h("en-IN"));
+        assert!(!region_uses_12h("en_GB.UTF-8"));
+        assert!(!region_uses_12h("de_DE"));
+        assert!(!region_uses_12h("C"));
     }
 }
