@@ -36,14 +36,14 @@ struct GeniuzMenu: View {
     private var folderLine: some View {
         HStack(spacing: 8) {
             folderPicker
-            Spacer(minLength: 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: { service.openDashboard() }) {
                 Text("Open Dashboard")
                     .font(.system(size: 12, weight: .semibold))
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .keyboardShortcut(.defaultAction)
+            .fixedSize()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
@@ -89,7 +89,6 @@ struct GeniuzMenu: View {
                 }
             }
             .menuStyle(.borderlessButton)
-            .fixedSize()
         }
     }
 
@@ -97,7 +96,8 @@ struct GeniuzMenu: View {
 
     /// Something to do about the connection: not connected, or a restart owed.
     private var needsAttention: Bool {
-        !service.mcpInstalled || service.restartRequired
+        (!service.mcpInstalled && service.claudeFound && !service.claudeConfigUnreadable)
+            || (service.mcpInstalled && service.restartRequired)
     }
 
     /// The header's small status mark: a quiet check when connected, an orange
@@ -278,8 +278,8 @@ struct GeniuzMenu: View {
     private var connectionStatus: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: service.mcpInstalled ? "checkmark.circle.fill" : "xmark.circle")
-                    .foregroundColor(service.mcpInstalled ? .green : .orange)
+                Image(systemName: service.mcpInstalled && !service.restartRequired ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .foregroundColor(service.mcpInstalled && !service.restartRequired ? .green : .orange)
                     .font(.system(size: 13))
                 Text(connectionText)
                     .font(.system(size: 12))
@@ -311,6 +311,7 @@ struct GeniuzMenu: View {
     }
 
     private var connectionText: String {
+        if service.mcpInstalled && service.restartRequired { return "Connected. Restart Claude to finish." }
         if service.mcpInstalled { return "Claude Desktop connected" }
         if service.claudeConfigUnreadable { return "Claude Desktop's settings file couldn't be read, so Geniuz left it alone." }
         if !service.claudeFound { return "Geniuz will connect when Claude Desktop is installed." }

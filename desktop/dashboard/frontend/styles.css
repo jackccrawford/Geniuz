@@ -1379,7 +1379,11 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
    doesn't scroll; each heading is a plain row that stays put, and each open
    group's own body scrolls. Open groups share the height, closed ones take a line. */
 .sidebar-folders.has-groups { overflow: hidden; max-height: 62vh; flex: 1 1 auto; min-height: 0; gap: 0; }
-.sidebar-group { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+/* Open groups share the area equally, so a short one is never squeezed under a
+   long one; the area takes its full height only while something is open. */
+.sidebar-folders.has-groups:has(.sidebar-group:not(.is-closed)),
+.sidebar-folders.has-groups.is-filtering { height: 62vh; }
+.sidebar-group { display: flex; flex-direction: column; flex: 1 1 0; min-height: 28px; max-height: max-content; }
 .sidebar-group.is-closed { flex: none; }
 .sidebar-group__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
 .sidebar-group__head {
@@ -1407,7 +1411,7 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .sidebar-group__empties:hover { color: rgba(250, 244, 232, 0.85); }
 /* While filtering: every group open, empties included, Recent set aside so a match shows once. */
 .sidebar-folders.is-filtering .sidebar-group--recent { display: none; }
-.sidebar-folders.is-filtering .sidebar-group.is-closed { flex: 1 1 auto; }
+.sidebar-folders.is-filtering .sidebar-group.is-closed { flex: 1 1 0; }
 .sidebar-folders.is-filtering .sidebar-group.is-closed .sidebar-group__body { display: flex; }
 .sidebar-folders.is-filtering .sidebar-folder.is-empty-folder:not([hidden]) { display: flex; }
 .sidebar-folders.is-filtering .sidebar-group__empties { display: none; }

@@ -217,6 +217,8 @@ export async function mount(container) {
     const host = threadEl.querySelector('.s-thread__tree');
     const m = byKey.get(k);
     if (!open.has(k)) { host.innerHTML = ''; return; }
+    // Whether this draw belongs to an Expand all, decided now, not after the wait.
+    const all = expandingAll;
     let entries;
     try {
       entries = await api.getThreadChain(m.uuid, 500);
@@ -224,9 +226,11 @@ export async function mount(container) {
       host.innerHTML = `<p class="s-tree-err">${su.esc(e)}</p>`;
       return;
     }
+    // Folded while this was loading (Collapse all, or a click): stay folded.
+    if (!open.has(k)) { host.innerHTML = ''; return; }
     for (const e of entries) if (!numOf.has(key8(e.uuid))) e._num = null;
     // Expand all reaches every depth: open each reply that has replies of its own.
-    if (expandingAll) {
+    if (all) {
       const parentsHere = new Set(entries.map(parentOf).filter(Boolean));
       for (const e of entries) if (parentsHere.has(key8(e.uuid))) open.add(key8(e.uuid));
     }
@@ -250,6 +254,7 @@ export async function mount(container) {
     if (threadEl) {
       const head = threadEl.querySelector(':scope > .smsg');
       head.outerHTML = card(byKey.get(k), { count: subtree(k).length, opened: open.has(k) });
+      clampCheck(threadEl);
       drawTree(threadEl);
     } else {
       // A fold inside an open tree: redraw that tree.
@@ -273,6 +278,8 @@ export async function mount(container) {
       const k = t.dataset.key;
       t.querySelector(':scope > .smsg').outerHTML = card(byKey.get(k), { count: subtree(k).length, opened: open.has(k) });
     }
+    // Re-drawn cards start with "Read all" hidden; show it where text is cut.
+    clampCheck(stream);
     expandingAll = openEverything;
     try {
       await Promise.all(threads.map((t) => drawTree(t)));
