@@ -171,7 +171,6 @@ function foldersSection(list, buttons) {
           ? group.querySelectorAll('.sidebar-folder:not([hidden])').length
           : count.dataset.total;
       }
-      stackHeads(rows);
     });
     sec.appendChild(filter);
   }
@@ -191,26 +190,10 @@ function foldersSection(list, buttons) {
     if (recent.length) rows.appendChild(folderGroup('recent', 'Recent', recent, buttons, { recent: true }));
     rows.appendChild(folderGroup('agents', 'Agents', all.filter((f) => f.tree === 'agents'), buttons));
     rows.appendChild(folderGroup('folders', 'Folders', all.filter((f) => f.tree !== 'agents'), buttons));
-    stackHeads(rows);
+    rows.classList.add('has-groups');
   }
   sec.appendChild(rows);
   return finishFoldersSection(sec, list, buttons);
-}
-
-/**
- * Give each visible group heading its place in the stack: --i headings above it
- * when it sticks to the top, --after below it when it waits at the bottom. So
- * Recent, Agents and Folders can all be reached however far the list scrolls.
- */
-function stackHeads(rows) {
-  const filtering = rows.classList.contains('is-filtering');
-  const heads = [...rows.querySelectorAll('.sidebar-group')]
-    .filter((g) => !(filtering && g.classList.contains('sidebar-group--recent')))
-    .map((g) => g.querySelector('.sidebar-group__head'));
-  heads.forEach((h, i) => {
-    h.style.setProperty('--i', String(i));
-    h.style.setProperty('--after', String(heads.length - 1 - i));
-  });
 }
 
 /** Group open/closed state, remembered per viewer (a convenience, so storage may fail). */

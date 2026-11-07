@@ -1374,23 +1374,19 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .find-folders__filter { width: 140px; color: var(--ink-1); background: transparent; border: 1px solid var(--hairline-2); }
 .sidebar-folder[hidden], .find-folder[hidden] { display: none; }
 
-/* Groups: Recent, Agents, Folders (only once agents' homes exist).
-   Every heading stays reachable while the list scrolls: each sticks to the top
-   (stacked under the ones before it) or waits at the bottom (stacked above the
-   ones after it). The group box is display:contents so a heading's sticky range
-   is the whole list, not just its own group. --i / --after are set in JS. */
-.sidebar-folders { --group-head-h: 28px; }
-.sidebar-folders { position: relative; }
-.sidebar-group { display: contents; }
+/* Groups: Recent, Agents, Folders (only once agents' homes exist), as separate
+   sections, the way Keep and Find stand apart (Jack, 6 Nov). The list itself
+   doesn't scroll; each heading is a plain row that stays put, and each open
+   group's own body scrolls. Open groups share the height, closed ones take a line. */
+.sidebar-folders.has-groups { overflow: hidden; max-height: 62vh; flex: 1 1 auto; min-height: 0; gap: 0; }
+.sidebar-group { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.sidebar-group.is-closed { flex: none; }
+.sidebar-group__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
 .sidebar-group__head {
-  position: sticky; z-index: 1;
-  top: calc(var(--i, 0) * var(--group-head-h));
-  bottom: calc(var(--after, 0) * var(--group-head-h));
-  height: var(--group-head-h); box-sizing: border-box; flex: none;
-  background: var(--s-ground);
+  flex: none; height: 28px; box-sizing: border-box;
   display: flex; align-items: center; gap: 6px; width: 100%; padding: 0 10px 0 8px;
   font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  color: rgba(250, 244, 232, 0.55); border: 0; cursor: pointer; text-align: left;
+  color: rgba(250, 244, 232, 0.55); background: none; border: 0; cursor: pointer; text-align: left;
 }
 .sidebar-group__head:hover { color: rgba(250, 244, 232, 0.85); }
 .sidebar-group__head:focus-visible { outline: 2px solid rgba(250, 244, 232, 0.5); outline-offset: -2px; border-radius: 4px; }
@@ -1411,7 +1407,8 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .sidebar-group__empties:hover { color: rgba(250, 244, 232, 0.85); }
 /* While filtering: every group open, empties included, Recent set aside so a match shows once. */
 .sidebar-folders.is-filtering .sidebar-group--recent { display: none; }
-.sidebar-folders.is-filtering .sidebar-group.is-closed .sidebar-group__body { display: block; }
+.sidebar-folders.is-filtering .sidebar-group.is-closed { flex: 1 1 auto; }
+.sidebar-folders.is-filtering .sidebar-group.is-closed .sidebar-group__body { display: flex; }
 .sidebar-folders.is-filtering .sidebar-folder.is-empty-folder:not([hidden]) { display: flex; }
 .sidebar-folders.is-filtering .sidebar-group__empties { display: none; }
 .is-collapsed .sidebar-group__head, .is-collapsed .sidebar-group__empties { display: none; }
@@ -1419,8 +1416,7 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
    groups' open/closed, filter or show-empty state (these outrank the rules above). */
 .is-collapsed .sidebar-folder:not(.is-current),
 .is-collapsed .sidebar-folder.is-mirror { display: none !important; }
-.is-collapsed .sidebar-group.is-closed .sidebar-group__body { display: block; }
-.is-collapsed .sidebar-group + .sidebar-group { margin-top: 0; }
+.is-collapsed .sidebar-group.is-closed .sidebar-group__body { display: flex; }
 @media (prefers-reduced-motion: reduce) { .sidebar-group__caret { transition: none; } }
 .sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned) { margin-top: 6px; position: relative; }
 .sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned)::before {
