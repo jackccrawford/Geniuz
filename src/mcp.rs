@@ -167,6 +167,10 @@ fn base_tool_definitions() -> Value {
                             "type": "string",
                             "description": "Optional. A folder's name or 8-character ID, to read it in full."
                         },
+                        "filter": {
+                            "type": "string",
+                            "description": "Optional. A word from a folder's name or description. With many folders the list is a shortlist; this finds the others."
+                        },
                         "create": {
                             "type": "string",
                             "description": "Optional. The name of a new folder to create, such as Work."
@@ -344,9 +348,55 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
     }
     let scan = reg.scan();
     let current = crate::resolve_db_path().ok();
+    // Many folders (a fleet's stations, 6 Nov 2026: 257) would cost every agent
+    // thousands of tokens per call. Past SHORTLIST_FROM, list the folder in use,
+    // the pinned ones and the week's newest, and say how to find the rest.
+    const SHORTLIST_FROM: usize = 20;
+    const RECENT: usize = 10;
+    const MATCHES: usize = 30;
+    let filter = params.get("filter").and_then(|f| f.as_str()).map(|f| f.trim().to_lowercase()).filter(|f| !f.is_empty());
+    let stats: Vec<(i64, Option<String>)> = scan.folders.iter().map(|f| f.stats().unwrap_or((0, None))).collect();
+    let mut chosen: Vec<usize> = (0..scan.folders.len()).collect();
+    let mut tail: Option<String> = None;
+    if let Some(q) = &filter {
+        let hits: Vec<usize> = chosen.into_iter().filter(|&i| {
+            let f = &scan.folders[i];
+            f.name.to_lowercase().contains(q.as_str()) || f.description.to_lowercase().contains(q.as_str()) || f.short_id().to_lowercase().starts_with(q.as_str())
+        }).collect();
+        if hits.is_empty() {
+            return (format!("No folder's name or description mentions \"{}\".", q), false);
+        }
+        if hits.len() > MATCHES {
+            tail = Some(format!("…and {} more matches. Narrow the filter.", hits.len() - MATCHES));
+        }
+        chosen = hits.into_iter().take(MATCHES).collect();
+    } else if scan.folders.len() > SHORTLIST_FROM {
+        let pins = reg.pinned();
+        let week_ago = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%d %H:%M:%S").to_string();
+        let mut recent: Vec<usize> = (0..scan.folders.len())
+            .filter(|&i| stats[i].1.as_deref().is_some_and(|w| w > week_ago.as_str()))
+            .collect();
+        recent.sort_by(|&a, &b| stats[b].1.cmp(&stats[a].1));
+        let mut picked: Vec<usize> = Vec::new();
+        let in_use = (0..scan.folders.len()).filter(|&i| current.as_ref() == Some(&scan.folders[i].db_path));
+        let pinned = (0..scan.folders.len()).filter(|&i| pins.iter().any(|p| p.eq_ignore_ascii_case(&scan.folders[i].uuid)));
+        for i in in_use.chain(pinned).chain(recent.into_iter().take(RECENT)) {
+            if !picked.contains(&i) { picked.push(i); }
+        }
+        let homes = scan.folders.iter().filter(|f| in_agents_tree(&f.db_path)).count();
+        let rest = scan.folders.len() - picked.len();
+        tail = Some(format!(
+            "{} more folders not shown ({} total{}). Pass filter with a word from a name or description to find one, e.g. filter: \"genesis\".",
+            rest,
+            scan.folders.len(),
+            if homes > 0 { format!(", {} of them agents' homes", homes) } else { String::new() }
+        ));
+        chosen = picked;
+    }
     let mut lines = Vec::new();
-    for f in &scan.folders {
-        let (count, last) = f.stats().unwrap_or((0, None));
+    for &i in &chosen {
+        let f = &scan.folders[i];
+        let (count, last) = stats[i].clone();
         let flat = f.description.split_whitespace().collect::<Vec<_>>().join(" ");
         let summary: String = flat.chars().take(CLIPPED).collect();
         let more = if flat.chars().count() > CLIPPED { "…" } else { "" };
@@ -362,10 +412,19 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
         }
         lines.push(line);
     }
+    if let Some(t) = tail {
+        lines.push(t);
+    }
     if !scan.blocked.is_empty() {
         lines.push(format!("{} blocked as copies of each other, until one is moved.", scan.blocked.len()));
     }
     (lines.join("\n"), false)
+}
+
+/// A folder whose directory sits in one named `agents` is an agent's home.
+fn in_agents_tree(db_path: &std::path::Path) -> bool {
+    db_path.parent().and_then(|d| d.parent()).and_then(|p| p.file_name())
+        .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("agents"))
 }
 
 /// The store for this call: the named folder, or the one in use right now.
@@ -553,10 +612,15 @@ fn call_tool(
                     })
                     .collect();
                 if !elsewhere.is_empty() {
-                    return (
-                        format!("This folder is empty. Other folders hold memories: {}.", elsewhere.join(", ")),
-                        false,
-                    );
+                    // Name a few, not hundreds: the folders tool finds the rest.
+                    const NAMED: usize = 8;
+                    let shown = elsewhere.iter().take(NAMED).cloned().collect::<Vec<_>>().join(", ");
+                    let more = if elsewhere.len() > NAMED {
+                        format!(", and {} more (the folders tool finds them)", elsewhere.len() - NAMED)
+                    } else {
+                        String::new()
+                    };
+                    return (format!("This folder is empty. Other folders hold memories: {}{}.", shown, more), false);
                 }
             }
             (text, is_error)

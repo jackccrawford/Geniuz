@@ -1685,6 +1685,7 @@ dependencies = [
 name = "geniuz-dashboard"
 version = "5.0.2"
 dependencies = [
+ "chrono",
  "geniuz",
  "serde",
  "serde_json",

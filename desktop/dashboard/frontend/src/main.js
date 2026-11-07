@@ -156,6 +156,12 @@ async function wireMenuEvents() {
       case 'menu_sidebar':
         toggleSidebar();
         break;
+      case 'menu_all_folders': {
+        // The menu shows a shortlist; the sidebar's filter reaches the rest.
+        const filter = document.querySelector('.sidebar-folders__filter');
+        if (filter) { filter.focus(); filter.select(); }
+        break;
+      }
       case 'menu_refresh':
         // Force a re-render of the current surface via state-key bump.
         setState({ _refresh: Date.now() });
@@ -184,16 +190,21 @@ async function refreshFolderCounts(list) {
   // A folder made, renamed, archived or moved elsewhere (the command line, an
   // agent) changes the list itself, and the menu lists folders too: reload for
   // that, unless a draft is open. Counts alone are updated in place.
+  // A folder can show twice (Recent repeats it in its own group), so compare the
+  // set of folders, not the rows.
   const rows = [...document.querySelectorAll('.sidebar-folder[data-folder]')];
-  const shown = rows.map((r) => `${r.dataset.folder}:${r.getAttribute('aria-label')}`).sort().join('|');
-  const now = (fresh.folders || []).map((f) => `${f.uuid}:${f.name}`).sort().join('|');
-  if (rows.length && shown !== now && getState().currentSurface !== 'remember') {
+  const shown = [...new Set(rows.map((r) => `${r.dataset.folder}:${r.getAttribute('aria-label')}`))].sort().join('|');
+  const now = (fresh.folders || []).map((f) => `${f.uuid}:${f.name}:${f.tree || ''}`).sort().join('|');
+  const was = (getState().folders?.folders || []).map((f) => `${f.uuid}:${f.name}:${f.tree || ''}`).sort().join('|');
+  const listChanged = shown !== (fresh.folders || []).map((f) => `${f.uuid}:${f.name}`).sort().join('|') || (was && was !== now);
+  if (rows.length && listChanged && getState().currentSurface !== 'remember') {
     location.reload();
     return fresh;
   }
   for (const f of fresh.folders || []) {
-    const el = document.querySelector(`.sidebar-item[data-folder="${f.uuid}"] .sidebar-item__count`);
-    if (el && el.textContent !== String(f.memories)) el.textContent = f.memories;
+    for (const el of document.querySelectorAll(`.sidebar-item[data-folder="${f.uuid}"] .sidebar-item__count`)) {
+      if (el.textContent !== String(f.memories)) el.textContent = f.memories;
+    }
   }
   return fresh;
 }

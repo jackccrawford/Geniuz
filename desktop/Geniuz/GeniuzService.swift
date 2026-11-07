@@ -46,12 +46,33 @@ struct FolderOption: Decodable, Identifiable, Equatable {
     let path: String
     let memories: Int
     let inUse: Bool
+    let pinned: Bool?
+    let lastWritten: String?
     var id: String { uuid }
 
     enum CodingKeys: String, CodingKey {
-        case uuid, name, path, memories
+        case uuid, name, path, memories, pinned
         case inUse = "in_use"
+        case lastWritten = "last_written"
     }
+}
+
+/// With many folders, a menu of all of them is a wall. Show the one in use,
+/// the pinned ones and those written in the last week (newest first, up to
+/// ten); the dashboard has the rest.
+func shortlist(_ folders: [FolderOption], over limit: Int = 20) -> [FolderOption] {
+    guard folders.count > limit else { return folders }
+    let fmt = DateFormatter()
+    fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    fmt.timeZone = TimeZone(identifier: "UTC")
+    let weekAgo = Date().addingTimeInterval(-7 * 86400)
+    let recent = folders
+        .filter { f in f.lastWritten.flatMap { fmt.date(from: String($0.prefix(19))) }.map { $0 > weekAgo } ?? false }
+        .sorted { ($0.lastWritten ?? "") > ($1.lastWritten ?? "") }
+        .prefix(10)
+    var seen = Set<String>()
+    return (folders.filter { $0.inUse } + folders.filter { $0.pinned == true } + recent)
+        .filter { seen.insert($0.uuid).inserted }
 }
 
 private struct FolderListing: Decodable {

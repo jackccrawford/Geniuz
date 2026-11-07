@@ -36,7 +36,7 @@ struct GeniuzMenu: View {
     private var folderPicker: some View {
         if service.folders.count > 1 {
             Menu {
-                ForEach(service.folders) { folder in
+                ForEach(shortlist(service.folders)) { folder in
                     Button(action: { service.useFolder(folder) }) {
                         if folder.inUse {
                             Label(folder.name, systemImage: "checkmark")
@@ -44,6 +44,10 @@ struct GeniuzMenu: View {
                             Text(folder.name)
                         }
                     }
+                }
+                if shortlist(service.folders).count < service.folders.count {
+                    Divider()
+                    Button("All \(service.folders.count) Folders…") { service.openDashboard() }
                 }
             } label: {
                 HStack(spacing: 8) {

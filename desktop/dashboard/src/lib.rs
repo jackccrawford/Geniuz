@@ -457,6 +457,10 @@ struct FolderRow {
     /// The first folder lives beside the others, so it stays where it is.
     fixed: bool,
     pinned: bool,
+    /// "agents" when the folder sits in a directory named agents (each agent's
+    /// own home), "folders" otherwise. Where a folder lives says what it is;
+    /// nothing in it is read to decide.
+    tree: &'static str,
 }
 
 #[derive(Serialize)]
@@ -482,7 +486,14 @@ fn folder_row(f: &Folder, current: Option<&str>, pinned: bool) -> FolderRow {
         current: current.is_some_and(|c| c.eq_ignore_ascii_case(&f.uuid)),
         fixed: canonical(dir) == canonical(&geniuz::data_dir()),
         pinned,
+        tree: tree_of(dir),
     }
+}
+
+/// Which tree a folder's directory belongs to (see FolderRow::tree).
+fn tree_of(dir: &std::path::Path) -> &'static str {
+    let parent = dir.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_lowercase());
+    if parent.as_deref() == Some("agents") { "agents" } else { "folders" }
 }
 
 #[tauri::command]
@@ -799,10 +810,34 @@ fn build_menu(app: &tauri::AppHandle, shortcuts: bool) -> tauri::Result<Menu<tau
     folders_menu.append(&item("menu_new_folder", "New Folder…")?)?;
     folders_menu.append(&MenuItem::with_id(app, "menu_archived", "Archived", true, None::<&str>)?)?;
     folders_menu.append(&PredefinedMenuItem::separator(app)?)?;
-    for (i, f) in list.folders.iter().enumerate() {
+    // With many folders a menu of all of them is a wall: show the one in use,
+    // the pinned ones and the week's (newest first, up to ten), then All Folders….
+    const MENU_ALL_UP_TO: usize = 20;
+    let shown: Vec<&FolderRow> = if list.folders.len() <= MENU_ALL_UP_TO {
+        list.folders.iter().collect()
+    } else {
+        let week_ago = (chrono::Utc::now() - chrono::Duration::days(7)).format("%Y-%m-%d %H:%M:%S").to_string();
+        let mut recent: Vec<&FolderRow> = list.folders.iter()
+            .filter(|f| f.last_written.as_deref().is_some_and(|w| w > week_ago.as_str()))
+            .collect();
+        recent.sort_by(|a, b| b.last_written.cmp(&a.last_written));
+        let mut out: Vec<&FolderRow> = Vec::new();
+        for f in list.folders.iter().filter(|f| f.current)
+            .chain(list.folders.iter().filter(|f| f.pinned))
+            .chain(recent.into_iter().take(10))
+        {
+            if !out.iter().any(|o| o.uuid == f.uuid) { out.push(f); }
+        }
+        out
+    };
+    for (i, f) in shown.iter().enumerate() {
         let accel = (shortcuts && i < 9).then(|| format!("CmdOrCtrl+{}", i + 1));
         let label = if f.current { format!("✓ {}", f.name) } else { f.name.clone() };
         folders_menu.append(&MenuItem::with_id(app, format!("menu_folder:{}", f.uuid), label, true, accel)?)?;
+    }
+    if shown.len() < list.folders.len() {
+        folders_menu.append(&PredefinedMenuItem::separator(app)?)?;
+        folders_menu.append(&MenuItem::with_id(app, "menu_all_folders", format!("All {} Folders…", list.folders.len()), true, None::<&str>)?)?;
     }
 
     let edit_menu = Submenu::with_items(
