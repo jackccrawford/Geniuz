@@ -181,6 +181,16 @@ async function wireMenuEvents() {
 // the sidebar's counts follow the folders instead of staying as they were at load.
 async function refreshFolderCounts(list) {
   const fresh = list || await api.listFolders();
+  // A folder made, renamed, archived or moved elsewhere (the command line, an
+  // agent) changes the list itself, and the menu lists folders too: reload for
+  // that, unless a draft is open. Counts alone are updated in place.
+  const rows = [...document.querySelectorAll('.sidebar-folder[data-folder]')];
+  const shown = rows.map((r) => `${r.dataset.folder}:${r.getAttribute('aria-label')}`).sort().join('|');
+  const now = (fresh.folders || []).map((f) => `${f.uuid}:${f.name}`).sort().join('|');
+  if (rows.length && shown !== now && getState().currentSurface !== 'remember') {
+    location.reload();
+    return fresh;
+  }
   for (const f of fresh.folders || []) {
     const el = document.querySelector(`.sidebar-item[data-folder="${f.uuid}"] .sidebar-item__count`);
     if (el && el.textContent !== String(f.memories)) el.textContent = f.memories;
