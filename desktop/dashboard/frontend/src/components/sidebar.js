@@ -197,6 +197,8 @@ function foldersSection(list, buttons) {
     count.className = 'sidebar-item__count';
     count.textContent = f.memories;
     btn.appendChild(count);
+    // So refreshFolderCounts can find this row when memories arrive.
+    btn.dataset.folder = f.uuid;
     if (f.current) {
       btn.dataset.surface = 'recent';
       btn.addEventListener('click', () => navigate('recent'));

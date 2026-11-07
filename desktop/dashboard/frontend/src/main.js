@@ -177,20 +177,38 @@ async function wireMenuEvents() {
   await listen('tray-nav', (event) => handleNav(event.payload));
 }
 
+// Memories arrive from agents and the command line while the window is open, so
+// the sidebar's counts follow the folders instead of staying as they were at load.
+async function refreshFolderCounts(list) {
+  const fresh = list || await api.listFolders();
+  for (const f of fresh.folders || []) {
+    const el = document.querySelector(`.sidebar-item[data-folder="${f.uuid}"] .sidebar-item__count`);
+    if (el && el.textContent !== String(f.memories)) el.textContent = f.memories;
+  }
+  return fresh;
+}
+
 // The folder in use can change from the menu bar or the command line. Coming back
 // to this window shows it, rather than one folder's memories under another's name.
 window.addEventListener('focus', async () => {
   if (!api.isTauri()) return;
-  // Don't reload away a draft. It's bound to the folder it names, so it stays right.
-  if (getState().currentSurface === 'remember') return;
   try {
+    const fresh = await refreshFolderCounts();
+    // Don't reload away a draft. It's bound to the folder it names, so it stays right.
+    if (getState().currentSurface === 'remember') return;
     const shown = (getState().folders?.folders || []).find((f) => f.current)?.uuid;
-    const now = (await api.listFolders()).folders.find((f) => f.current)?.uuid;
+    const now = fresh.folders.find((f) => f.current)?.uuid;
     if (shown && now && shown !== now) location.reload();
   } catch (e) {
     console.error('[geniuz] checking the folder failed:', e);
   }
 });
+
+// And while the window stays open and visible, every 15 seconds.
+setInterval(() => {
+  if (!api.isTauri() || document.hidden) return;
+  refreshFolderCounts().catch((e) => console.error('[geniuz] refreshing counts failed:', e));
+}, 15_000);
 
 // An address in any memory's text opens that memory, whichever folder it's in.
 document.addEventListener('click', async (ev) => {
