@@ -1,11 +1,13 @@
 // memoryModal.js — reading one memory (Jack, 2026-11-02: "user navigates tree,
 // clicks on memory, it pops up a modal"). The stream or Find stays exactly
-// where it was behind it; closing returns there. Read-only, and it goes nowhere
-// else: moving through a thread is the tree's job.
+// where it was behind it; closing returns there. Read-only: moving through a
+// thread is the tree's job. Its one way out is Reply, which opens Keep pointed
+// at this memory (Jack, 2026-11-06).
 
 import * as api from '../api.js';
 import * as su from '../stream-ui.js';
 import { getState } from '../store.js';
+import { replyTo } from '../surfaces/remember.js';
 
 let dialog = null;
 
@@ -62,26 +64,31 @@ export async function openMemory(uuid, { onClose, folder = null } = {}) {
     return;
   }
 
-  const { tag, rest } = su.splitGist(m.gist || '');
   const text = su.bodyAfterGist(m.content, m.gist);
   // The full address works from any folder, so that's what gets copied.
   const folderId = folder || (getState().folders?.folders || []).find((f) => f.current)?.uuid || '';
   const id = `${String(folderId).slice(0, 8)}:${String(m.uuid).slice(0, 8)}`.toUpperCase();
   d.innerHTML = panel(`
     <header class="memory-modal__head">
-      ${su.mark(tag, 36, rest)}
+      ${su.node(!!m.parent_uuid && String(m.parent_uuid).toUpperCase() !== String(m.uuid).toUpperCase())}
       <div class="memory-modal__titles">
-        ${tag ? `<div class="memory-modal__tag">${su.esc(tag)}</div>` : ''}
-        <h2 class="memory-modal__gist">${su.esc(tag ? rest : (m.gist || '(no gist)'))}</h2>
+        <h2 class="memory-modal__gist">${su.esc(m.gist || '(no gist)')}</h2>
       </div>
     </header>
     <div class="memory-modal__text">${text ? su.renderText(text) : ''}</div>
     <footer class="memory-modal__foot">
       <span>${su.esc(su.timeFull(m.created_at))}</span>
-      <button type="button" class="memory-modal__id" title="Copy this memory's address">${su.esc(id)}</button>
+      <span class="memory-modal__actions">
+        <button type="button" class="memory-modal__reply" title="Keep a new memory in this thread">Reply</button>
+        <button type="button" class="memory-modal__id" title="Copy this memory's address">${su.esc(id)}</button>
+      </span>
     </footer>
   `);
   wire();
+  d.querySelector('.memory-modal__reply').addEventListener('click', () => {
+    closeDialog();
+    replyTo({ uuid: m.uuid, folder: folderId, gist: m.gist });
+  });
   const idBtn = d.querySelector('.memory-modal__id');
   idBtn.addEventListener('click', async () => {
     try {

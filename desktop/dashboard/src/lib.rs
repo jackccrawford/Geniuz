@@ -61,7 +61,6 @@ struct RecentMemory {
     gist: String,
     content: Option<String>,
     created_at: String,
-    category: Option<String>,
     parent_uuid: Option<String>,
     /// Which folder it came from, when a search covered more than the one on screen.
     folder: Option<String>,
@@ -112,7 +111,6 @@ struct MemoryDetail {
     content: Option<String>,
     created_at: String,
     parent_uuid: Option<String>,
-    category: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -146,14 +144,30 @@ fn get_app_version() -> &'static str {
 /// auto-derives one from the first 200 chars of content. Returns the short
 /// (8-char) UUID prefix of the new memory.
 #[tauri::command]
-fn remember_memory(gist: Option<String>, content: String, folder: Option<String>) -> Result<String, String> {
+fn remember_memory(
+    gist: Option<String>,
+    content: String,
+    folder: Option<String>,
+    parent: Option<String>,
+) -> Result<String, String> {
     // The folder chosen on the page, or the one on screen.
     let db = match folder {
         Some(uuid) => DatabaseManager::open_existing(&Registry::from_env().find(&uuid)?.db_path.to_string_lossy())?,
         None => open_db()?,
     };
+    // A reply goes under a memory in this same folder. db.signal starts a new
+    // thread when the parent doesn't resolve; here that would quietly lose the
+    // reply the person asked for, so say so instead.
+    let parent = match parent.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+        Some(p) => Some(
+            db.get_by_uuid_prefix(p)?
+                .ok_or_else(|| format!("No memory {} in this folder to reply to", &p[..p.len().min(8)]))?
+                .memory_uuid,
+        ),
+        None => None,
+    };
     let gist_trimmed = gist.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty());
-    db.signal(content.trim(), gist_trimmed, None, None)
+    db.signal(content.trim(), gist_trimmed, parent.as_deref(), None)
         .map(|r| r.uuid)
 }
 
@@ -707,29 +721,15 @@ fn get_data_dir() -> String {
 // Helpers
 // -------------------------------------------------------------------------
 
-/// Extract a category from a gist by splitting on the earliest separator
-/// (`|`, `;`, or `:`). Returns `None` when no separator is present, the
-/// prefix is empty, or the prefix is too long to be a shelf label (>= 40
-/// chars). Matches the TUI's `split_gist` discipline so the dashboard chip
-/// and the TUI category render the same way.
-fn extract_category(gist: &str) -> Option<String> {
-    let positions = [gist.find('|'), gist.find(';'), gist.find(':')];
-    let earliest = positions.into_iter().flatten().min()?;
-    let cat = gist[..earliest].trim().to_string();
-    if cat.is_empty() || cat.len() >= 40 {
-        return None;
-    }
-    Some(cat)
-}
+// No category is read out of a gist. Meaning is the writer's, in the words,
+// and the app shows the gist whole (Jack, 2026-11-06).
 
 fn map_recent(e: SignalEntry) -> RecentMemory {
-    let category = extract_category(&e.gist);
     RecentMemory {
         uuid: e.memory_uuid,
         gist: e.gist,
         content: e.content,
         created_at: e.created_at,
-        category,
         parent_uuid: e.parent_uuid,
         folder: None,
         folder_name: None,
@@ -737,14 +737,12 @@ fn map_recent(e: SignalEntry) -> RecentMemory {
 }
 
 fn map_detail(e: SignalEntry) -> MemoryDetail {
-    let category = extract_category(&e.gist);
     MemoryDetail {
         uuid: e.memory_uuid,
         gist: e.gist,
         content: e.content,
         created_at: e.created_at,
         parent_uuid: e.parent_uuid,
-        category,
     }
 }
 

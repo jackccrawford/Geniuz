@@ -73,19 +73,17 @@ html.os-linux .sidebar {
 .smsg.is-current { background: color-mix(in oklab, var(--s-teal) 10%, var(--s-paper)); }
 .smsg__gutter { display: flex; justify-content: center; align-items: flex-start; padding-top: 2px; }
 
-.sm {
-  --sm: 36px;
-  display: inline-flex; align-items: center; justify-content: center;
-  width: var(--sm); height: var(--sm); border-radius: calc(var(--sm) * 0.24);
-  background: color-mix(in oklab, var(--st) 18%, var(--s-paper));
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--st) 32%, transparent);
-  color: color-mix(in oklab, var(--st) 85%, var(--s-ink));
-  font-family: var(--s-name); font-weight: 700; font-size: calc(var(--sm) * 0.42);
+/* A memory's place in the tree: a dot starts a thread, a hook answers one. */
+.snode {
+  display: inline-grid; place-items: center; flex-shrink: 0;
+  width: 18px; height: 22px;
 }
+/* The menu bar's two marks, in the dashboard's teal: the reply's hook is the
+   same colour, lighter, ending in a smaller dot. Depth is the tree's to show. */
+.snode--root { color: var(--s-teal); }
+.snode--reply { color: color-mix(in oklab, var(--s-teal) 60%, var(--s-paper)); }
 
 .smsg__head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-.smsg__tag { font-family: var(--s-name); font-weight: 700; font-size: 15px; color: var(--s-ink); white-space: nowrap; }
-.smsg__tag--plain { white-space: normal; }
 .smsg__gist { font-size: 15px; color: var(--s-ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .smsg__head time { font-size: 12px; color: var(--s-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .smsg__num { margin-left: auto; flex-shrink: 0; white-space: nowrap; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
@@ -116,8 +114,8 @@ html.os-linux .sidebar {
 
 /* ---- Threads as a tree (Jack: "like windows file manager") ------------------ */
 
-.smsg__gutter { gap: 2px; justify-content: flex-end; padding-right: 8px; }
-.smsg { grid-template-columns: 70px minmax(0, 1fr); }
+.smsg__gutter { gap: 2px; justify-content: flex-end; align-items: center; padding-right: 8px; padding-top: 0; height: 22px; }
+.smsg { grid-template-columns: 52px minmax(0, 1fr); }
 .stwisty {
   width: 22px; height: 22px; margin-top: 7px; flex-shrink: 0;
   display: inline-grid; place-items: center;
@@ -137,7 +135,7 @@ html.os-linux .sidebar {
 .smsg__replies:hover { text-decoration: underline; }
 
 /* Each level indents and hangs from a guide line, as folders do. */
-.stree { position: relative; margin-left: 46px; padding-left: 14px; }
+.stree { position: relative; margin-left: 34px; padding-left: 14px; }
 .stree::before {
   content: ""; position: absolute; left: 0; top: 0; bottom: 18px;
   border-left: 1px solid var(--s-line);
@@ -147,11 +145,11 @@ html.os-linux .sidebar {
   content: ""; position: absolute; left: -14px; top: 22px; width: 12px;
   border-top: 1px solid var(--s-line);
 }
-.smsg--child { grid-template-columns: 56px minmax(0, 1fr); padding-top: 6px; padding-bottom: 6px; }
-.smsg--child .smsg__tag, .smsg--child .smsg__gist, .smsg--child .smsg__text { font-size: 14px; }
-.smsg--child .stwisty { margin-top: 3px; }
+.smsg--child { grid-template-columns: 48px minmax(0, 1fr); padding-top: 6px; padding-bottom: 6px; }
+.smsg--child .smsg__gist, .smsg--child .smsg__text { font-size: 14px; }
+.smsg__gutter .stwisty { margin-top: 0; }
 .smsg.is-here { background: color-mix(in oklab, var(--s-teal) 12%, var(--s-paper)); box-shadow: inset 2px 0 0 var(--s-teal); }
-.s-tree-err { margin: 4px 0 8px 70px; color: var(--s-terra); font-size: 13px; }
+.s-tree-err { margin: 4px 0 8px 52px; color: var(--s-terra); font-size: 13px; }
 
 /* Deep threads keep their shape without squeezing the words out: indentation
    stops growing after three levels, and tightens in a narrow window. */
@@ -211,9 +209,8 @@ html.os-linux .sidebar {
 .memory-modal__close:focus-visible,
 .memory-modal__id:focus-visible { outline: 2px solid var(--s-teal); outline-offset: 1px; }
 .memory-modal__head { display: flex; gap: 12px; align-items: flex-start; padding-right: 28px; }
-.memory-modal__head .sm { flex: none; }
+.memory-modal__head .snode { flex: none; margin-top: 2px; }
 .memory-modal__titles { min-width: 0; display: grid; gap: 3px; }
-.memory-modal__tag { font-size: 13px; font-weight: 700; color: var(--s-ink); }
 .memory-modal__gist {
   margin: 0;
   font-family: "Newsreader", Georgia, serif;
@@ -258,6 +255,20 @@ html.os-linux .sidebar {
   cursor: pointer;
 }
 .memory-modal__id:hover { background: var(--s-hover); }
+.memory-modal__actions { display: flex; align-items: center; gap: 8px; }
+.memory-modal__reply {
+  padding: 3px 10px;
+  border: 1px solid var(--s-line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--s-ink);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.memory-modal__reply:hover { background: var(--s-hover); }
+.memory-modal__reply:focus-visible { outline: 2px solid var(--s-teal); outline-offset: 1px; }
 .memory-modal__status { margin: 0; color: var(--s-muted); }
 @media (max-width: 600px) {
   .memory-modal { width: calc(100vw - 24px); }

@@ -13,7 +13,7 @@
 ; mkdir failure.
 
 #define MyAppName "Geniuz"
-#define MyAppVersion "5.0.1"
+#define MyAppVersion "5.0.2"
 #define MyAppPublisher "Managed Ventures LLC"
 #define MyAppURL "https://geniuz.life"
 #define MyAppExeName "geniuz.exe"
@@ -67,6 +67,12 @@ WizardSmallImageFile=WizardSmallImage.bmp
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Messages]
+; Claude Desktop reads its MCP servers only when it starts, and closing its
+; window leaves it running in the tray, so say how to restart it for real.
+FinishedLabel=Setup has finished installing [name] on your computer.%n%nIf Claude Desktop is open, restart it so it can use Geniuz: right-click the Claude icon near the clock, choose Quit, then open Claude again.
+FinishedLabelNoIcons=Setup has finished installing [name] on your computer.%n%nIf Claude Desktop is open, restart it so it can use Geniuz: right-click the Claude icon near the clock, choose Quit, then open Claude again.
 
 [Files]
 Source: "geniuz.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -162,8 +168,24 @@ begin
     Result := True;
     exit;
   end;
+  // Inno doesn't expand constants in a Check parameter, so {app} arrives as written.
   // Treat case-insensitively, match exact entry boundaries
-  Result := Pos(';' + LowerCase(Param) + ';', ';' + LowerCase(OrigPath) + ';') = 0;
+  Result := Pos(';' + LowerCase(ExpandConstant(Param)) + ';', ';' + LowerCase(OrigPath) + ';') = 0;
+end;
+
+// Earlier installers added another PATH entry on every upgrade. Collapse those.
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Path, Entry: string;
+begin
+  if CurStep <> ssPostInstall then exit;
+  if not RegQueryStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Path) then exit;
+  Entry := ';' + ExpandConstant('{app}') + ';';
+  Path := ';' + Path + ';';
+  if Pos(Entry + Copy(Entry, 2, Length(Entry) - 1), Path) = 0 then exit;
+  while Pos(Entry + Copy(Entry, 2, Length(Entry) - 1), Path) > 0 do
+    StringChangeEx(Path, Entry + Copy(Entry, 2, Length(Entry) - 1), Entry, True);
+  RegWriteExpandStringValue(HKEY_CURRENT_USER, 'Environment', 'Path', Copy(Path, 2, Length(Path) - 2));
 end;
 
 // A running copy would lock the files this installer has to replace.

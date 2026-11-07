@@ -146,18 +146,17 @@ export async function mount(container) {
 
   const numOf = new Map(numbered.map((m) => [key8(m.uuid), m._num]));
   const card = (m, { depth = 0, here = false, count = 0, opened = false } = {}) => {
-    const { tag, rest } = su.splitGist(m.gist || '');
     const text = su.bodyAfterGist(m.content, m.gist);
     const num = numOf.get(key8(m.uuid));
-    const head = tag
-      ? `<b class="smsg__tag">${su.esc(tag)}</b><span class="smsg__gist">${su.esc(rest)}</span>`
-      : `<b class="smsg__tag smsg__tag--plain">${su.esc(m.gist || '(no gist)')}</b>`;
+    // The gist as written, nothing singled out (Jack, 2026-11-06: "the app
+    // just shows the gist"). Its first words are the writer's, not a category.
+    const head = `<span class="smsg__gist">${su.esc(m.gist || '(no gist)')}</span>`;
     const twisty = count || depth === 0 && parentOf(m)
       ? `<button type="button" class="stwisty${opened ? ' is-open' : ''}" data-twisty="${su.esc(m.uuid)}" aria-expanded="${opened}" aria-label="${opened ? 'Fold' : 'Open'} this thread"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4 2.5 8 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
       : `<span class="stwisty stwisty--leaf"></span>`;
     return `
       <article class="smsg${depth ? ' smsg--child' : ''}${here ? ' is-here' : ''}" data-uuid="${su.esc(m.uuid)}" tabindex="0">
-        <div class="smsg__gutter">${twisty}${su.mark(tag, depth ? 28 : 36, rest)}</div>
+        <div class="smsg__gutter">${twisty}${su.node(!!parentOf(m))}</div>
         <div class="smsg__body">
           <div class="smsg__head">${head}
             <time datetime="${su.esc(m.created_at)}" title="${su.esc(su.timeFull(m.created_at))}">${su.esc(su.timeShort(m.created_at))}</time>

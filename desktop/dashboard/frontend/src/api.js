@@ -85,8 +85,8 @@ export function getRecentMemories(limit = 24) {
  * auto-derives one from the first 200 chars of content. Returns the short
  * (8-char) UUID prefix of the new memory.
  */
-export function rememberMemory(gist, content, folder) {
-  return invoke('remember_memory', { gist: gist || null, content, folder: folder || null });
+export function rememberMemory(gist, content, folder, parent = null) {
+  return invoke('remember_memory', { gist: gist || null, content, folder: folder || null, parent: parent || null });
 }
 
 export function getActivity(days = 14) {
@@ -124,7 +124,7 @@ export function openPath(path) {
 
 /**
  * Fetch full details for a single memory by UUID.
- * Returns: { uuid, gist, content, created_at, parent_uuid, category } | null
+ * Returns: { uuid, gist, content, created_at, parent_uuid } | null
  */
 export function getMemoryDetail(uuid, folder = null) {
   return invoke('get_memory_detail', { uuid, folder });
@@ -132,7 +132,7 @@ export function getMemoryDetail(uuid, folder = null) {
 
 /**
  * Fetch all memories in the same thread as `uuid`, ordered oldest-first.
- * Returns: Array<{ uuid, gist, content, created_at, category, parent_uuid }>
+ * Returns: Array<{ uuid, gist, content, created_at, parent_uuid }>
  */
 export function getThreadChain(uuid, limit = 100) {
   return invoke('get_thread_chain', { uuid, limit });
