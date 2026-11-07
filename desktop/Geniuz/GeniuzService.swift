@@ -60,14 +60,22 @@ struct FolderOption: Decodable, Identifiable, Equatable {
 /// With many folders, a menu of all of them is a wall. Show the one in use,
 /// the pinned ones and those written in the last week (newest first, up to
 /// ten); the dashboard has the rest.
+/// Geniuz stores times as UTC "yyyy-MM-dd HH:mm:ss". A fixed-format parser
+/// needs the POSIX locale, or a 12-hour or non-Gregorian setting breaks it.
+private let storedTime: DateFormatter = {
+    let fmt = DateFormatter()
+    fmt.locale = Locale(identifier: "en_US_POSIX")
+    fmt.calendar = Calendar(identifier: .gregorian)
+    fmt.timeZone = TimeZone(identifier: "UTC")
+    fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    return fmt
+}()
+
 func shortlist(_ folders: [FolderOption], over limit: Int = 20) -> [FolderOption] {
     guard folders.count > limit else { return folders }
-    let fmt = DateFormatter()
-    fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
-    fmt.timeZone = TimeZone(identifier: "UTC")
     let weekAgo = Date().addingTimeInterval(-7 * 86400)
     let recent = folders
-        .filter { f in f.lastWritten.flatMap { fmt.date(from: String($0.prefix(19))) }.map { $0 > weekAgo } ?? false }
+        .filter { f in f.lastWritten.flatMap { storedTime.date(from: String($0.prefix(19)).replacingOccurrences(of: "T", with: " ")) }.map { $0 > weekAgo } ?? false }
         .sorted { ($0.lastWritten ?? "") > ($1.lastWritten ?? "") }
         .prefix(10)
     var seen = Set<String>()

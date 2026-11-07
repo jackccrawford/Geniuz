@@ -176,7 +176,7 @@ function foldersSection(list, buttons) {
   } else {
     const weekAgo = Date.now() - 7 * 86400_000;
     const recent = all
-      .filter((f) => f.last_written && Date.parse(f.last_written.replace(' ', 'T') + 'Z') > weekAgo)
+      .filter((f) => f.last_written && Date.parse(f.last_written.slice(0, 19).replace(' ', 'T') + 'Z') > weekAgo)
       .sort((a, b) => (b.last_written || '').localeCompare(a.last_written || ''))
       .slice(0, 12);
     if (recent.length) rows.appendChild(folderGroup('recent', 'Recent', recent, buttons, { recent: true }));

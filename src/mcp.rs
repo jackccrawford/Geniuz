@@ -378,7 +378,9 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
             .collect();
         recent.sort_by(|&a, &b| stats[b].1.cmp(&stats[a].1));
         let mut picked: Vec<usize> = Vec::new();
-        let in_use = (0..scan.folders.len()).filter(|&i| current.as_ref() == Some(&scan.folders[i].db_path));
+        let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+        let here = current.as_deref().map(canon);
+        let in_use = (0..scan.folders.len()).filter(|&i| here.as_deref() == Some(canon(&scan.folders[i].db_path).as_path()));
         let pinned = (0..scan.folders.len()).filter(|&i| pins.iter().any(|p| p.eq_ignore_ascii_case(&scan.folders[i].uuid)));
         for i in in_use.chain(pinned).chain(recent.into_iter().take(RECENT)) {
             if !picked.contains(&i) { picked.push(i); }
@@ -601,16 +603,20 @@ fn call_tool(
             // "Nothing here" mustn't read as "nothing anywhere".
             if !is_error && db.count().unwrap_or(1) == 0 {
                 let here = std::fs::canonicalize(&db.db_path).ok();
-                let elsewhere: Vec<String> = reg
+                let elsewhere = reg
                     .scan()
                     .folders
                     .iter()
                     .filter(|f| std::fs::canonicalize(&f.db_path).ok() != here)
                     .filter_map(|f| {
-                        let (count, _) = f.stats().ok()?;
-                        (count > 0).then(|| format!("{} ({})", f.name, count))
+                        let (count, last) = f.stats().ok()?;
+                        (count > 0).then(|| (last, format!("{} ({})", f.name, count)))
                     })
-                    .collect();
+                    .collect::<Vec<_>>();
+                // Newest first, so the few named are the live ones.
+                let mut elsewhere = elsewhere;
+                elsewhere.sort_by(|a, b| b.0.cmp(&a.0));
+                let elsewhere: Vec<String> = elsewhere.into_iter().map(|(_, s)| s).collect();
                 if !elsewhere.is_empty() {
                     // Name a few, not hundreds: the folders tool finds the rest.
                     const NAMED: usize = 8;

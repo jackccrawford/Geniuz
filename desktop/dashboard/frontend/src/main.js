@@ -158,8 +158,12 @@ async function wireMenuEvents() {
         break;
       case 'menu_all_folders': {
         // The menu shows a shortlist; the sidebar's filter reaches the rest.
-        const filter = document.querySelector('.sidebar-folders__filter');
-        if (filter) { filter.focus(); filter.select(); }
+        // A collapsed sidebar hides the filter, so open it first.
+        if (document.querySelector('.is-collapsed')) toggleSidebar();
+        requestAnimationFrame(() => {
+          const filter = document.querySelector('.sidebar-folders__filter');
+          if (filter) { filter.focus(); filter.select(); }
+        });
         break;
       }
       case 'menu_refresh':
@@ -197,7 +201,13 @@ async function refreshFolderCounts(list) {
   const now = (fresh.folders || []).map((f) => `${f.uuid}:${f.name}:${f.tree || ''}`).sort().join('|');
   const was = (getState().folders?.folders || []).map((f) => `${f.uuid}:${f.name}:${f.tree || ''}`).sort().join('|');
   const listChanged = shown !== (fresh.folders || []).map((f) => `${f.uuid}:${f.name}`).sort().join('|') || (was && was !== now);
-  if (rows.length && listChanged && getState().currentSurface !== 'remember') {
+  // A folder that was empty at load and now holds memories belongs out of
+  // "Show N empty" (and maybe in Recent): that's a change of place, not count.
+  const woke = (fresh.folders || []).some((f) => f.memories > 0
+    && document.querySelector(`.sidebar-folder.is-empty-folder[data-folder="${f.uuid}"]`));
+  // Never reload away work in progress: a draft, or an open dialog (New/Edit folder).
+  const busy = getState().currentSurface === 'remember' || document.querySelector('dialog[open]');
+  if (rows.length && (listChanged || woke) && !busy) {
     location.reload();
     return fresh;
   }

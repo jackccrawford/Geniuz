@@ -139,7 +139,7 @@ fn list_json(reg: &Registry, scan: &Scan, using: &Option<PathBuf>) -> Result<Str
         .iter()
         .map(|f| {
             let mut row = folder_json(f, is_in_use(f, using));
-            row["pinned"] = serde_json::json!(pinned.contains(&f.uuid));
+            row["pinned"] = serde_json::json!(pinned.iter().any(|p| p.eq_ignore_ascii_case(&f.uuid)));
             row
         })
         .collect();
