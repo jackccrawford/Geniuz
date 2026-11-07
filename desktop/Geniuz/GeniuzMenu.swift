@@ -4,22 +4,23 @@ struct GeniuzMenu: View {
     @ObservedObject var service: GeniuzService
 
     var body: some View {
+        // Status is quiet in the header; the one action people come here for,
+        // Open Dashboard, sits on the folder line it opens (Jack, 7 Nov). The
+        // connection message takes a row only when there's something to do.
         VStack(alignment: .leading, spacing: 0) {
             header
+            if needsAttention {
+                connectionStatus
+            }
             Divider()
-            folderPicker
+            folderLine
+            Divider()
 
             if service.stationExists {
                 recentMemoriesList
             } else {
                 emptyState
             }
-
-            Divider()
-            connectionStatus
-
-            Divider()
-            openDashboardRow
 
             Divider()
             quitRow
@@ -30,11 +31,40 @@ struct GeniuzMenu: View {
 
     // MARK: - Folders
 
+    /// The folder this menu shows (a picker when there are two or more), and
+    /// beside it the way into the dashboard.
+    private var folderLine: some View {
+        HStack(spacing: 8) {
+            folderPicker
+            Spacer(minLength: 8)
+            Button(action: { service.openDashboard() }) {
+                Text("Open Dashboard")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    private var currentFolderName: String {
+        service.folders.first(where: { $0.inUse })?.name ?? "My memory"
+    }
+
     /// Which folder this menu is showing, and the way to another. One folder
-    /// needs no choosing, so the row only appears with two or more.
+    /// needs no choosing, so it's just named.
     @ViewBuilder
     private var folderPicker: some View {
-        if service.folders.count > 1 {
+        if service.folders.count <= 1 {
+            HStack(spacing: 8) {
+                Image(systemName: "book").font(.system(size: 12))
+                Text(currentFolderName)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+            }
+        } else {
             Menu {
                 ForEach(shortlist(service.folders)) { folder in
                     Button(action: { service.useFolder(folder) }) {
@@ -53,37 +83,31 @@ struct GeniuzMenu: View {
                 HStack(spacing: 8) {
                     Image(systemName: "book")
                         .font(.system(size: 12))
-                    Text(service.folders.first(where: { $0.inUse })?.name ?? "My memory")
+                    Text(currentFolderName)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
-                    Spacer()
                 }
             }
             .menuStyle(.borderlessButton)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-
-            Divider()
+            .fixedSize()
         }
     }
 
-    // MARK: - Open Dashboard
+    // MARK: - Connection, quiet when fine
 
-    private var openDashboardRow: some View {
-        Button(action: { service.openDashboard() }) {
-            HStack(spacing: 8) {
-                Image(systemName: "rectangle.grid.2x2")
-                    .font(.system(size: 12))
-                Text("Open Dashboard")
-                    .font(.system(size: 12, weight: .medium))
-                Spacer()
-            }
-            .foregroundColor(.primary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+    /// Something to do about the connection: not connected, or a restart owed.
+    private var needsAttention: Bool {
+        !service.mcpInstalled || service.restartRequired
+    }
+
+    /// The header's small status mark: a quiet check when connected, an orange
+    /// mark when the row below asks for something.
+    private var statusMark: some View {
+        Image(systemName: needsAttention ? "exclamationmark.circle.fill" : "checkmark.circle")
+            .font(.system(size: 13))
+            .foregroundColor(needsAttention ? .orange : .secondary)
+            .help(service.restartRequired && service.mcpInstalled ? "Restart Claude to finish connecting" : connectionText)
+            .accessibilityLabel(connectionText)
     }
 
     // MARK: - Header
@@ -119,6 +143,8 @@ struct GeniuzMenu: View {
             }
 
             Spacer()
+
+            statusMark
 
             Button(action: { service.openSettings() }) {
                 Image(systemName: "gearshape")

@@ -1,7 +1,7 @@
 // main.js — entry point. Bootstraps the app, mounts sidebar, routes surfaces.
 
 import * as api from './api.js';
-import { sidebar, wireCollapse } from './components/sidebar.js';
+import { sidebar, wireCollapse, keepSidebarPlace } from './components/sidebar.js';
 import * as recent from './surfaces/recent.js';
 import * as remember from './surfaces/remember.js';
 import * as find from './surfaces/find.js';
@@ -70,6 +70,7 @@ async function bootstrap() {
     },
   });
   appShell.appendChild(aside);
+  requestAnimationFrame(() => keepSidebarPlace(aside));
 
   // Main mount target
   const mainHost = document.createElement('div');

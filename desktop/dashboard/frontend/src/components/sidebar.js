@@ -189,11 +189,40 @@ function foldersSection(list, buttons) {
       .slice(0, 12);
     if (recent.length) rows.appendChild(folderGroup('recent', 'Recent', recent, buttons, { recent: true }));
     rows.appendChild(folderGroup('agents', 'Agents', all.filter((f) => f.tree === 'agents'), buttons));
-    rows.appendChild(folderGroup('folders', 'Folders', all.filter((f) => f.tree !== 'agents'), buttons));
+    rows.appendChild(folderGroup('folders', 'Shared', all.filter((f) => f.tree !== 'agents'), buttons));
     rows.classList.add('has-groups');
   }
   sec.appendChild(rows);
   return finishFoldersSection(sec, list, buttons);
+}
+
+/**
+ * Choosing a folder reloads the app (so no screen shows one folder's memories
+ * under another's name). Keep the sidebar's place across that reload: each
+ * section's scroll is saved as the page goes and restored after, and the
+ * folder now showing is brought into view (Jack, 7 Nov). Call once the
+ * sidebar is in the document.
+ */
+const SCROLL_KEY = 'geniuz.sidebar.scroll';
+export function keepSidebarPlace(aside) {
+  const boxes = () => [...aside.querySelectorAll('.sidebar-folders, .sidebar-group__body')];
+  const keyOf = (el) => (el.classList.contains('sidebar-folders') ? 'list' : el.closest('.sidebar-group')?.dataset.key || '');
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || '{}');
+    for (const b of boxes()) if (saved[keyOf(b)]) b.scrollTop = saved[keyOf(b)];
+  } catch { /* a convenience */ }
+  // The one in its own section, not its Recent copy.
+  const current = aside.querySelector('.sidebar-folder.is-current:not(.is-mirror)');
+  if (current && current.offsetParent) current.scrollIntoView({ block: 'nearest' });
+  const save = () => {
+    try {
+      const out = {};
+      for (const b of boxes()) out[keyOf(b)] = b.scrollTop;
+      sessionStorage.setItem(SCROLL_KEY, JSON.stringify(out));
+    } catch { /* a convenience */ }
+  };
+  window.addEventListener('beforeunload', save);
+  window.addEventListener('pagehide', save);
 }
 
 /** Group open/closed state, remembered per viewer (a convenience, so storage may fail). */
@@ -208,6 +237,7 @@ function setGroupOpen(key, open) {
 function folderGroup(key, title, folders, buttons, { recent = false } = {}) {
   const group = document.createElement('div');
   group.className = `sidebar-group${recent ? ' sidebar-group--recent' : ''}`;
+  group.dataset.key = key;
   group.classList.toggle('is-closed', !groupOpen(key));
   const head = document.createElement('button');
   head.type = 'button';

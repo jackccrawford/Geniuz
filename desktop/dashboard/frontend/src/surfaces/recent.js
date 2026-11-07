@@ -225,6 +225,11 @@ export async function mount(container) {
       return;
     }
     for (const e of entries) if (!numOf.has(key8(e.uuid))) e._num = null;
+    // Expand all reaches every depth: open each reply that has replies of its own.
+    if (expandingAll) {
+      const parentsHere = new Set(entries.map(parentOf).filter(Boolean));
+      for (const e of entries) if (parentsHere.has(key8(e.uuid))) open.add(key8(e.uuid));
+    }
     const rootEntry = entries.find((e) => !parentOf(e) || !entries.some((x) => key8(x.uuid) === parentOf(e))) || entries[0];
     const rootKey = key8(rootEntry.uuid);
     if (rootKey === k) {
@@ -250,6 +255,40 @@ export async function mount(container) {
       // A fold inside an open tree: redraw that tree.
       const owner = stream.querySelector(`.smsg[data-uuid="${uuid}"]`)?.closest('.s-thread');
       if (owner) drawTree(owner);
+    }
+  }
+
+  // Expand all / Collapse all (Jack, 7 Nov): every thread loaded on screen,
+  // at every depth. Folding one afterwards still works, since what's open is
+  // the same set a single fold changes.
+  let expandingAll = false;
+  async function setAll(openEverything) {
+    const threads = [...stream.querySelectorAll('.s-thread')];
+    if (openEverything) {
+      for (const t of threads) if (subtree(t.dataset.key).length) open.add(t.dataset.key);
+    } else {
+      open.clear();
+    }
+    for (const t of threads) {
+      const k = t.dataset.key;
+      t.querySelector(':scope > .smsg').outerHTML = card(byKey.get(k), { count: subtree(k).length, opened: open.has(k) });
+    }
+    expandingAll = openEverything;
+    try {
+      await Promise.all(threads.map((t) => drawTree(t)));
+    } finally {
+      expandingAll = false;
+      saveOpen();
+    }
+  }
+  if (top.some((m) => subtree(key8(m.uuid)).length)) {
+    for (const [label, everything] of [['Expand all', true], ['Collapse all', false]]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'sort-toggle list-controls__all';
+      b.textContent = label;
+      b.addEventListener('click', () => setAll(everything));
+      controls.appendChild(b);
     }
   }
 

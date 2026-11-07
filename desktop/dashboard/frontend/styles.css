@@ -1447,3 +1447,6 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .is-collapsed .sidebar-folder__pin { display: none; }
 /* While filtering, every group shows its matches, so every caret says open. */
 .sidebar-folders.is-filtering .sidebar-group__caret { transform: rotate(90deg); }
+/* Expand all / Collapse all sit together on the right of the list controls. */
+.list-controls__all { margin-left: auto; font-size: 12px; }
+.list-controls__all + .list-controls__all { margin-left: 0; }

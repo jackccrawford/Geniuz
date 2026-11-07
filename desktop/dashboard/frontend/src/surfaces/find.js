@@ -558,7 +558,7 @@ function scopePicker({ allFolders, getChosen, setChosen, onScreen }) {
   list.appendChild(row('All folders', allFolders.length, null));
   const hasAgents = allFolders.some((f) => f.tree === 'agents');
   const groups = hasAgents
-    ? [['Agents', allFolders.filter((f) => f.tree === 'agents')], ['Folders', allFolders.filter((f) => f.tree !== 'agents')]]
+    ? [['Agents', allFolders.filter((f) => f.tree === 'agents')], ['Shared', allFolders.filter((f) => f.tree !== 'agents')]]
     : [[null, allFolders]];
   const heads = [];
   for (const [title, fs] of groups) {
