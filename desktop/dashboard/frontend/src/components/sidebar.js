@@ -163,6 +163,15 @@ function foldersSection(list, buttons) {
       for (const row of rows.querySelectorAll('.sidebar-folder')) {
         row.hidden = !!q && !row.dataset.tip?.toLowerCase().includes(q);
       }
+      // Headings count what matches while filtering, and their totals after.
+      for (const group of rows.querySelectorAll('.sidebar-group')) {
+        const count = group.querySelector('.sidebar-group__count');
+        if (!count) continue;
+        count.textContent = q
+          ? group.querySelectorAll('.sidebar-folder:not([hidden])').length
+          : count.dataset.total;
+      }
+      stackHeads(rows);
     });
     sec.appendChild(filter);
   }
@@ -182,9 +191,26 @@ function foldersSection(list, buttons) {
     if (recent.length) rows.appendChild(folderGroup('recent', 'Recent', recent, buttons, { recent: true }));
     rows.appendChild(folderGroup('agents', 'Agents', all.filter((f) => f.tree === 'agents'), buttons));
     rows.appendChild(folderGroup('folders', 'Folders', all.filter((f) => f.tree !== 'agents'), buttons));
+    stackHeads(rows);
   }
   sec.appendChild(rows);
   return finishFoldersSection(sec, list, buttons);
+}
+
+/**
+ * Give each visible group heading its place in the stack: --i headings above it
+ * when it sticks to the top, --after below it when it waits at the bottom. So
+ * Recent, Agents and Folders can all be reached however far the list scrolls.
+ */
+function stackHeads(rows) {
+  const filtering = rows.classList.contains('is-filtering');
+  const heads = [...rows.querySelectorAll('.sidebar-group')]
+    .filter((g) => !(filtering && g.classList.contains('sidebar-group--recent')))
+    .map((g) => g.querySelector('.sidebar-group__head'));
+  heads.forEach((h, i) => {
+    h.style.setProperty('--i', String(i));
+    h.style.setProperty('--after', String(heads.length - 1 - i));
+  });
 }
 
 /** Group open/closed state, remembered per viewer (a convenience, so storage may fail). */
@@ -207,6 +233,7 @@ function folderGroup(key, title, folders, buttons, { recent = false } = {}) {
   head.innerHTML = `<span class="sidebar-group__caret" aria-hidden="true"></span><span class="sidebar-group__title"></span><span class="sidebar-group__count"></span>`;
   head.querySelector('.sidebar-group__title').textContent = title;
   head.querySelector('.sidebar-group__count').textContent = folders.length;
+  head.querySelector('.sidebar-group__count').dataset.total = String(folders.length);
   head.addEventListener('click', () => {
     const open = group.classList.toggle('is-closed') === false;
     head.setAttribute('aria-expanded', String(open));

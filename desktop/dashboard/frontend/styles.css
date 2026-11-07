@@ -1374,10 +1374,21 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .find-folders__filter { width: 140px; color: var(--ink-1); background: transparent; border: 1px solid var(--hairline-2); }
 .sidebar-folder[hidden], .find-folder[hidden] { display: none; }
 
-/* Groups: Recent, Agents, Folders (only once agents' homes exist). */
-.sidebar-group + .sidebar-group { margin-top: 8px; }
+/* Groups: Recent, Agents, Folders (only once agents' homes exist).
+   Every heading stays reachable while the list scrolls: each sticks to the top
+   (stacked under the ones before it) or waits at the bottom (stacked above the
+   ones after it). The group box is display:contents so a heading's sticky range
+   is the whole list, not just its own group. --i / --after are set in JS. */
+.sidebar-folders { --group-head-h: 28px; }
+.sidebar-folders { position: relative; }
+.sidebar-group { display: contents; }
 .sidebar-group__head {
-  display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 10px 4px 8px;
+  position: sticky; z-index: 1;
+  top: calc(var(--i, 0) * var(--group-head-h));
+  bottom: calc(var(--after, 0) * var(--group-head-h));
+  height: var(--group-head-h); box-sizing: border-box; flex: none;
+  background: var(--s-ground);
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 0 10px 0 8px;
   font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
   color: rgba(250, 244, 232, 0.55); background: none; border: 0; cursor: pointer; text-align: left;
 }
@@ -1438,3 +1449,5 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .sidebar-folder__pin.is-on svg { fill: currentColor; }
 .sidebar-folder__pin:hover { opacity: 1; background: rgba(250, 244, 232, 0.14); }
 .is-collapsed .sidebar-folder__pin { display: none; }
+/* While filtering, every group shows its matches, so every caret says open. */
+.sidebar-folders.is-filtering .sidebar-group__caret { transform: rotate(90deg); }
