@@ -1390,7 +1390,7 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
   background: var(--s-ground);
   display: flex; align-items: center; gap: 6px; width: 100%; padding: 0 10px 0 8px;
   font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  color: rgba(250, 244, 232, 0.55); background: none; border: 0; cursor: pointer; text-align: left;
+  color: rgba(250, 244, 232, 0.55); border: 0; cursor: pointer; text-align: left;
 }
 .sidebar-group__head:hover { color: rgba(250, 244, 232, 0.85); }
 .sidebar-group__head:focus-visible { outline: 2px solid rgba(250, 244, 232, 0.5); outline-offset: -2px; border-radius: 4px; }
