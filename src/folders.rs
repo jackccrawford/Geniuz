@@ -323,7 +323,7 @@ impl Registry {
         }
         if self.no_default() {
             return Err("No default folder is set, so name a folder: the folder argument, or -f <folder> \
-                        on the command line. A default can be chosen in Settings, or with `geniuz folder use`."
+                        on the command line. A default can be chosen in Settings, or with `geniuz folder use <folder>`."
                 .to_string());
         }
         if let Some(q) = self.current() {
@@ -334,7 +334,7 @@ impl Registry {
                     if e.contains("Move one of them") {
                         e
                     } else {
-                        format!("The current folder ({}) isn't available. Choose one with `geniuz folder use`.", q)
+                        format!("The current folder ({}) isn't available. Choose one with `geniuz folder use <folder>`.", q)
                     }
                 });
         }
@@ -359,7 +359,7 @@ impl Registry {
     }
 
     /// Whether the default was set to none: a command that names no folder must
-    /// ask for one rather than guess (Jack and SSH, 7 Nov 2026: on a machine many
+    /// ask for one rather than guess: on a machine many
     /// agents share, a memory in the wrong folder can't be moved afterwards).
     pub fn no_default(&self) -> bool {
         std::fs::read_to_string(self.current_path())

@@ -89,11 +89,11 @@ private struct FolderListing: Decodable {
 
 // MARK: - Updates
 //
-// "Update available" (Jack, 7 Nov: "it's how good apps work"). The app asks
+// "Update available". The app asks
 // GitHub for the latest published release (drafts and pre-releases are never
 // "latest") and compares versions. It downloads nothing and installs nothing:
 // Download opens the disk image in the browser. Installing in place (Sparkle)
-// needs an update-signing key, which is Jack's decision.
+// needs an update-signing key, so it isn't done yet.
 
 let releasesAPI = URL(string: "https://api.github.com/repos/jackccrawford/Geniuz/releases/latest")!
 let releasesPage = URL(string: "https://github.com/jackccrawford/Geniuz/releases/latest")!
@@ -209,8 +209,8 @@ class GeniuzService: ObservableObject {
     }
 
     /// The folder this menu shows: the one picked here, else the default folder,
-    /// else the first. Picking here only changes what the menu shows (Jack, 7 Nov
-    /// 2026: looking is not choosing where memories go); the default folder is a
+    /// else the first. Picking here only changes what the menu shows (looking
+    /// is not choosing where memories go); the default folder is a
     /// setting. The binary owns the rules for finding folders, so this never has a
     /// second copy of them.
     var stationPath: String { stationPath(shown: shownFolderID) }
@@ -364,7 +364,7 @@ class GeniuzService: ObservableObject {
             return
         }
         // One serial queue for all of this: the folder cache and its stamps are only
-        // ever touched there (Firn's review, PR #30: concurrent refreshes raced).
+        // ever touched there, because concurrent refreshes race.
         work.async { [weak self] in
             guard let self = self else { return }
             let folders = self.readFolders()
@@ -380,7 +380,7 @@ class GeniuzService: ObservableObject {
             DispatchQueue.main.async {
                 self.folders = folders
                 // A refresh for the folder shown before a newer pick lands late: keep its
-                // folder list, drop its memories (Firn's review, PR #30).
+                // folder list, drop its memories.
                 guard shown == self.shownFolderID else { return }
                 self.stationExists = station.exists
                 self.memoryCount = station.memories
@@ -650,7 +650,7 @@ class GeniuzService: ObservableObject {
     // MARK: - Direct SQLite station read
 
     /// One memory tuple as displayed in the popover.
-    /// `parentUuid == uuid` for root memories (per the relay/Geniuz convention),
+    /// `parentUuid == uuid` for root memories (the Geniuz convention),
     /// or different for follow-ups; the menu uses this to render threading.
     struct RecentMemory: Identifiable, Equatable {
         let id: String           // memory_uuid

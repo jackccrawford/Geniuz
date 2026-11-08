@@ -5,7 +5,7 @@ struct GeniuzMenu: View {
 
     var body: some View {
         // Status is quiet in the header; the one action people come here for,
-        // Open Dashboard, sits on the folder line it opens (Jack, 7 Nov). The
+        // Open Dashboard, sits on the folder line it opens. The
         // connection message takes a row only when there's something to do.
         VStack(alignment: .leading, spacing: 0) {
             header
@@ -55,8 +55,7 @@ struct GeniuzMenu: View {
     /// The folder this menu shows: picked here, else the default, else the first.
     private var shownFolder: FolderOption? {
         if let id = service.shownFolderID, let f = service.folders.first(where: { $0.uuid == id }) { return f }
-        // With no default set, the menu shows the first folder: name it and check it
-        // (Firn's review, PR #30).
+        // With no default set, the menu shows the first folder: name it and check it.
         return service.folders.first(where: { $0.inUse })
             ?? service.folders.first(where: { $0.path == service.defaultStationPath })
     }
@@ -128,7 +127,7 @@ struct GeniuzMenu: View {
     // MARK: - Connection, quiet when fine
 
     /// Something to do about the connection: not connected, or a restart owed.
-    /// An unreadable Claude config counts too, so its message row shows (cubic, PR #30).
+    /// An unreadable Claude config counts too, so its message row shows.
     private var needsAttention: Bool {
         (!service.mcpInstalled && service.claudeFound)
             || (service.mcpInstalled && service.restartRequired)

@@ -168,8 +168,8 @@ impl DatabaseManager {
             return Err("Content cannot be empty".to_string());
         }
         // Every time in the store has one shape, UTC `YYYY-MM-DD HH:MM:SS`: times are
-        // compared as text, so another shape sorts and filters wrongly (Talus's report,
-        // 7 Nov 2026: 11 such memories exist from older writers; none may be added).
+        // compared as text, so another shape sorts and filters wrongly. Some
+        // older writers stored other shapes; no more may be added.
         if let Some(t) = created_at {
             let ok = t.len() == 19
                 && chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S").is_ok();
@@ -305,7 +305,7 @@ impl DatabaseManager {
     }
 
     /// One page of the whole folder, newest first or oldest first, `offset` memories in.
-    /// The dashboard reads a folder this way so a large one (Genesis: 5,587) is all
+    /// The dashboard reads a folder this way so a large one (thousands of memories) is all
     /// reachable, and "oldest first" starts at the oldest, not at the newest page reversed.
     pub fn page(&self, oldest_first: bool, offset: usize, limit: usize) -> Result<Vec<SignalEntry>, String> {
         let dir = if oldest_first { "ASC" } else { "DESC" };
@@ -377,10 +377,12 @@ impl DatabaseManager {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
-    /// Where a memory sits in the folder's order, (created_at, rowid): the cursor
-    /// `watch` keeps. A time alone can't be a cursor: memories written in the same
-    /// second share it, and "after" by time skips all but one of them (full-tree
-    /// test, 7 Nov 2026). Takes a UUID, a prefix, or an address FOLDER:MEMORY.
+    /// Where a memory sits in the order memories were written, (created_at, rowid):
+    /// the cursor `watch` keeps. The rowid decides. A time can't be a cursor: memories
+    /// written in the same second share it, and a memory kept with `--at`, or copied in
+    /// with its original date, is dated before memories written earlier, so "after" by
+    /// time would never show it. Memories are never deleted, so each new row's rowid is
+    /// higher than every earlier one's. Takes a UUID, a prefix, or an address FOLDER:MEMORY.
     pub fn position_of(&self, id: &str) -> Result<Option<(String, i64)>, String> {
         let (folder, memory) = match id.split_once(':') {
             Some((f, m)) => (Some(f.trim()), m.trim()),
@@ -390,7 +392,7 @@ impl DatabaseManager {
             return Ok(None);
         }
         // An address names its folder: one that isn't this folder is an error that
-        // says so, not "not found" (cubic, PR #30).
+        // says so, not "not found".
         if let Some(f) = folder.filter(|f| !f.is_empty()) {
             let here: Option<String> = self.conn()?
                 .query_row("SELECT value FROM _meta WHERE key = 'folder_uuid'", [], |r| r.get(0))
@@ -414,13 +416,14 @@ impl DatabaseManager {
     pub fn last_position(&self) -> Result<Option<(String, i64)>, String> {
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT created_at, rowid FROM memories ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            "SELECT created_at, rowid FROM memories ORDER BY rowid DESC LIMIT 1",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional().map_err(|e| format!("Query failed: {}", e))
     }
 
-    /// Memories after a position, oldest first, each with its own position.
+    /// Memories written after a position, in the order they were written, each with
+    /// its own position.
     pub fn after(&self, pos: &(String, i64), limit: usize) -> Result<Vec<((String, i64), SignalEntry)>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
@@ -428,8 +431,8 @@ impl DatabaseManager {
                     COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
                     created_at, parent_uuid, json_extract(payload, '$.content'), rowid
              FROM memories
-             WHERE created_at > ?1 OR (created_at = ?1 AND rowid > ?2)
-             ORDER BY created_at ASC, rowid ASC LIMIT ?3"
+             WHERE rowid > ?2
+             ORDER BY rowid ASC LIMIT ?3"
         ).map_err(|e| format!("Query failed: {}", e))?;
         let rows = stmt.query_map(rusqlite::params![pos.0, pos.1, limit as i64], |row| {
             let uuid: String = row.get(0)?;
@@ -913,8 +916,7 @@ impl DatabaseManager {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
-    /// The whole thread `id` (a UUID or prefix) belongs to, as `relay tune
-    /// --thread` reads one: up from `id` to its root, then every memory under
+    /// The whole thread `id` (a UUID or prefix) belongs to: up from `id` to its root, then every memory under
     /// that root, oldest first, inside `window`, at most `limit` of them
     /// (search feature 6).
     ///
@@ -1187,8 +1189,7 @@ pub struct SignalResult {
 
 impl DatabaseManager {
     /// The full address of a memory in this folder, FOLDER:MEMORY (8 + 8), the form
-    /// that opens it from any folder (Jack, 7 Nov 2026: "I'd actually like to see the
-    /// return value with both numbers"). Just the memory's ID if the folder has none.
+    /// that opens it from any folder, and what keep answers with. Just the memory's ID if the folder has none.
     pub fn address(&self, memory_uuid: &str) -> String {
         let short = |s: &str| s.chars().take(8).collect::<String>().to_uppercase();
         let folder: Option<String> = self.conn().ok().and_then(|c| {
@@ -1223,11 +1224,11 @@ pub struct SignalEntry {
 // Pattern: each test gets its own tempdir and DatabaseManager so they don't
 // share state and can run in parallel.
 
-/// The one clock: UTC now in the fleet format, computed by SQLite. Spelled
+/// The one clock: UTC now in the stored format, computed by SQLite. Spelled
 /// with `strftime` rather than `datetime('now','utc')`: the `utc` modifier
 /// tells SQLite the value to its left is local time, and some builds take
 /// that literally and shift an already-UTC `now` by the local offset (SQLite
-/// 3.45 did, in Geniuz Team, 2026-10-21). Old memory.db files keep the old
+/// 3.45 did). Old memory.db files keep the old
 /// DEFAULT in their schema; every write names the clock itself.
 pub const NOW_UTC: &str = "strftime('%Y-%m-%d %H:%M:%S', 'now')";
 
@@ -1310,10 +1311,9 @@ mod tests {
             .uuid
     }
 
-    /// The clock is UTC whatever SQLite is linked in. Geniuz Team, bundling
-    /// SQLite 3.45, stamped every record seven hours ahead through
-    /// `datetime('now','utc')` (found 2026-10-21); Free was right only
-    /// because it bundled 3.46. The stamp must not depend on that guess.
+    /// The clock is UTC whatever SQLite is linked in. A build bundling
+    /// SQLite 3.45 stamped every record seven hours ahead through
+    /// `datetime('now','utc')`; one bundling 3.46 was right only by luck. The stamp must not depend on that guess.
     #[test]
     fn a_fresh_memory_is_stamped_now_in_utc() {
         let (db, _dir) = fresh_db();
@@ -1323,7 +1323,7 @@ mod tests {
             .query_row("SELECT created_at FROM memories WHERE memory_uuid LIKE ?1", [format!("{short}%")], |r| r.get(0))
             .unwrap();
         let at = chrono::NaiveDateTime::parse_from_str(&stamped, "%Y-%m-%d %H:%M:%S")
-            .unwrap_or_else(|e| panic!("fleet format is YYYY-MM-DD HH:MM:SS, got {stamped:?}: {e}"))
+            .unwrap_or_else(|e| panic!("stored format is YYYY-MM-DD HH:MM:SS, got {stamped:?}: {e}"))
             .and_utc();
         let skew = (chrono::Utc::now() - at).num_seconds().abs();
         assert!(skew < 120, "stamped {stamped} is {skew}s from UTC now");
@@ -1592,6 +1592,18 @@ mod tests {
     }
 
     #[test]
+    fn watch_sees_a_memory_dated_before_the_cursor() {
+        let (db, _dir) = fresh_db();
+        let first = db.signal_with_backend("now", Some("now"), None, Some("2026-11-08 09:00:00"), Some(&MockBackend)).unwrap();
+        let start = db.position_of(&first.uuid).unwrap().unwrap();
+        // Kept afterwards, dated months earlier (keep --at, or copied in with its date).
+        db.signal_with_backend("old", Some("old"), None, Some("2026-03-21 00:00:00"), Some(&MockBackend)).unwrap();
+        let after: Vec<String> = db.after(&start, 10).unwrap().into_iter().map(|(_, e)| e.gist).collect();
+        assert_eq!(after, ["old"]);
+        assert!(db.after(&db.last_position().unwrap().unwrap(), 10).unwrap().is_empty(), "the newest written is the end");
+    }
+
+    #[test]
     fn recent_respects_limit() {
         let (db, _dir) = fresh_db();
         for i in 0..10 {
@@ -1681,7 +1693,7 @@ mod tests {
 
     /// Embeds by whether a text names "Cubic": everything is about reviews,
     /// and the one memory that names Cubic sits a little off the review axis —
-    /// the shape of Pumpkin's question (2026-09-30), where months of review-ish
+    /// the shape of a real question, where months of review-ish
     /// memories outranked last week's answer.
     struct ReviewAxis;
     impl crate::embedding::EmbeddingBackend for ReviewAxis {
@@ -1694,7 +1706,7 @@ mod tests {
         fn name(&self) -> &str { "review-axis" }
     }
 
-    fn pumpkins_station() -> (DatabaseManager, tempfile::TempDir, String) {
+    fn review_folder() -> (DatabaseManager, tempfile::TempDir, String) {
         let (db, dir) = fresh_db();
         for i in 0..30 {
             let ts = format!("2026-{:02}-{:02} 12:00:00", 2 + i / 6, 1 + (i % 6) * 4);
@@ -1709,7 +1721,7 @@ mod tests {
 
     #[test]
     fn semantic_without_a_window_buries_last_weeks_answer() {
-        let (db, _dir, cubic) = pumpkins_station();
+        let (db, _dir, cubic) = review_folder();
         let hits = db.semantic_search_with("third-party reviewers", &Window::all(), 5, Some(&ReviewAxis)).unwrap();
         assert_eq!(hits.len(), 5);
         assert!(hits.iter().all(|h| !h.memory_uuid.starts_with(&cubic)), "{:?}",
@@ -1718,7 +1730,7 @@ mod tests {
 
     #[test]
     fn a_window_narrows_before_ranking_so_last_weeks_answer_comes_first() {
-        let (db, _dir, cubic) = pumpkins_station();
+        let (db, _dir, cubic) = review_folder();
         let week = Window::parse(Some("7d"), None).unwrap();
         let hits = db.semantic_search_with("third-party reviewers", &week, 5, Some(&ReviewAxis)).unwrap();
         assert_eq!(hits.len(), 1, "only last week's memory is inside the window");
@@ -1806,7 +1818,7 @@ mod tests {
     /// it, from the full content, inside the window asked for.
     #[test]
     fn grep_finds_a_name_deep_in_a_body_inside_the_window() {
-        let (db, _dir, cubic) = pumpkins_station();
+        let (db, _dir, cubic) = review_folder();
         db.signal_with_backend("Weekly notes\nlots of other text\n\nIn the end Cubic signed off.",
             Some("weekly notes"), None, Some("2026-03-01 00:00:00"), Some(&ReviewAxis)).unwrap();
         let terms = crate::dig::Terms::parse(&["cubic"]).unwrap();

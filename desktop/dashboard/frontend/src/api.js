@@ -35,8 +35,8 @@ export function useFolder(uuid) {
   return invoke('use_folder', { uuid });
 }
 
-/** Show this folder in this window, and change nothing else (Jack, 7 Nov: looking
- *  is not choosing where memories go). */
+/** Show this folder in this window, and change nothing else: looking
+ *  is not choosing where memories go. */
 export function viewFolder(uuid) {
   return invoke('view_folder', { uuid });
 }

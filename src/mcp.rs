@@ -359,7 +359,7 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
     }
     let scan = reg.scan();
     let current = crate::resolve_db_path().ok();
-    // Many folders (a fleet's stations, 6 Nov 2026: 257) would cost every agent
+    // Many folders (hundreds, where many agents share a machine) would cost every agent
     // thousands of tokens per call. Past SHORTLIST_FROM, list the folder in use,
     // the pinned ones and the week's newest, and say how to find the rest.
     const SHORTLIST_FROM: usize = 20;
@@ -399,7 +399,7 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
         let homes = scan.folders.iter().filter(|f| in_agents_tree(&f.db_path)).count();
         let rest = scan.folders.len() - picked.len();
         if rest > 0 { tail = Some(format!(
-            "{} more folders not shown ({} total{}). Pass filter with a word from a name or description to find one, e.g. filter: \"genesis\".",
+            "{} more folders not shown ({} total{}). Pass filter with a word from a name or description to find one, e.g. filter: \"work\".",
             rest,
             scan.folders.len(),
             if homes > 0 { format!(", {} of them agents' homes", homes) } else { String::new() }

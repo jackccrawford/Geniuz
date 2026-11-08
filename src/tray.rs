@@ -1,6 +1,6 @@
 //! Geniuz tray — Windows ambient presence.
 //!
-//! Design commitment (per Jack, April 18 2026 late evening):
+//! Design commitment:
 //!   - Tooltip carries live "is it working?" status — memory count + Claude
 //!     Desktop connection state.
 //!   - Right-click menu carries only what a tooltip can't: identity, recent

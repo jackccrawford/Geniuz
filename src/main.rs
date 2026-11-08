@@ -140,7 +140,7 @@ static IN_FOLDER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new
 
 /// Which database this command uses. One resolver for everything in this binary.
 /// One specific memory file. `GENIUZ_STATION` is its older name, still honored
-/// because fleet scripts may set it.
+/// because older scripts may set it.
 fn explicit_db_env() -> Option<String> {
     std::env::var("GENIUZ_DB").or_else(|_| std::env::var("GENIUZ_STATION")).ok()
 }
@@ -813,7 +813,7 @@ fn run(cli: Cli) -> Result<String, String> {
 
         Command::Watch { interval, since, exec, once, json } => {
             // An address names its own folder: watch that one, as recall opens it,
-            // whatever the default (Firn's review, PR #30). With -f too, they must agree.
+            // whatever the default. With -f too, they must agree.
             let db = match since.as_deref().and_then(geniuz::folders::parse_address) {
                 Some((folder, _)) => {
                     let reg = geniuz::folders::Registry::from_env();
@@ -832,8 +832,10 @@ fn run(cli: Cli) -> Result<String, String> {
                 eprintln!("[watch] Memory text arrives as a shell variable, which single quotes keep from expanding. Use double quotes in: {t}");
             }
 
-            // The cursor is a position, (time, row): memories written in the same
-            // second are all seen, not just the first (full-tree test, 7 Nov 2026).
+            // The cursor is a position in the order memories were written, so every
+            // memory written since is seen, whatever its date. Between checks it is held
+            // as the last memory's ID and looked up again, because another tool's VACUUM
+            // can renumber rows (it keeps their order).
             let mut cursor = if let Some(ref id) = since {
                 db.position_of(id)?.ok_or_else(|| format!("Memory not found: {}", id))?
             } else if once {
@@ -851,10 +853,17 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
             }
 
+            let mut last_seen: Option<String> = since.clone();
             loop {
+                if let Some(id) = last_seen.as_deref() {
+                    if let Some(pos) = db.position_of(id)? {
+                        cursor = pos;
+                    }
+                }
                 let found = db.after(&cursor, 100)?;
-                if let Some((pos, _)) = found.last() {
+                if let Some((pos, e)) = found.last() {
                     cursor = pos.clone();
+                    last_seen = Some(e.memory_uuid.clone());
                 }
                 let entries: Vec<_> = found.into_iter().map(|(_, e)| e).collect();
 

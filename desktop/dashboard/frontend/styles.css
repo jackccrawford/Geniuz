@@ -1144,7 +1144,7 @@ html.os-linux .reply-results { background: rgba(255, 255, 255, 0.92); }
 }
 
 /* ============================================================================
-   The header on a Mac, and the sidebar collapsed to icons (Jack, 2026-11-02)
+   The header on a Mac, and the sidebar collapsed to icons
    ============================================================================ */
 
 .window-topbar { display: none; }
@@ -1261,7 +1261,7 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 
 .main-header__titles { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .main-header__titles .main-header__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Edit: a pencil (Jack, 7 Nov 2026), quiet until pointed at. */
+/* Edit: a pencil, quiet until pointed at. */
 .folder-edit {
   flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0;
   border: 0; border-radius: 6px; background: none; cursor: pointer;
@@ -1378,7 +1378,7 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .sidebar-folder[hidden], .find-folder[hidden] { display: none; }
 
 /* Groups: Recent, Agents, Folders (only once agents' homes exist), as separate
-   sections, the way Keep and Find stand apart (Jack, 6 Nov). The list itself
+   sections, the way Keep and Find stand apart. The list itself
    doesn't scroll; each heading is a plain row that stays put, and each open
    group's own body scrolls. Open groups share the height, closed ones take a line. */
 .sidebar-folders.has-groups { overflow: hidden; max-height: 62vh; flex: 1 1 auto; min-height: 0; gap: 0; }

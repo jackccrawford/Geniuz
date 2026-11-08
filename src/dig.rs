@@ -145,7 +145,7 @@ pub fn names_in(names: &[String], text: &str) -> usize {
 pub struct Hit {
     pub memory_uuid: String,
     pub created_at: String,
-    /// The chapter (Geniuz Team turns); `None` in Geniuz Free.
+    /// The chapter, in stores that record one; `None` here.
     pub chapter: Option<i64>,
     pub line: String,
 }
@@ -244,7 +244,7 @@ impl Harvest {
                         }
                     } else {
                         let w = raw.trim_matches(|c: char| !c.is_alphanumeric());
-                        // A possessive is the name it belongs to: Jack's is Jack.
+                        // A possessive is the name it belongs to: Sam's is Sam.
                         let w = w.strip_suffix("'s").or_else(|| w.strip_suffix("’s")).unwrap_or(w);
                         if !sentence_start && !is_function_word(w) && name_shaped(w) && !asked.contains(&w.to_lowercase())
                             && !is_calendar_word(w) && !seen_here.iter().any(|s| s == w)
@@ -321,8 +321,8 @@ pub fn count(n: usize, one: &str, many: &str) -> String {
 
 /// Whether `w` looks like a proper name and not code: a capital, then
 /// letters (a hyphen or apostrophe may join two parts, as in Jean-Luc or
-/// O'Brien), at most two capitals (LimeJello, Jean-Luc), and no digit, `_`,
-/// `=`, path or dot. Found on a Windows store (2026-10-01): Get-CimInstance,
+/// O'Brien), at most two capitals (McCoy, Jean-Luc), and no digit, `_`,
+/// `=`, path or dot. Found on a Windows store: Get-CimInstance,
 /// Win32_OperatingSystem and TotalVirtualMemorySize were offered as names.
 fn name_shaped(w: &str) -> bool {
     let mut chars = w.chars();
@@ -333,7 +333,7 @@ fn name_shaped(w: &str) -> bool {
         return false;
     }
     // Three capitals or more is an identifier (Get-CimInstance,
-    // TotalVirtualMemorySize); a name has one or two (Jean-Luc, LimeJello).
+    // TotalVirtualMemorySize); a name has one or two (Jean-Luc, McCoy).
     w.chars().filter(|c| c.is_uppercase()).count() <= 2 && w.chars().any(|c| c.is_lowercase())
 }
 
@@ -426,24 +426,23 @@ mod tests {
         let code = Harvest::of(&[
             "Ran Get-CimInstance on Win32_OperatingSystem; TotalVirtualMemorySize was low. Set GENIUZ_STATION=C:\\path\\to.db first.",
             "Again Get-CimInstance and Win32_OperatingSystem. Columns: Name High Thermal Zone, then High Thermal Zone again.",
-            "Asked LimeJello and Jean-Luc.", "Then LimeJello and Jean-Luc replied.",
+            "Asked McCoy and Jean-Luc.", "Then McCoy and Jean-Luc replied.",
         ], "", &[]);
         let got: Vec<&str> = code.names.iter().map(|(n, _)| n.as_str()).collect();
-        assert_eq!(got, ["Jean-Luc", "LimeJello"], "{:?}", code.names);
+        assert_eq!(got, ["Jean-Luc", "McCoy"], "{:?}", code.names);
         // SSH's caution (13625F6B:CB7E79C3): real surnames carry two capitals,
         // and the rule allows two. Checked, not assumed.
-        for n in ["McDonald", "MacArthur", "DeShawn", "LaToya", "O'Brien", "DiCaprio", "Jean-Luc", "LimeJello"] {
+        for n in ["McDonald", "MacArthur", "DeShawn", "LaToya", "O'Brien", "DiCaprio", "Jean-Luc", "McCoy"] {
             assert!(name_shaped(n), "{n} must count as a name");
         }
         for n in ["Get-CimInstance", "TotalVirtualMemorySize", "Win32_OperatingSystem", "GENIUZ", "C:\\path"] {
             assert!(!name_shaped(n), "{n} is code, not a name");
         }
-        // Jack's Find, 2026-10-01: possessives, a quoted "What", and names in
-        // every hit.
+        // A real Find: possessives, a quoted "What", and names in every hit.
         let find = Harvest::of(&[
-            "Asked Devin — What we found was Jack's note.",
-            "Then Devin and Jack spoke. \"What next?\" said Jack.",
-            "Then Jack wrote it.", "Again Jack, with Mara.", "And Jack with Mara.",
+            "Asked Devin — What we found was Sam's note.",
+            "Then Devin and Sam spoke. \"What next?\" said Sam.",
+            "Then Sam wrote it.", "Again Sam, with Mara.", "And Sam with Mara.",
         ], "", &[]);
         let got: Vec<&str> = find.names.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(got, ["Devin", "Mara"], "{:?}", find.names);
