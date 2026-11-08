@@ -24,7 +24,7 @@ export async function mount(container) {
   let stats, recent;
   try {
     [stats, recent] = await Promise.all([
-      api.getStationStats(),
+      api.getFolderStats(),
       api.getRecentMemories(PAGE, 0, (getState().sortDirection || 'desc') === 'asc'),
     ]);
   } catch (e) {

@@ -55,11 +55,7 @@ fn main() {
     }
 }
 
-use geniuz::data_dir;
 
-fn default_db_path() -> PathBuf {
-    data_dir().join("memory.db")
-}
 
 
 /// Locate and launch the Geniuz Dashboard binary.
@@ -147,9 +143,9 @@ fn explicit_db_env() -> Option<String> {
 
 pub fn resolve_db_path() -> Result<PathBuf, String> {
     let flag = IN_FOLDER.get().and_then(|f| f.as_deref());
-    let env_station = explicit_db_env();
+    let env_db = explicit_db_env();
     let cwd = std::env::current_dir().ok();
-    geniuz::folders::Registry::from_env().resolve(flag, env_station.as_deref(), cwd.as_deref())
+    geniuz::folders::Registry::from_env().resolve(flag, env_db.as_deref(), cwd.as_deref())
 }
 
 pub fn get_db() -> Result<db::DatabaseManager, String> {

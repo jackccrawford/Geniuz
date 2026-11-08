@@ -1271,13 +1271,19 @@ Drag Geniuz to Applications, open it from there, and run this again.".to_string(
         }
     }
 
-    let station = crate::default_db_path();
-    if station.exists() {
-        if let Ok(db) = crate::get_db() {
-            let count = db.count().unwrap_or(0);
-            if count > 0 {
-                lines.push(String::new());
-                lines.push(format!("  Your folder has {} existing memories, and Claude will find them.", count));
+    // The folder Claude will use when it names none, if there is one: counted
+    // there, not in the first folder.
+    if let Ok(path) = crate::resolve_db_path() {
+        if path.exists() {
+            if let Ok(db) = crate::get_db() {
+                let count = db.count().unwrap_or(0);
+                if count > 0 {
+                    let name = geniuz::folders::identity_at(&path)
+                        .map(|f| format!("\"{}\"", f.name))
+                        .unwrap_or_else(|| "Your folder".to_string());
+                    lines.push(String::new());
+                    lines.push(format!("  {} has {} memories, and Claude will find them.", name, count));
+                }
             }
         }
     }

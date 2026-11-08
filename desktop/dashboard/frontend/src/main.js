@@ -49,7 +49,7 @@ async function bootstrap() {
         api.getAppVersion(),
         api.getDataDir(),
       ]);
-      stats = await api.getStationStats();
+      stats = await api.getFolderStats();
     } catch (e) {
       console.error('[geniuz] bootstrap failed:', e);
     }

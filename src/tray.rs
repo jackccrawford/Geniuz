@@ -34,7 +34,6 @@ use winit::window::WindowId;
 #[derive(Clone, Default)]
 struct Status {
     memory_count: usize,
-    station_exists: bool,
     recent_gists: Vec<String>,
     claude_configured: bool,
     restart_required: bool,
@@ -55,8 +54,8 @@ impl Status {
         let reg = geniuz::folders::Registry::from_env();
         let no_default = reg.no_default();
         let resolved = reg.resolve(None, None, None);
-        let station_path = resolved.clone().unwrap_or_else(|_| geniuz::data_dir().join("memory.db"));
-        let in_use = std::fs::canonicalize(&station_path).unwrap_or_else(|_| station_path.clone());
+        let db_path = resolved.clone().unwrap_or_else(|_| geniuz::data_dir().join("memory.db"));
+        let in_use = std::fs::canonicalize(&db_path).unwrap_or_else(|_| db_path.clone());
         let folders: Vec<(String, String, bool)> = reg
             .scan()
             .folders
@@ -71,10 +70,10 @@ impl Status {
                 (f.uuid, f.name, current)
             })
             .collect();
-        let (memory_count, recent_gists, station_exists) = if no_default {
-            (0, Vec::new(), true)
-        } else if station_path.exists() {
-            match geniuz::db::DatabaseManager::open_existing(&station_path.to_string_lossy()) {
+        let (memory_count, recent_gists) = if no_default {
+            (0, Vec::new())
+        } else if db_path.exists() {
+            match geniuz::db::DatabaseManager::open_existing(&db_path.to_string_lossy()) {
                 Ok(db) => {
                     let count = db.count().unwrap_or(0);
                     let gists = db
@@ -83,12 +82,12 @@ impl Status {
                         .into_iter()
                         .map(|e| e.gist)
                         .collect();
-                    (count, gists, true)
+                    (count, gists)
                 }
-                Err(_) => (0, Vec::new(), false),
+                Err(_) => (0, Vec::new()),
             }
         } else {
-            (0, Vec::new(), false)
+            (0, Vec::new())
         };
 
         Status {
@@ -96,7 +95,6 @@ impl Status {
             no_default,
             update: geniuz::update::available(),
             memory_count,
-            station_exists,
             recent_gists,
             claude_configured: check_claude_configured(),
             restart_required,

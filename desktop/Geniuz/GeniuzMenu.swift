@@ -19,7 +19,7 @@ struct GeniuzMenu: View {
             folderLine
             Divider()
 
-            if service.stationExists {
+            if service.folderExists {
                 recentMemoriesList
             } else {
                 emptyState
@@ -57,7 +57,7 @@ struct GeniuzMenu: View {
         if let id = service.shownFolderID, let f = service.folders.first(where: { $0.uuid == id }) { return f }
         // With no default set, the menu shows the first folder: name it and check it.
         return service.folders.first(where: { $0.inUse })
-            ?? service.folders.first(where: { $0.path == service.defaultStationPath })
+            ?? service.folders.first(where: { $0.path == service.firstFolderPath })
     }
 
     private var currentFolderName: String {
@@ -151,7 +151,7 @@ struct GeniuzMenu: View {
     /// How much is held, beside the version: the one number a person uses.
     private var headerDetail: String {
         let version = "v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0")"
-        guard service.stationExists else { return version }
+        guard service.folderExists else { return version }
         let noun = service.memoryCount == 1 ? "memory" : "memories"
         return "\(formattedCount(service.memoryCount)) \(noun) · \(version)"
     }
@@ -195,7 +195,7 @@ struct GeniuzMenu: View {
         .padding(.bottom, 10)
     }
 
-    // MARK: - Empty state (no station yet)
+    // MARK: - Empty state (no folder yet)
 
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {

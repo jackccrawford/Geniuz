@@ -71,7 +71,7 @@ export function dayLabel(at) {
 
 /**
  * A memory's words as HTML: code kept verbatim, links that open in the
- * browser, station pointers (ABCD1234:EF567890) as chips, **bold**, breaks.
+ * browser, addresses (ABCD1234:EF567890) as chips, **bold**, breaks.
  */
 export function renderText(content) {
   let s = esc(content);

@@ -14,7 +14,7 @@ export async function mount(container) {
   try {
     [dataDir, stats] = await Promise.all([
       api.getDataDir(),
-      api.getStationStats(),
+      api.getFolderStats(),
     ]);
   } catch (e) {
     container.innerHTML = `

@@ -316,13 +316,13 @@ impl Registry {
     pub fn resolve(
         &self,
         flag: Option<&str>,
-        env_station: Option<&str>,
+        env_db: Option<&str>,
         cwd: Option<&Path>,
     ) -> Result<PathBuf, String> {
         if let Some(q) = flag {
             return Ok(self.find(q)?.db_path);
         }
-        if let Some(path) = env_station.filter(|s| !s.is_empty()) {
+        if let Some(path) = env_db.filter(|s| !s.is_empty()) {
             return Ok(PathBuf::from(path));
         }
         if let Some(dir) = cwd {

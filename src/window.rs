@@ -117,9 +117,9 @@ impl Window {
 /// "nothing found" carries its scope and a short list says how big the pool
 /// was (search feature 5). For example
 /// `searched: PILOT · 312 memories · since 7d · semantic "reviewers"`.
-pub fn scope_line(station: Option<&str>, memories: usize, window: &Window, mode: &str) -> String {
+pub fn scope_line(folders: Option<&str>, memories: usize, window: &Window, mode: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
-    if let Some(s) = station.filter(|s| !s.is_empty()) {
+    if let Some(s) = folders.filter(|s| !s.is_empty()) {
         parts.push(s.to_string());
     }
     parts.push(format!("{memories} {}", if memories == 1 { "memory" } else { "memories" }));

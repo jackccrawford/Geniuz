@@ -151,7 +151,7 @@ class GeniuzService: ObservableObject {
     @Published var claudeConfigUnreadable: Bool = false
     @Published var claudeCodeConnected: Bool = false
     @Published var claudeCodeFailed: Bool = false
-    @Published var stationExists: Bool = false
+    @Published var folderExists: Bool = false
     @Published var recentExpanded: Bool = false
     @Published var restartRequired: Bool = false
     @Published var cliOnPath: Bool = false
@@ -204,7 +204,7 @@ class GeniuzService: ObservableObject {
     }
 
     /// The first folder: where everything goes until another is chosen.
-    var defaultStationPath: String {
+    var firstFolderPath: String {
         return "\(dataDir)/memory.db"
     }
 
@@ -213,13 +213,13 @@ class GeniuzService: ObservableObject {
     /// is not choosing where memories go); the default folder is a
     /// setting. The binary owns the rules for finding folders, so this never has a
     /// second copy of them.
-    var stationPath: String { stationPath(shown: shownFolderID) }
+    var folderPath: String { folderPath(shown: shownFolderID) }
 
     /// The same, for a folder picked in the menu read on the main thread beforehand
     /// (refresh runs its reads on a background queue).
-    func stationPath(shown: String?) -> String {
+    func folderPath(shown: String?) -> String {
         if let id = shown, let f = cachedFolders.first(where: { $0.uuid == id }) { return f.path }
-        return cachedFolders.first(where: { $0.inUse })?.path ?? defaultStationPath
+        return cachedFolders.first(where: { $0.inUse })?.path ?? firstFolderPath
     }
 
     /// The folder picked in this menu, if any (kept for this run of the app).
@@ -330,7 +330,7 @@ class GeniuzService: ObservableObject {
     }
 
     init() {
-        NSLog("[geniuz-app] init — realHome=%@ stationPath=%@", realHome, stationPath)
+        NSLog("[geniuz-app] init — realHome=%@ folderPath=%@", realHome, folderPath)
         availableUpdate = readUpdateFile()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
@@ -368,7 +368,7 @@ class GeniuzService: ObservableObject {
         work.async { [weak self] in
             guard let self = self else { return }
             let folders = self.readFolders()
-            let station = self.readStation(shown: shown)
+            let folder = self.readFolder(shown: shown)
             // The full check runs the registered program, so once per launch is enough.
             let entry = self.readClaudeEntry(runIt: !self.verifiedThisLaunch)
             self.verifiedThisLaunch = true
@@ -382,10 +382,10 @@ class GeniuzService: ObservableObject {
                 // A refresh for the folder shown before a newer pick lands late: keep its
                 // folder list, drop its memories.
                 guard shown == self.shownFolderID else { return }
-                self.stationExists = station.exists
-                self.memoryCount = station.memories
-                self.recentMemories = station.recentMemories
-                self.recentGists = station.recentGists
+                self.folderExists = folder.exists
+                self.memoryCount = folder.memories
+                self.recentMemories = folder.recentMemories
+                self.recentGists = folder.recentGists
                 self.settleClaudeConnection(entry)
                 self.claudeCodeConnected = claudeCode
                 self.cliOnPath = onPath
@@ -664,7 +664,7 @@ class GeniuzService: ObservableObject {
         return lines.last.map { $0.split(separator: ":").map(String.init) }
     }
 
-    // MARK: - Direct SQLite station read
+    // MARK: - Direct SQLite folder read
 
     /// One memory tuple as displayed in the popover.
     /// `parentUuid == uuid` for root memories (the Geniuz convention),
@@ -693,19 +693,19 @@ class GeniuzService: ObservableObject {
         }
     }
 
-    private struct StationInfo {
+    private struct FolderInfo {
         var exists: Bool = false
         var memories: Int = 0
         var recentMemories: [RecentMemory] = []
         var recentGists: [String] = []  // legacy, kept so existing call sites compile
     }
 
-    private func readStation(shown: String?) -> StationInfo {
-        var info = StationInfo()
-        let path = stationPath(shown: shown)
+    private func readFolder(shown: String?) -> FolderInfo {
+        var info = FolderInfo()
+        let path = folderPath(shown: shown)
 
         let fileExists = FileManager.default.fileExists(atPath: path)
-        NSLog("[geniuz-app] readStation path=%@ exists=%d", path, fileExists ? 1 : 0)
+        NSLog("[geniuz-app] readFolder path=%@ exists=%d", path, fileExists ? 1 : 0)
 
         guard fileExists else { return info }
         info.exists = true
@@ -759,7 +759,7 @@ class GeniuzService: ObservableObject {
         }
         sqlite3_finalize(stmt)
 
-        NSLog("[geniuz-app] station: %d memories, %d recent", info.memories, info.recentMemories.count)
+        NSLog("[geniuz-app] folder: %d memories, %d recent", info.memories, info.recentMemories.count)
         return info
     }
 

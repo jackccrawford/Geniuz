@@ -71,7 +71,7 @@ fn open_db() -> Result<DatabaseManager, String> {
 // -------------------------------------------------------------------------
 
 #[derive(Serialize, Default)]
-struct StationStats {
+struct FolderStats {
     total_memories: usize,
     this_week: usize,
     storage_bytes: u64,
@@ -259,7 +259,7 @@ fn remember_memory(
 }
 
 #[tauri::command]
-fn get_station_stats() -> Result<StationStats, String> {
+fn get_folder_stats() -> Result<FolderStats, String> {
     let db = open_db()?;
     let total_memories = db.count()?;
     let this_week = db.count_since_days(7)?;
@@ -268,7 +268,7 @@ fn get_station_stats() -> Result<StationStats, String> {
     let last_write_iso = db.last_write_timestamp()?;
     let storage_bytes = std::fs::metadata(db_path()?).map(|m| m.len()).unwrap_or(0);
 
-    Ok(StationStats {
+    Ok(FolderStats {
         total_memories,
         this_week,
         storage_bytes,
@@ -1056,7 +1056,7 @@ pub fn run() {
             get_update,
             view_folder,
             remember_memory,
-            get_station_stats,
+            get_folder_stats,
             get_recent_memories,
             get_activity,
             semantic_search,

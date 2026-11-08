@@ -615,9 +615,9 @@ impl DatabaseManager {
         //
         // Look every time, not only when semantic left slots free. Ranking is
         // unthresholded, so semantic returns exactly min(cached_count, limit) —
-        // meaning on any station holding more embedded memories than `limit`,
+        // meaning in any folder holding more embedded memories than `limit`,
         // a "fill the leftovers" gate never fires at all. That populated
-        // station is precisely the case this exists to protect.
+        // folder is precisely the case this exists to protect.
         //
         // Unembedded memories are invisible to the ranker rather than ranked
         // low, so there is no honest way to score them against cosine hits.
@@ -1440,7 +1440,7 @@ mod tests {
 
     #[test]
     fn unembedded_share_seats_hits_on_a_full_page_of_semantic_results() {
-        // The regression this guards: a populated station where semantic
+        // The regression this guards: a populated folder where semantic
         // ranking fills every slot. A "only if slots are free" rule yields 0
         // here, which leaves the unembedded memories exactly as invisible as
         // they were before the fix.
@@ -1451,7 +1451,7 @@ mod tests {
 
     #[test]
     fn unembedded_share_uses_free_slots_before_reserving() {
-        // Small or sparse station: semantic came back short, so unembedded
+        // Small or sparse folder: semantic came back short, so unembedded
         // hits take the leftovers rather than displacing anything.
         assert_eq!(unembedded_share(10, 4, 3), 3, "free slots absorb all matches");
         assert_eq!(unembedded_share(10, 0, 10), 10, "an empty page can fill entirely");
@@ -1461,7 +1461,7 @@ mod tests {
     #[test]
     fn unembedded_count_tracks_memories_the_backend_could_not_embed() {
         let (db, _dir) = fresh_db();
-        assert_eq!(db.unembedded_count().unwrap(), 0, "fresh station has nothing pending");
+        assert_eq!(db.unembedded_count().unwrap(), 0, "a fresh folder has nothing pending");
         db.keep_with_backend("embeds fine", None, None, None, Some(&MockBackend)).unwrap();
         assert_eq!(db.unembedded_count().unwrap(), 0, "a successful embed leaves nothing pending");
         db.keep_with_backend("backend was down", None, None, None, Some(&FailingBackend)).unwrap();
