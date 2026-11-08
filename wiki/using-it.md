@@ -5,8 +5,8 @@
 | You have | Do this |
 |---|---|
 | A Mac | Download [Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg) and drag it to Applications. To use `geniuz` in a terminal, use **Settings → Copy Install Command** in the menubar. |
-| Windows 11 | Download [Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe). It installs per user, with no admin prompt. |
 | Linux | Run the command below, or see the [releases](https://github.com/jackccrawford/geniuz/releases/latest) for `.deb`, AppImage and tarballs (x86_64 and arm64). |
+| Windows 11 | Download [Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe). It installs per user, with no admin prompt. |
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jackccrawford/geniuz/main/install.sh | bash
@@ -32,8 +32,8 @@ On a Mac, the menubar tells you when a newer Geniuz is out, and **Download** ope
 
 | You use | Next step |
 |---|---|
-| Claude Desktop | Connects by itself when Geniuz opens. Restart Claude Desktop once. To connect by hand: `geniuz mcp install` |
 | Claude Code, Cursor, Windsurf | `geniuz skill` prints instructions to give your agent |
+| Claude Desktop | Connects by itself when Geniuz opens. Restart Claude Desktop once. To connect by hand: `geniuz mcp install` |
 | Your own agents | Call `geniuz keep` and `geniuz recall` from a shell, or run `geniuz mcp serve` |
 
 Then keep talking. Your AI saves what matters as you go. Tomorrow, in a new chat, ask it what you told it today.
@@ -128,18 +128,18 @@ Editing a description keeps the old wording. Your first folder, "My memory", can
 
 In the dashboard. Change any of these under Settings, and the menu follows at once.
 
-| Keys, on a Mac | What they do |
+| What it does | Keys, on a Mac |
 |---|---|
-| ⌘N | Keep |
-| ⌘K | Find |
-| ⌘0 | Memories in this folder |
-| ⌘1 to ⌘9 | Your first nine folders, in sidebar order (not changeable) |
-| ⇧⌘N | New folder |
-| ⌘B | Show or hide the sidebar |
-| ⇧⌘S | Status |
-| ⌘, | Settings |
-| ⇧⌘E | Export this folder |
-| ⌘R | Refresh |
+| Export this folder | ⇧⌘E |
+| Find | ⌘K |
+| Keep | ⌘N |
+| Memories in this folder | ⌘0 |
+| New folder | ⇧⌘N |
+| Refresh | ⌘R |
+| Settings | ⌘, |
+| Show or hide the sidebar | ⌘B |
+| Status | ⇧⌘S |
+| Your first nine folders, in sidebar order (not changeable) | ⌘1 to ⌘9 |
 
 On Windows and Linux, use Ctrl in place of ⌘.
 
@@ -165,8 +165,8 @@ Read the schema freely, and write through Geniuz, which keeps embeddings and ide
 
 | Variable | What it does |
 |---|---|
-| `GENIUZ_HOME` | Where Geniuz keeps its files |
 | `GENIUZ_DB` | Use one specific memory file, for the CLI and MCP |
-| `GENIUZ_MODELS_PATH` | Where the model is stored |
-| `GENIUZ_EMBED_URL`, `GENIUZ_EMBED_MODEL` | The embedding service to try if the built-in model fails to load |
 | `GENIUZ_EMBED_SOCKET`, `GENIUZ_EMBED_SPAWN`, `GENIUZ_EMBED_IDLE` | Control the embed helper |
+| `GENIUZ_EMBED_URL`, `GENIUZ_EMBED_MODEL` | The embedding service to try if the built-in model fails to load |
+| `GENIUZ_HOME` | Where Geniuz keeps its files |
+| `GENIUZ_MODELS_PATH` | Where the model is stored |

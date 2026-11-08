@@ -70,9 +70,9 @@ Other kinds of recall skip meaning entirely:
 | Flag | What it does |
 |---|---|
 | `--grep Cubic --grep PR` | Memories holding every term, showing each line with any of them |
-| `--thread 98672A90` | A whole thread, starting at its root |
 | `--keyword "exact words"` | Keyword search |
 | `--random` | Something you may have forgotten |
+| `--thread 98672A90` | A whole thread, starting at its root |
 
 Two more forms reach across folders. `recall --all "topic"` searches every folder and shows each result with its address. `recall 13625F6B:3487B9B0` opens that memory in full, whichever folder it is in. In the dashboard, Find can search any selection of folders, and an address in a memory's text can be clicked.
 
