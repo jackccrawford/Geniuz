@@ -499,7 +499,7 @@ function scopePicker({ allFolders, getChosen, setChosen, onScreen }) {
       return;
     }
     const picked = [...getChosen()].map((id) => byId.get(id)).filter(Boolean);
-    for (const f of picked.slice(0, 3)) {
+    picked.slice(0, 3).forEach((f, i) => {
       const chip = document.createElement('span');
       chip.className = 'find-scope__chip';
       const chipName = document.createElement('span');
@@ -518,13 +518,15 @@ function scopePicker({ allFolders, getChosen, setChosen, onScreen }) {
           next.delete(f.uuid);
           if (next.size) setChosen(next);
           paint();
-          // The chip is gone; keep the keyboard in the same place.
-          (summary.querySelector('.find-scope__remove') || trigger).focus();
+          // The chip is gone: focus the remove button that took its place, else the
+          // one before it, else the folder picker.
+          const left = summary.querySelectorAll('.find-scope__remove');
+          (left[i] || left[left.length - 1] || trigger).focus();
         });
         chip.appendChild(x);
       }
       summary.appendChild(chip);
-    }
+    });
     if (picked.length > 3) {
       const more = document.createElement('button');
       more.type = 'button';

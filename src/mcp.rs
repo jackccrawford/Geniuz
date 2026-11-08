@@ -1388,9 +1388,10 @@ pub fn status() -> Result<String, String> {
     }
 
     // The folder a memory goes to when it names none: the one resolve picks.
-    let reg = geniuz::folders::Registry::from_env();
     match crate::resolve_db_path() {
-        Err(_) if reg.no_default() => {
+        // Only the no-default refusal reads as "no default"; any other reason (a
+        // .geniuz-folder naming a missing folder, say) is shown as it is.
+        Err(e) if e == geniuz::folders::NO_DEFAULT_MESSAGE => {
             lines.push("Folder: no default; each memory names its folder".to_string());
         }
         Err(e) => lines.push(format!("Folder: {}", e)),
@@ -1398,17 +1399,17 @@ pub fn status() -> Result<String, String> {
             lines.push("Folder: not created yet (will be created on first keep)".to_string());
         }
         Ok(path) => {
-            let name = reg
-                .scan()
-                .folders
-                .into_iter()
-                .find(|f| std::fs::canonicalize(&f.db_path).ok() == std::fs::canonicalize(&path).ok())
+            // Named from the database itself: a status check changes nothing on disk.
+            let name = geniuz::folders::identity_at(&path)
                 .map(|f| format!("{} ({})", f.name, f.short_id()))
                 .unwrap_or_else(|| path.display().to_string());
-            if let Ok(db) = crate::get_db() {
-                let count = db.count().unwrap_or(0);
-                let embeddings = db.embedding_count().unwrap_or(0);
-                lines.push(format!("Folder: {} ({} memories, {}/{} embedded)", name, count, embeddings, count));
+            match crate::get_db() {
+                Ok(db) => {
+                    let count = db.count().unwrap_or(0);
+                    let embeddings = db.embedding_count().unwrap_or(0);
+                    lines.push(format!("Folder: {} ({} memories, {}/{} embedded)", name, count, embeddings, count));
+                }
+                Err(e) => lines.push(format!("Folder: {} (can't be opened: {})", name, e)),
             }
         }
     }

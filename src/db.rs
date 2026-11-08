@@ -1099,7 +1099,8 @@ impl DatabaseManager {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT e.memory_uuid,
-                    COALESCE(json_extract(s.payload, '$.gist'), substr(json_extract(s.payload, '$.content'), 1, 120)),
+                    COALESCE(json_extract(s.payload, '$.gist'), substr(json_extract(s.payload, '$.content'), 1, 120),
+                             substr(s.payload, 1, 120), ''),
                     s.created_at, e.embedding
              FROM memory_embeddings e
              JOIN memories s ON s.memory_uuid = e.memory_uuid"
@@ -1607,6 +1608,15 @@ mod tests {
         assert_eq!(uncached.len(), 1);
         assert!(uncached[0].1.contains("moved the docs"), "{:?}", uncached);
         assert_eq!(db.unembedded_count().unwrap(), uncached.len(), "what is counted is what backfill embeds");
+
+        // Once embedded, search by meaning still works in the folder: a memory with no
+        // gist and no content must not break reading the cache.
+        let emb = crate::embedding::EmbeddingBackend::embed(&MockBackend, &uncached[0].1).unwrap();
+        db.cache_embedding(&uncached[0].0, &emb).unwrap();
+        let cached = db.get_cached_embeddings().unwrap();
+        assert_eq!(cached.len(), 1);
+        assert!(cached[0].gist.contains("breadcrumbs"), "{}", cached[0].gist);
+        assert!(db.semantic_search_with("docs", &Window::all(), 5, Some(&MockBackend)).is_ok());
     }
 
     #[test]

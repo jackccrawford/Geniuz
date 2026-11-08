@@ -271,6 +271,7 @@ export async function mount(container) {
     if (threadEl) {
       const head = threadEl.querySelector(':scope > .smsg');
       head.outerHTML = card(byKey.get(k), { count: subtree(k).length, opened: open.has(k) });
+      markRead();
       clampCheck(threadEl);
       drawTree(threadEl);
     } else {
@@ -294,6 +295,7 @@ export async function mount(container) {
     for (const t of threads) {
       const k = t.dataset.key;
       t.querySelector(':scope > .smsg').outerHTML = card(byKey.get(k), { count: subtree(k).length, opened: open.has(k) });
+      markRead();
     }
     // Re-drawn cards start with "Read all" hidden; show it where text is cut.
     clampCheck(stream);

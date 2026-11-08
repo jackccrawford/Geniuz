@@ -52,9 +52,8 @@ impl Status {
     fn fetch(restart_required: bool) -> Self {
         let reg = geniuz::folders::Registry::from_env();
         let no_default = reg.no_default();
-        let station_path = reg
-            .resolve(None, None, None)
-            .unwrap_or_else(|_| geniuz::data_dir().join("memory.db"));
+        let resolved = reg.resolve(None, None, None);
+        let station_path = resolved.clone().unwrap_or_else(|_| geniuz::data_dir().join("memory.db"));
         let in_use = std::fs::canonicalize(&station_path).unwrap_or_else(|_| station_path.clone());
         let folders: Vec<(String, String, bool)> = reg
             .scan()
@@ -62,7 +61,10 @@ impl Status {
             .into_iter()
             .map(|f| {
                 // Under "none" no folder is the default, whatever the fallback path is.
+                // Marked only when the default really resolves: a saved default that's
+                // unavailable must not show the fallback as if it were chosen.
                 let current = !no_default
+                    && resolved.is_ok()
                     && std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()) == in_use;
                 (f.uuid, f.name, current)
             })
@@ -221,7 +223,7 @@ fn build_menu(status: &Status) -> MenuBuild {
     // needs no choosing, so this appears with two or more, or when set to none.
     let mut folder_ids = Vec::new();
     if status.folders.len() > 1 || status.no_default {
-        let name = if status.no_default { "None" } else { status.current_folder().unwrap_or("not chosen") };
+        let name = if status.no_default { "None" } else { status.current_folder().unwrap_or("not available") };
         let submenu = Submenu::new(truncate_for_menu(&format!("Default folder: {}", name), 50), true);
         for (uuid, folder, current) in &status.folders {
             let label = if *current { format!("✓  {}", folder) } else { format!("    {}", folder) };

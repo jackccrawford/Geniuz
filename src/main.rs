@@ -407,7 +407,8 @@ fn run(cli: Cli) -> Result<String, String> {
             let mut files: Vec<PathBuf> = Vec::new();
             let mut rejected: Vec<PathBuf> = Vec::new();
             // A directory is read one level deep: memories can't be removed, so a whole
-            // tree is never taken in by accident. Subfolders are named, not passed over.
+            // tree is never taken in by accident. Subfolders are named, not passed over,
+            // except hidden ones (.git, .obsidian), which are tool state, not documents.
             let mut subdirs: Vec<PathBuf> = Vec::new();
             for p in &paths {
                 let path = PathBuf::from(p);

@@ -88,6 +88,7 @@ export function wireCollapse(shell, topbar) {
     if (nowNarrow !== narrow) {
       narrow = nowNarrow;
       openedWhileNarrow = false;
+      shownForNow = false; // a moment's reveal ends with the width it was made in
       apply();
     }
   });
@@ -309,7 +310,7 @@ function folderButton(f, buttons, { mirror = false } = {}) {
       const mark = document.createElement('span');
       mark.className = 'sidebar-folder__in-use';
       mark.title = 'New memories go here: Claude, the command line and the MCP use this folder when none is named';
-      mark.id = `in-use-${f.id}`;
+      mark.id = `in-use-${f.id}${mirror ? '-recent' : ''}`;
       mark.textContent = '';
       mark.setAttribute('aria-label', 'Default folder: new memories go here');
       btn.setAttribute('aria-describedby', mark.id);

@@ -322,9 +322,7 @@ impl Registry {
             }
         }
         if self.no_default() {
-            return Err("No default folder is set, so name a folder: the folder argument, or -f <folder> \
-                        on the command line. A default can be chosen in Settings, or with `geniuz folder use <folder>`."
-                .to_string());
+            return Err(NO_DEFAULT_MESSAGE.to_string());
         }
         if let Some(q) = self.current() {
             return self
@@ -1028,6 +1026,16 @@ fn same_file(_: &Path, _: &Path) -> bool {
 }
 
 /// Read a file's identity. `None` means it isn't a folder, or can't be read.
+/// What a command that names no folder is told when the default is none. Shared, so
+/// callers can tell this refusal from other reasons a folder doesn't resolve.
+pub const NO_DEFAULT_MESSAGE: &str = "No default folder is set, so name a folder: the folder argument, or -f <folder> \
+     on the command line. A default can be chosen in Settings, or with `geniuz folder use <folder>`.";
+
+/// The folder whose database is at `db`, read without changing anything on disk.
+pub fn identity_at(db: &Path) -> Option<Folder> {
+    read_identity(db)
+}
+
 fn read_identity(db: &Path) -> Option<Folder> {
     identity_from(&open_read_only(db).ok()?, db)
 }

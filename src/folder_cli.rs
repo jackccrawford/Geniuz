@@ -176,19 +176,22 @@ fn folder_json(f: &Folder, using: bool) -> serde_json::Value {
 }
 
 fn show(reg: &Registry, name: Option<&str>, json: bool) -> Result<String, String> {
-    let using = in_use();
+    // Resolved once: the path in use, or the reason there isn't one.
+    let resolved = crate::resolve_db_path().map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+    let using = resolved.as_ref().ok().cloned();
     let folder = match name {
         Some(q) => reg.find(q)?,
         None => {
             // Say why there's no folder in use, as the command that resolves it would.
-            if using.is_none() {
-                crate::resolve_db_path()?;
+            if let Err(e) = &resolved {
+                return Err(e.clone());
             }
             reg.scan()
                 .folders
                 .into_iter()
                 .find(|f| is_in_use(f, &using))
-                .ok_or_else(|| "The database in use isn't one of your folders: GENIUZ_DB names a file outside them.".to_string())?
+                .ok_or_else(|| "The database in use isn't one of your folders: an explicit database file \
+                                (GENIUZ_DB or GENIUZ_STATION) names a file outside them.".to_string())?
         }
     };
     if json {
