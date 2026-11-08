@@ -24,6 +24,12 @@ Memories point at each other by address, so an ID that changes breaks every memo
 
 If a copy turns up anyway, every copy stops working until one is moved. Nothing can tell which is the original, and carrying on with the wrong one would split the history in two. That's disruptive when it happens, and we chose it knowingly: an error you can fix beats a loss you can't see.
 
+## Looking is not choosing
+
+Where your memories go is a setting you change on purpose, not a side effect of what you happen to be looking at. Browsing another folder in the dashboard or the Mac menubar doesn't move the default, so your AI keeps writing where you told it to. And if you'd rather nothing were kept by guess, the default can be none, and every command has to name its folder.
+
+The cost is one more step when you do want to switch. In return, a glance can't redirect a week of memories.
+
 ## The AI has to be told
 
 A memory nobody uses is worth nothing. In our tests, agents with good tools and no other guidance used Geniuz in 0 of 8 sessions. With a few sentences on when to recall and keep, all of them did, in the right folders. So the server says so when an AI connects. It is a small sample on one model, and the point stands: being available isn't the same as being used.
