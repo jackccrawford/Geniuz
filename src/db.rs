@@ -268,12 +268,8 @@ impl DatabaseManager {
             crate::embedding::embed_content(content).ok()
         };
 
-        if embedding.is_none() {
-            eprintln!(
-                "[geniuz] Embedding unavailable: memory {} saved with keyword search only. Run 'geniuz backfill' later to make it searchable by meaning.",
-                &uuid[..8]
-            );
-        }
+        // No notice here: the CLI's "Kept" line and the MCP's reply both say a memory
+        // was kept without an embedding, and how to fix it.
 
         // Insert memory + (optional) embedding atomically in one transaction
         let conn = self.conn()?;

@@ -216,7 +216,7 @@ pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
     match BuiltinBackend::new() {
         Ok(b) => Ok(Box::new(b)),
         Err(e) => {
-            eprintln!("[geniuz] ONNX failed ({}), falling back to ollama", e);
+            eprintln!("[geniuz] The built-in search model couldn't load ({}); trying Ollama.", e);
             let backend = OllamaBackend::new();
             // Verify ollama is reachable before claiming ready
             let agent = ureq::Agent::config_builder()
@@ -231,7 +231,7 @@ pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
                 .replace("/api/tagsdings", "/api/tags"); // fix over-replace on legacy URL
             match agent.get(&tags_url).call() {
                 Ok(_) => Ok(Box::new(backend)),
-                Err(_) => Err("Neither built-in ONNX nor Ollama available for embeddings".to_string()),
+                Err(_) => Err("Search by meaning is unavailable: the built-in model couldn't load, and Ollama isn't running".to_string()),
             }
         }
     }
