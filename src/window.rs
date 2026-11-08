@@ -188,7 +188,11 @@ fn relative(raw: &str) -> Option<Duration> {
     // character, and a byte index inside one panics (cubic, PR #30).
     let (cut, _) = raw.char_indices().last()?;
     let (n, unit) = raw.split_at(cut);
-    let n: i64 = n.parse().ok().filter(|n| *n >= 0)?;
+    // Digits only: "+3d" or " 3d" is not a relative time (Firn's review, PR #30).
+    if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let n: i64 = n.parse().ok()?;
     match unit {
         "h" => Duration::try_hours(n),
         "d" => Duration::try_days(n),

@@ -812,7 +812,21 @@ fn run(cli: Cli) -> Result<String, String> {
         }
 
         Command::Watch { interval, since, exec, once, json } => {
-            let db = get_db()?;
+            // An address names its own folder: watch that one, as recall opens it,
+            // whatever the default (Firn's review, PR #30). With -f too, they must agree.
+            let db = match since.as_deref().and_then(geniuz::folders::parse_address) {
+                Some((folder, _)) => {
+                    let reg = geniuz::folders::Registry::from_env();
+                    let named = reg.find(&folder)?;
+                    if let Some(flag) = IN_FOLDER.get().and_then(|f| f.as_deref()) {
+                        if reg.find(flag)?.uuid != named.uuid {
+                            return Err(format!("--since {} is in folder {}, but -f names {}", since.as_deref().unwrap_or_default(), named.name, flag));
+                        }
+                    }
+                    open_resolved(|| Ok(named.db_path.clone()))?
+                }
+                None => get_db()?,
+            };
 
             if let Some(t) = exec.as_deref().filter(|t| ["'{gist}'", "'{content}'", "'{json}'"].iter().any(|p| t.contains(p))) {
                 eprintln!("[watch] Memory text arrives as a shell variable, which single quotes keep from expanding. Use double quotes in: {t}");

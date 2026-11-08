@@ -1261,11 +1261,14 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 
 .main-header__titles { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .main-header__titles .main-header__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Edit: a pencil (Jack, 7 Nov 2026), quiet until pointed at. */
 .folder-edit {
-  flex: none; padding: 0; border: 0; background: none; cursor: pointer;
-  color: var(--muted, inherit); font: inherit; font-size: 13px; text-decoration: underline;
-  text-underline-offset: 2px;
+  flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: 0; border-radius: 6px; background: none; cursor: pointer;
+  color: var(--ink-3, inherit); align-self: center;
 }
+.folder-edit:hover { color: var(--ink-1, inherit); background: var(--bg-elevated, rgba(0,0,0,0.06)); }
+.folder-edit:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
 .folder-description {
   margin: 4px 0 0; max-width: 65ch; font-size: 14px; line-height: 1.45;
   white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;

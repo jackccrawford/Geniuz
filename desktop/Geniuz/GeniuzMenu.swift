@@ -55,7 +55,10 @@ struct GeniuzMenu: View {
     /// The folder this menu shows: picked here, else the default, else the first.
     private var shownFolder: FolderOption? {
         if let id = service.shownFolderID, let f = service.folders.first(where: { $0.uuid == id }) { return f }
+        // With no default set, the menu shows the first folder: name it and check it
+        // (Firn's review, PR #30).
         return service.folders.first(where: { $0.inUse })
+            ?? service.folders.first(where: { $0.path == service.defaultStationPath })
     }
 
     private var currentFolderName: String {

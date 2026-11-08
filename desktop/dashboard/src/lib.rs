@@ -652,7 +652,9 @@ fn bind_current_folder() -> Result<FolderList, String> {
             *slot = Shown::Folder(uuid.clone());
             // What's on screen stays on screen: a later change of the default
             // folder elsewhere doesn't move this window (review, 7 Nov).
-            if let Ok(mut v) = VIEW.lock() { v.get_or_insert_with(|| uuid.clone()); }
+            // Replace, not keep: a viewed folder that vanished must not pull the window
+            // back when it returns (Firn's review, PR #30).
+            if let Ok(mut v) = VIEW.lock() { *v = Some(uuid.clone()); }
             Ok(folder_list(&reg, Some(&uuid)))
         }
         Err(why) => {

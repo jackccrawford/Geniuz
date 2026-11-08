@@ -51,7 +51,7 @@ export async function mount(container) {
   header.innerHTML = `
     <div class="main-header__titles">
       <h1 class="main-header__title">${escapeHtml(folder?.name || 'Your memory')}</h1>
-      ${folder ? '<button type="button" class="folder-edit" data-action="edit-folder">Edit</button>' : ''}
+      ${folder ? `<button type="button" class="folder-edit" data-action="edit-folder" aria-label="Edit folder" title="Edit the name and description"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.2 2.3a1.6 1.6 0 0 1 2.3 2.3L5.6 12.5 2.5 13.5l1-3.1z"/><path d="M10 3.5l2.5 2.5"/></svg></button>` : ''}
     </div>
     ${folder?.description ? `<p class="folder-description">${escapeHtml(folder.description)}</p>` : ''}
     <p class="main-header__sub">${fmt.number(stats.total_memories)} ${stats.total_memories === 1 ? 'memory' : 'memories'} · ${fmt.number(stats.this_week)} this week</p>

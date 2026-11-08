@@ -302,7 +302,7 @@ class GeniuzService: ObservableObject {
 
     /// The default folder setting: a folder's UUID, or "none" to ask instead.
     func setDefaultFolder(_ value: String) {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        work.async { [weak self] in
             guard let self = self else { return }
             _ = self.runGeniuz(value == "none" ? ["folder", "use", "--none"] : ["folder", "use", value])
             self.foldersReadAt = .distantPast
@@ -353,6 +353,9 @@ class GeniuzService: ObservableObject {
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 
+    /// Where the menu's background reads run, one at a time.
+    private let work = DispatchQueue(label: "geniuz.menu.work", qos: .utility)
+
     func refresh() {
         // Read on the main thread, where it's written; the reads below run elsewhere.
         let shown = Thread.isMainThread ? shownFolderID : nil
@@ -360,7 +363,9 @@ class GeniuzService: ObservableObject {
             DispatchQueue.main.async { [weak self] in self?.refresh() }
             return
         }
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+        // One serial queue for all of this: the folder cache and its stamps are only
+        // ever touched there (Firn's review, PR #30: concurrent refreshes raced).
+        work.async { [weak self] in
             guard let self = self else { return }
             let folders = self.readFolders()
             let station = self.readStation(shown: shown)
@@ -374,6 +379,9 @@ class GeniuzService: ObservableObject {
 
             DispatchQueue.main.async {
                 self.folders = folders
+                // A refresh for the folder shown before a newer pick lands late: keep its
+                // folder list, drop its memories (Firn's review, PR #30).
+                guard shown == self.shownFolderID else { return }
                 self.stationExists = station.exists
                 self.memoryCount = station.memories
                 self.recentMemories = station.recentMemories
@@ -719,7 +727,7 @@ class GeniuzService: ObservableObject {
                    parent_uuid,
                    created_at
             FROM memories
-            ORDER BY created_at DESC
+            ORDER BY created_at DESC, rowid DESC
             LIMIT 20
         """
         if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK {
