@@ -513,7 +513,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     };
                     for (i, section) in sections.iter().enumerate() {
                         let gist = match &section.header {
-                            Some(h) => format!("{}capture: {} — {}", prefix, filename, h),
+                            Some(h) => format!("{}capture: {}: {}", prefix, filename, h),
                             None => format!("{}capture: {} (section {})", prefix, filename, i + 1),
                         };
                         match db.signal_with_backend(&section.content, Some(&gist), Some(&root_uuid), None, Some(backend.as_ref())) {
@@ -588,7 +588,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 Ok(format!("✅ Kept {}", address))
             } else {
                 Ok(format!(
-                    "✅ Kept {} (keyword search only — embedding unavailable, run 'geniuz backfill' later)",
+                    "✅ Kept {} (found by keywords only for now: run 'geniuz backfill' later)",
                     address
                 ))
             }
@@ -682,7 +682,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     match db.get_by_uuid_prefix(q)? {
                         Some(entry) => vec![entry],
                         None => {
-                            eprintln!("[geniuz] No memory found matching UUID {} — falling back to semantic search.", q);
+                            eprintln!("[geniuz] No memory found matching UUID {}, so searching by meaning instead.", q);
                             mode = format!("semantic \"{q}\" (no memory has that id)");
                             db.semantic_search_in(q, &window, limit)?
                         }
@@ -757,7 +757,7 @@ fn run(cli: Cli) -> Result<String, String> {
             if let Ok(n) = db.unembedded_count() {
                 if n > 0 {
                     lines.push(format!(
-                        "\n({} {} not embedded — ranked results are partial. Run 'geniuz backfill'.)",
+                        "\n({} {} not embedded, so these results may be incomplete. Run 'geniuz backfill'.)",
                         n, if n == 1 { "memory" } else { "memories" }
                     ));
                 }

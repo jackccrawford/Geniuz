@@ -101,7 +101,7 @@ fn list(reg: &Registry, json: bool) -> Result<String, String> {
         let mut line = format!("{} {} | {} | {} · {}{}", mark, f.short_id(), f.name, memories(count), last, pin);
         let summary = clip(&f.description);
         if !summary.is_empty() {
-            line.push_str(&format!(" — {}", summary));
+            line.push_str(&format!(" · {}", summary));
         }
         lines.push(line);
     }
@@ -130,7 +130,7 @@ fn list_archived(reg: &Registry, json: bool) -> Result<String, String> {
         .iter()
         .map(|f| {
             let (count, _) = f.stats().unwrap_or((0, None));
-            format!("{} | {} | {} — {}", f.short_id(), f.name, memories(count), clip(&f.description))
+            format!("{} | {} | {} · {}", f.short_id(), f.name, memories(count), clip(&f.description))
         })
         .collect();
     Ok(lines.join("\n"))

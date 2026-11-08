@@ -1,4 +1,5 @@
-//! Database layer — signals, embedding cache, search
+//! The store: memories, their embeddings, and every kind of search. One SQLite
+//! file per folder; see schema/schema.sql.
 
 use rusqlite::{Connection, OptionalExtension};
 use std::path::Path;
@@ -16,26 +17,23 @@ fn escape_like(term: &str) -> String {
     term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
 }
 
-/// How many unembedded keyword hits to seat on a page of semantic results:
-/// every free slot, or half the page when none are free, capped by how many
-/// actually matched.
+/// How many memories found by keyword, but not yet embedded, get a place on a
+/// page of results by meaning: every free slot, or half the page when none are
+/// free, never more than matched.
 ///
-/// Pulled out as a pure function on purpose. `semantic_search` builds a real
-/// ONNX/Ollama backend internally, so it cannot be unit-tested, and the first
-/// version of this fix was wrong in exactly the arithmetic — it only looked
-/// for unembedded memories when semantic left slots free, which on a
-/// populated station is never. A test on the helper it calls passed anyway,
-/// because the helper was never the part that was broken. Keeping the
-/// decision testable is the point.
+/// A pure function so the arithmetic can be tested: `semantic_search` loads a
+/// real embedding model, so it can't be. Asking for unembedded memories only
+/// when slots are free would never ask in a full folder, so half the page is
+/// held for them.
 fn unembedded_share(limit: usize, semantic_hits: usize, unembedded_hits: usize) -> usize {
     let free = limit.saturating_sub(semantic_hits);
     free.max(limit / 2).min(unembedded_hits)
 }
 
-/// Products whose stores Geniuz wrote, under its names over time.
+/// The names Geniuz has written into a store's `product` field over time.
 pub const OWN_PRODUCTS: [&str; 3] = ["geniuz", "clawmark", "relay-for-claw"];
 
-/// Opening a store migrates it, so a store written by another product must be
+/// Opening a store updates its schema, so a store another product wrote is
 /// refused before anything touches it. A file with no `_meta` is new or empty.
 fn check_product(conn: &Connection, db_path: &str) -> Result<(), String> {
     let product: Option<String> = conn
@@ -264,7 +262,7 @@ impl DatabaseManager {
 
         if embedding.is_none() {
             eprintln!(
-                "[geniuz] Embedding unavailable — memory {} saved with keyword search only. Run 'geniuz backfill' later to add semantic search.",
+                "[geniuz] Embedding unavailable: memory {} saved with keyword search only. Run 'geniuz backfill' later to make it searchable by meaning.",
                 &uuid[..8]
             );
         }
@@ -1073,7 +1071,7 @@ impl DatabaseManager {
                 ).map_err(|e| format!("UUID resolve failed: {}", e))?;
                 let shown: Vec<String> = matches.iter().map(|u| u[..8].to_string()).collect();
                 Err(format!(
-                    "Ambiguous UUID prefix '{}' matches {} memories ({}{}) — use more characters",
+                    "Ambiguous UUID prefix '{}' matches {} memories ({}{}). Use more characters",
                     partial, total, shown.join(", "),
                     if total as usize > shown.len() { ", ..." } else { "" }
                 ))

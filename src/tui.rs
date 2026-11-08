@@ -208,7 +208,7 @@ impl App {
         if let Some(stripped) = input.strip_prefix('/') {
             self.handle_command(stripped)?;
         } else {
-            self.status = "(no LLM backend yet — try /help)".into();
+            self.status = "(no LLM backend yet: try /help)".into();
         }
         Ok(())
     }
@@ -699,7 +699,7 @@ fn render_detail(f: &mut Frame, app: &App, area: Rect) {
 fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let prompt_style = Style::default().fg(Color::Yellow);
     let (prompt, body) = if matches!(app.mode, Mode::Compose) {
-        ("⧉ ", String::from("(composing — type below; Ctrl-S submit; Esc cancel)"))
+        ("⧉ ", String::from("(composing: type below; Ctrl-S to keep; Esc to cancel)"))
     } else {
         ("› ", app.input.clone())
     };
@@ -736,7 +736,7 @@ fn render_help(f: &mut Frame, area: Rect) {
     let cmd = Style::default().fg(Color::Yellow);
     let dim = Style::default().fg(Color::DarkGray);
     let lines: Vec<Line> = vec![
-        Line::from(vec![Span::styled("geniuz tui — your memories, your terminal", header)]),
+        Line::from(vec![Span::styled("geniuz tui · your memories, your terminal", header)]),
         Line::raw(""),
         Line::from(vec![Span::styled("COMMANDS", header)]),
         Line::from(vec![Span::styled("  /recent [n]   ", cmd), Span::raw("last n memories (default 24)")]),
@@ -781,7 +781,7 @@ fn render_compose(f: &mut Frame, app: &App, area: Rect) {
 
     let gist_text = if app.compose_gist.is_empty() && !gist_focused {
         Line::from(vec![Span::styled(
-            "(short shelf-label, e.g. \"fix: auth token order\" — used for retrieval)",
+            "(short shelf-label, e.g. \"fix: auth token order\": how it's found later)",
             dim,
         )])
     } else if gist_focused {
@@ -805,7 +805,7 @@ fn render_compose(f: &mut Frame, app: &App, area: Rect) {
 
     let content_lines: Vec<Line> = if app.compose_content.is_empty() && !content_focused {
         vec![Line::from(vec![Span::styled(
-            "(content — Enter inserts a newline)",
+            "(content: Enter adds a new line)",
             dim,
         )])]
     } else {

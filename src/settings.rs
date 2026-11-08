@@ -116,7 +116,7 @@ impl Settings {
         let path = Self::path();
         match fs::read_to_string(&path) {
             Ok(content) => serde_json::from_str(&content).unwrap_or_else(|e| {
-                eprintln!("[settings] Failed to parse {}: {} — using defaults", path.display(), e);
+                eprintln!("[settings] Failed to parse {}: {}. Using defaults", path.display(), e);
                 Self::default()
             }),
             Err(_) => Self::default(),
@@ -178,12 +178,12 @@ impl Settings {
             }
             "update_check_frequency" => {
                 let v = UpdateFrequency::parse(value)
-                    .ok_or_else(|| format!("invalid value '{}' — expected daily/weekly/manual", value))?;
+                    .ok_or_else(|| format!("invalid value '{}': expected daily, weekly or manual", value))?;
                 self.update_check_frequency = v;
                 Ok(v.as_str().to_string())
             }
             "recent_memories_count" => {
-                let v: u32 = value.parse().map_err(|_| format!("invalid count '{}' — expected non-negative integer", value))?;
+                let v: u32 = value.parse().map_err(|_| format!("invalid count '{}': expected 0 or more", value))?;
                 self.recent_memories_count = v;
                 Ok(v.to_string())
             }
@@ -219,7 +219,7 @@ fn parse_bool(s: &str) -> Result<bool, String> {
     match s.to_lowercase().as_str() {
         "true" | "1" | "yes" | "on" => Ok(true),
         "false" | "0" | "no" | "off" => Ok(false),
-        _ => Err(format!("invalid bool '{}' — expected true/false", s)),
+        _ => Err(format!("invalid value '{}': expected true or false", s)),
     }
 }
 

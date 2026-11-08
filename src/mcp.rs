@@ -95,7 +95,7 @@ fn base_tool_definitions() -> Value {
         "tools": [
             {
                 "name": "keep",
-                "description": "Keep something worth remembering for future sessions. Use this when you learn something important about the user — their preferences, decisions, client details, project context, or anything they would not want to repeat. Your future self will find it by meaning, not keywords. Keep more than you think you should — storage is free, forgetting is expensive.",
+                "description": "Keep something worth remembering for future sessions. Use this when you learn something important about the user: their preferences, decisions, client details, project context, or anything they would not want to repeat. Your future self will find it by meaning, not keywords. Keep more than you think you should: storage is free, forgetting is expensive.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -105,11 +105,11 @@ fn base_tool_definitions() -> Value {
                         },
                         "gist": {
                             "type": "string",
-                            "description": "A one-line summary for finding this later. Format: 'category: key insight'. Example: 'client: Maria — Q2 retention focus, $40K budget'"
+                            "description": "A one-line summary for finding this later. Format: 'category: key insight'. Example: 'client: Maria, Q2 retention focus, $40K budget'"
                         },
                         "thread": {
                             "type": "string",
-                            "description": "Optional. Short UUID or address of a memory in the same folder to thread this to. Builds chains — prospect to client, draft to final, problem to solution. A memory in another folder can't be threaded to: keep this in that folder, or put its address in the content instead."
+                            "description": "Optional. Short UUID or address of a memory in the same folder to thread this to. Builds chains: prospect to client, draft to final, problem to solution. A memory in another folder can't be threaded to: keep this in that folder, or put its address in the content instead."
                         },
                         "at": {
                             "type": "string",
@@ -121,7 +121,7 @@ fn base_tool_definitions() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Search your memories by meaning. Use this at the START of every conversation to check what you already know about the topic or the user. Also use it whenever you need context from previous sessions. The search finds related memories even when the words are different — 'budget priorities' finds memories about 'retention focus, $40K'. Use this proactively and often.",
+                "description": "Search your memories by meaning. Use this at the START of every conversation to check what you already know about the topic or the user. Also use it whenever you need context from previous sessions. The search finds related memories even when the words are different: 'budget priorities' finds memories about 'retention focus, $40K'. Use this proactively and often.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -152,7 +152,7 @@ fn base_tool_definitions() -> Value {
                         },
                         "since": {
                             "type": "string",
-                            "description": "Optional. Only memories from this time on: '24h', '7d', '2w', a date ('2026-09-23'), a local time ('2026-09-23 14:00') or RFC 3339. Use it whenever the question has a time in it ('last week', 'yesterday') — without it, older memories outrank recent ones."
+                            "description": "Optional. Only memories from this time on: '24h', '7d', '2w', a date ('2026-09-23'), a local time ('2026-09-23 14:00') or RFC 3339. Use it whenever the question has a time in it ('last week', 'yesterday'). Without it, older memories outrank recent ones."
                         },
                         "until": {
                             "type": "string",
@@ -222,7 +222,7 @@ fn execute_keep(
         // run it or relay it; the server cannot see the caller's capabilities.
         Ok(result) => (
             format!(
-                "Kept ({}) — saved without a semantic embedding; keyword-searchable until 'geniuz backfill' runs.",
+                "Kept ({}), without an embedding for now: found by keywords until 'geniuz backfill' runs.",
                 db.address(&result.uuid)
             ),
             false,
@@ -286,7 +286,7 @@ fn execute_recall(db: &DatabaseManager, params: &Value) -> (String, bool) {
     if let Ok(n) = db.unembedded_count() {
         if n > 0 {
             out.push_str(&format!(
-                "\n\n({} {} not embedded — ranked results are partial until 'geniuz backfill' runs.)",
+                "\n\n({} {} not embedded, so results may be incomplete until 'geniuz backfill' runs.)",
                 n, if n == 1 { "memory" } else { "memories" }
             ));
         }
@@ -421,7 +421,7 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
             last.as_deref().map(crate::shorten_ts).unwrap_or_else(|| "never".to_string())
         );
         if !summary.is_empty() {
-            line.push_str(&format!(" — {}{}", summary, more));
+            line.push_str(&format!(" · {}{}", summary, more));
         }
         lines.push(line);
     }
@@ -1241,7 +1241,7 @@ Drag Geniuz to Applications, open it from there, and run this again.".to_string(
 
     if written.is_empty() {
         return Err(format!(
-            "Failed to install MCP config — no writable location:\n  {}",
+            "Couldn't install the MCP config: no writable location:\n  {}",
             errors.join("\n  ")
         ));
     }
@@ -1277,7 +1277,7 @@ Drag Geniuz to Applications, open it from there, and run this again.".to_string(
             let count = db.count().unwrap_or(0);
             if count > 0 {
                 lines.push(String::new());
-                lines.push(format!("  Your folder has {} existing memories — Claude will find them.", count));
+                lines.push(format!("  Your folder has {} existing memories, and Claude will find them.", count));
             }
         }
     }
