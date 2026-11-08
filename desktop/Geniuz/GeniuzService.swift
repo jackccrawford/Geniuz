@@ -71,7 +71,7 @@ private let storedTime: DateFormatter = {
     return fmt
 }()
 
-func shortlist(_ folders: [FolderOption], over limit: Int = 20) -> [FolderOption] {
+func shortlist(_ folders: [FolderOption], showing: String? = nil, over limit: Int = 20) -> [FolderOption] {
     guard folders.count > limit else { return folders }
     let weekAgo = Date().addingTimeInterval(-7 * 86400)
     let recent = folders
@@ -79,7 +79,7 @@ func shortlist(_ folders: [FolderOption], over limit: Int = 20) -> [FolderOption
         .sorted { ($0.lastWritten ?? "") > ($1.lastWritten ?? "") }
         .prefix(10)
     var seen = Set<String>()
-    return (folders.filter { $0.inUse } + folders.filter { $0.pinned == true } + recent)
+    return (folders.filter { $0.uuid == showing } + folders.filter { $0.inUse } + folders.filter { $0.pinned == true } + recent)
         .filter { seen.insert($0.uuid).inserted }
 }
 
@@ -208,10 +208,32 @@ class GeniuzService: ObservableObject {
         return "\(dataDir)/memory.db"
     }
 
-    /// The folder in use. The binary owns the rules for finding folders, so this
-    /// never has a second copy of them.
-    var stationPath: String {
+    /// The folder this menu shows: the one picked here, else the default folder,
+    /// else the first. Picking here only changes what the menu shows (Jack, 7 Nov
+    /// 2026: looking is not choosing where memories go); the default folder is a
+    /// setting. The binary owns the rules for finding folders, so this never has a
+    /// second copy of them.
+    var stationPath: String { stationPath(shown: shownFolderID) }
+
+    /// The same, for a folder picked in the menu read on the main thread beforehand
+    /// (refresh runs its reads on a background queue).
+    func stationPath(shown: String?) -> String {
+        if let id = shown, let f = cachedFolders.first(where: { $0.uuid == id }) { return f.path }
         return cachedFolders.first(where: { $0.inUse })?.path ?? defaultStationPath
+    }
+
+    /// The folder picked in this menu, if any (kept for this run of the app).
+    @Published var shownFolderID: String?
+
+    /// The default folder setting, as Geniuz stores it: a folder's UUID, "none"
+    /// (a command that names no folder must ask for one), or nil for never set
+    /// (the first folder).
+    @Published var defaultFolderSetting: String?
+
+    private func readDefaultSetting() -> String? {
+        guard let raw = try? String(contentsOfFile: "\(dataDir)/current", encoding: .utf8) else { return nil }
+        let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return v.isEmpty ? nil : v
     }
 
     // MARK: - Folders
@@ -272,11 +294,17 @@ class GeniuzService: ObservableObject {
         return cachedFolders
     }
 
-    /// Change the folder in use for every surface, then show it here.
-    func useFolder(_ folder: FolderOption) {
+    /// Show this folder in the menu. Changes nothing anywhere else.
+    func showFolder(_ folder: FolderOption) {
+        shownFolderID = folder.uuid
+        refresh()
+    }
+
+    /// The default folder setting: a folder's UUID, or "none" to ask instead.
+    func setDefaultFolder(_ value: String) {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            _ = self.runGeniuz(["folder", "use", folder.uuid])
+            _ = self.runGeniuz(value == "none" ? ["folder", "use", "--none"] : ["folder", "use", value])
             self.foldersReadAt = .distantPast
             self.refresh()
         }
@@ -326,16 +354,23 @@ class GeniuzService: ObservableObject {
     }
 
     func refresh() {
+        // Read on the main thread, where it's written; the reads below run elsewhere.
+        let shown = Thread.isMainThread ? shownFolderID : nil
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in self?.refresh() }
+            return
+        }
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self = self else { return }
             let folders = self.readFolders()
-            let station = self.readStation()
+            let station = self.readStation(shown: shown)
             // The full check runs the registered program, so once per launch is enough.
             let entry = self.readClaudeEntry(runIt: !self.verifiedThisLaunch)
             self.verifiedThisLaunch = true
             let claudeCode = self.checkClaudeCodeConnected()
             let onPath = self.checkCliOnPath()
             let s = self.loadSettings()
+            let defaultSetting = self.readDefaultSetting()
 
             DispatchQueue.main.async {
                 self.folders = folders
@@ -347,6 +382,7 @@ class GeniuzService: ObservableObject {
                 self.claudeCodeConnected = claudeCode
                 self.cliOnPath = onPath
                 self.settings = s
+                self.defaultFolderSetting = defaultSetting
                 self.onStateChange?()
                 self.checkForUpdateIfDue()
             }
@@ -639,9 +675,9 @@ class GeniuzService: ObservableObject {
         var recentGists: [String] = []  // legacy, kept so existing call sites compile
     }
 
-    private func readStation() -> StationInfo {
+    private func readStation(shown: String?) -> StationInfo {
         var info = StationInfo()
-        let path = stationPath
+        let path = stationPath(shown: shown)
 
         let fileExists = FileManager.default.fileExists(atPath: path)
         NSLog("[geniuz-app] readStation path=%@ exists=%d", path, fileExists ? 1 : 0)

@@ -175,7 +175,7 @@ async function wireMenuEvents() {
       // on_menu_event) and never reach the frontend.
       default:
         if (id.startsWith('menu_folder:')) {
-          api.useFolder(id.slice('menu_folder:'.length))
+          api.viewFolder(id.slice('menu_folder:'.length))
             .then(() => location.reload())
             .catch((e) => console.error('[geniuz] switching folder failed:', e));
           break;
@@ -201,7 +201,9 @@ async function refreshFolderCounts(list) {
   const shown = [...new Set(rows.map((r) => `${r.dataset.folder}:${r.getAttribute('aria-label')}`))].sort().join('|');
   const now = (fresh.folders || []).map((f) => `${f.uuid}:${f.name}:${f.tree || ''}`).sort().join('|');
   const was = (getState().folders?.folders || []).map((f) => `${f.uuid}:${f.name}:${f.tree || ''}`).sort().join('|');
-  const listChanged = shown !== (fresh.folders || []).map((f) => `${f.uuid}:${f.name}`).sort().join('|') || (was && was !== now);
+  const listChanged = shown !== (fresh.folders || []).map((f) => `${f.uuid}:${f.name}`).sort().join('|') || (was && was !== now)
+    // The folder in use moved (menu bar, command line): its mark moves with it.
+    || (fresh.folders || []).find((f) => f.in_use)?.uuid !== (getState().folders?.folders || []).find((f) => f.in_use)?.uuid;
   // A folder that was empty at load and now holds memories belongs out of
   // "Show N empty" (and maybe in Recent): that's a change of place, not count.
   const woke = (fresh.folders || []).some((f) => f.memories > 0
@@ -220,8 +222,9 @@ async function refreshFolderCounts(list) {
   return fresh;
 }
 
-// The folder in use can change from the menu bar or the command line. Coming back
-// to this window shows it, rather than one folder's memories under another's name.
+// The window keeps showing the folder chosen here (looking is not choosing where
+// memories go, Jack 7 Nov); when the folder in use changes elsewhere, the counts
+// refresh above moves its mark. A reload here only follows a folder that vanished.
 window.addEventListener('focus', async () => {
   if (!api.isTauri()) return;
   try {

@@ -55,15 +55,12 @@ fn main() {
     }
 }
 
-use geniuz::{home_dir, data_dir};
+use geniuz::data_dir;
 
 fn default_db_path() -> PathBuf {
     data_dir().join("memory.db")
 }
 
-fn default_claw_workspace() -> PathBuf {
-    home_dir().join(".openclaw").join("workspace")
-}
 
 /// Locate and launch the Geniuz Dashboard binary.
 ///
@@ -388,39 +385,10 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(String::new())
         }
 
-        Command::Capture { paths, openclaw, split, gist_prefix, dry_run, force } => {
-            // OpenClaw mode: use the adapter
-            if let Some(oc_path) = openclaw {
-                let ws_path = oc_path.map(PathBuf::from)
-                    .unwrap_or_else(default_claw_workspace);
-
-                let workspace = adapter::detect_workspace(&ws_path)
-                    .ok_or_else(|| format!("No OpenClaw workspace found at {}\nExpected MEMORY.md or memory/ directory.", ws_path.display()))?;
-
-                let summary = adapter::workspace_summary(&workspace);
-                println!("{}", summary);
-
-                if dry_run {
-                    println!("\n--dry-run: no changes made.");
-                    return Ok(String::new());
-                }
-
-                let db = get_db()?;
-                let (created, errors) = adapter::migrate(&workspace, &db)?;
-
-                let mut lines = vec![
-                    format!("\n✅ Captured: {} memories from OpenClaw workspace", created),
-                ];
-                if errors > 0 {
-                    lines.push(format!("⚠️  {} errors (see above)", errors));
-                }
-                lines.push("Run 'geniuz backfill' to enable semantic search.".to_string());
-                return Ok(lines.join("\n"));
-            }
-
+        Command::Capture { paths, split, gist_prefix, dry_run, force } => {
             // General mode: capture files and directories
             if paths.is_empty() {
-                return Err("No files specified. Use 'geniuz capture <files...>' or 'geniuz capture --openclaw'.".to_string());
+                return Err("No files specified. Use 'geniuz capture <files...>'.".to_string());
             }
 
             // Prose-format allowlist. Non-prose files (CSS, HTML, JS, binaries) produce
@@ -562,7 +530,8 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(lines.join("\n"))
         }
 
-        Command::Keep { content, gist, parent, json } => {
+        Command::Keep { content, gist, parent, at, json } => {
+            let at = at.as_deref().map(geniuz::window::moment).transpose()?;
             // Resolve content: @file or stdin
             let resolved = if content == "-" {
                 use std::io::{IsTerminal, Read};
@@ -591,18 +560,20 @@ fn run(cli: Cli) -> Result<String, String> {
             };
 
             let db = get_db()?;
-            let result = db.signal(&resolved, gist.as_deref(), parent.as_deref(), None)?;
+            let result = db.signal(&resolved, gist.as_deref(), parent.as_deref(), at.as_deref())?;
 
+            let address = db.address(&result.uuid);
             if json {
                 Ok(serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": true, "action": "remember", "uuid": result.uuid, "embedded": result.embedded
+                    "ok": true, "action": "remember", "uuid": result.uuid, "address": address,
+                    "embedded": result.embedded
                 })).unwrap())
             } else if result.embedded {
-                Ok(format!("✅ Kept {}", result.uuid))
+                Ok(format!("✅ Kept {}", address))
             } else {
                 Ok(format!(
                     "✅ Kept {} (keyword search only — embedding unavailable, run 'geniuz backfill' later)",
-                    result.uuid
+                    address
                 ))
             }
         }
@@ -847,26 +818,33 @@ fn run(cli: Cli) -> Result<String, String> {
                 eprintln!("[watch] Memory text arrives as a shell variable, which single quotes keep from expanding. Use double quotes in: {t}");
             }
 
-            let mut cursor = if let Some(ref uuid_prefix) = since {
-                db.get_signal_timestamp(uuid_prefix)?
-                    .ok_or_else(|| format!("Memory not found: {}", uuid_prefix))?
+            // The cursor is a position, (time, row): memories written in the same
+            // second are all seen, not just the first (full-tree test, 7 Nov 2026).
+            let mut cursor = if let Some(ref id) = since {
+                db.position_of(id)?.ok_or_else(|| format!("Memory not found: {}", id))?
+            } else if once {
+                // Starting from now, a single check could never find anything.
+                return Err("--once needs --since <memory>: the last one you saw (a UUID or an address)".to_string());
             } else {
-                chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string()
+                // From now: after the newest memory, whatever the clock says.
+                db.last_position()?.unwrap_or_else(|| (String::new(), 0))
             };
 
             if !once {
                 eprintln!("[watch] Watching for new memories (every {}s). Ctrl+C to stop.", interval);
                 if since.is_some() {
-                    eprintln!("[watch] Starting after: {}", cursor);
+                    eprintln!("[watch] Starting after: {}", cursor.0);
                 }
             }
 
             loop {
-                let entries = db.since(&cursor, 100)?;
+                let found = db.after(&cursor, 100)?;
+                if let Some((pos, _)) = found.last() {
+                    cursor = pos.clone();
+                }
+                let entries: Vec<_> = found.into_iter().map(|(_, e)| e).collect();
 
                 if !entries.is_empty() {
-                    cursor = entries.last().unwrap().created_at.clone();
-
                     for e in &entries {
                         if let Some(ref cmd_template) = exec {
                             let (cmd, vars) = watch_exec_command(cmd_template, e);

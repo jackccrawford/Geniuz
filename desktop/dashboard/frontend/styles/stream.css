@@ -275,3 +275,6 @@ html.os-linux .sidebar {
   .memory-modal__gist { font-size: 18px; }
   .memory-modal__panel { padding: 22px 18px 14px; }
 }
+
+/* The line under the list: "Loading more…" while a page comes, then how many are shown. */
+.stream-pager { padding: 8px 0 32px; text-align: center; font-size: var(--fs-micro, 12px); color: var(--ink-3); min-height: 1px; }

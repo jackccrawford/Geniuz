@@ -36,6 +36,8 @@ const DB_FILE: &str = "memory.db";
 const LEGACY_DB_FILE: &str = "station.db";
 const ADDED_FILE: &str = "added-folders";
 const CURRENT_FILE: &str = "current";
+/// What `current` holds when the person chose no default folder.
+const NO_DEFAULT: &str = "none";
 const PINNED_FILE: &str = "pinned-folders";
 const ARCHIVE_DIR: &str = "archive";
 const MOVED_MARK: &str = ".moved-";
@@ -318,6 +320,11 @@ impl Registry {
                     .map_err(|e| format!("{} (from {})", e, file.display()));
             }
         }
+        if self.no_default() {
+            return Err("No default folder is set, so name one: -f <folder> (or --in). \
+                        Choose a default in Settings, or with `geniuz folder use <folder>`."
+                .to_string());
+        }
         if let Some(q) = self.current() {
             return self
                 .find(&q)
@@ -347,7 +354,21 @@ impl Registry {
         std::fs::read_to_string(self.current_path())
             .ok()
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case(NO_DEFAULT))
+    }
+
+    /// Whether the default was set to none: a command that names no folder must
+    /// ask for one rather than guess (Jack and SSH, 7 Nov 2026: on a machine many
+    /// agents share, a memory in the wrong folder can't be moved afterwards).
+    pub fn no_default(&self) -> bool {
+        std::fs::read_to_string(self.current_path())
+            .map(|s| s.trim().eq_ignore_ascii_case(NO_DEFAULT))
+            .unwrap_or(false)
+    }
+
+    /// Set the default to none (see `no_default`).
+    pub fn clear_default(&self) -> Result<(), String> {
+        self.with_registry_lock(|| write_atomic(&self.current_path(), &format!("{}\n", NO_DEFAULT)))
     }
 
     /// Make a folder the one used when none is named. Records its UUID, so
@@ -1380,6 +1401,25 @@ mod tests {
 
     fn names(reg: &Registry) -> Vec<String> {
         reg.scan().folders.into_iter().map(|f| f.name).collect()
+    }
+
+    #[test]
+    fn no_default_asks_instead_of_guessing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = Registry::new(tmp.path());
+        reg.create("Work", "", None).unwrap();
+        reg.use_folder("Work").unwrap();
+        assert!(reg.resolve(None, None, None).unwrap().to_string_lossy().contains(&reg.find("Work").unwrap().uuid));
+        reg.clear_default().unwrap();
+        assert!(reg.no_default());
+        assert_eq!(reg.current(), None);
+        let err = reg.resolve(None, None, None).unwrap_err();
+        assert!(err.contains("No default folder"), "{err}");
+        // Naming a folder still works, and choosing a default again ends it.
+        assert!(reg.resolve(Some("Work"), None, None).is_ok());
+        reg.use_folder("Work").unwrap();
+        assert!(!reg.no_default());
+        assert!(reg.resolve(None, None, None).is_ok());
     }
 
     #[test]

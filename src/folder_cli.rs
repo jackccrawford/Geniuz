@@ -26,8 +26,12 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
             reg.remove(&path)?;
             Ok(format!("Geniuz no longer looks in {}. Its files weren't touched.", path.display()))
         }
-        FolderCommand::Use { name } => {
-            let f = reg.use_folder(&name)?;
+        FolderCommand::Use { name, none } => {
+            if none {
+                reg.clear_default()?;
+                return Ok("No default folder now: a command that names no folder will ask for one.".to_string());
+            }
+            let f = reg.use_folder(name.as_deref().unwrap_or_default())?;
             Ok(format!("Now using {}.", f.name))
         }
         FolderCommand::Rename { name, new_name } => {
@@ -180,7 +184,11 @@ fn show(reg: &Registry, name: Option<&str>, json: bool) -> Result<String, String
             .folders
             .into_iter()
             .find(|f| is_in_use(f, &using))
-            .ok_or_else(|| "The database in use isn't one of your folders. GENIUZ_DB may be set.".to_string())?,
+            .ok_or_else(|| if reg.no_default() {
+                "No default folder is set. Name one: geniuz folder show <folder>.".to_string()
+            } else {
+                "The database in use isn't one of your folders. GENIUZ_DB may be set.".to_string()
+            })?,
     };
     if json {
         return serde_json::to_string_pretty(&folder_json(&folder, is_in_use(&folder, &using)))

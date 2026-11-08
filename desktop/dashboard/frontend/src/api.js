@@ -29,8 +29,16 @@ export function listFolders() {
   return invoke('list_folders');
 }
 
+/** Make this the folder in use, Mac-wide: where Claude, the CLI and the MCP keep
+ *  memories when no folder is named. The dashboard no longer calls it; the menu bar sets it. */
 export function useFolder(uuid) {
   return invoke('use_folder', { uuid });
+}
+
+/** Show this folder in this window, and change nothing else (Jack, 7 Nov: looking
+ *  is not choosing where memories go). */
+export function viewFolder(uuid) {
+  return invoke('view_folder', { uuid });
 }
 
 export function createFolder(name, description) {
@@ -81,8 +89,9 @@ export function getStationStats() {
   return invoke('get_station_stats');
 }
 
-export function getRecentMemories(limit = 24) {
-  return invoke('get_recent_memories', { limit });
+/** One page of the folder: `oldestFirst` reads from the oldest, `offset` memories in. */
+export function getRecentMemories(limit = 24, offset = 0, oldestFirst = false) {
+  return invoke('get_recent_memories', { limit, offset, oldestFirst });
 }
 
 /**

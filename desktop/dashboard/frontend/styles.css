@@ -1474,3 +1474,10 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
   text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
 }
 .status-row__link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
+
+/* The folder in use (where new memories go when none is named): a small clay dot,
+   the brand's own accent, beside the name. Looking at another folder doesn't move it. */
+.sidebar-folder__in-use {
+  flex: none; width: 6px; height: 6px; border-radius: 50%; background: #CF5535; margin-left: 4px;
+}
+.is-collapsed .sidebar-folder__in-use { display: none; }

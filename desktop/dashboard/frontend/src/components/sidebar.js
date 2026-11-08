@@ -291,6 +291,16 @@ function folderButton(f, buttons, { mirror = false } = {}) {
     name.textContent = f.name;
     btn.innerHTML = `<span class="sidebar-item__icon">${ICONS.book}</span>`;
     btn.appendChild(name);
+    // Where new memories go when no folder is named: marked, because looking at a
+    // folder here no longer changes it.
+    if (f.in_use) {
+      btn.classList.add('is-in-use');
+      const mark = document.createElement('span');
+      mark.className = 'sidebar-folder__in-use';
+      mark.title = 'New memories go here: Claude, the command line and the MCP use this folder when none is named';
+      mark.setAttribute('aria-label', 'In use for new memories');
+      btn.appendChild(mark);
+    }
     // The pin: shown on hover, and always once it's pinned. A span, because a
     // button can't hold another button.
     const pin = document.createElement('span');
@@ -324,7 +334,7 @@ function folderButton(f, buttons, { mirror = false } = {}) {
     } else {
       btn.addEventListener('click', async () => {
         try {
-          await api.useFolder(f.uuid);
+          await api.viewFolder(f.uuid);
           location.reload();
         } catch (e) {
           console.error('[geniuz] switching folder failed:', e);

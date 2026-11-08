@@ -128,6 +128,28 @@ pub fn scope_line(station: Option<&str>, memories: usize, window: &Window, mode:
     format!("searched: {}", parts.join(" · "))
 }
 
+/// When a memory happened, for `keep --at` and the MCP's `at` (Jack, 7 Nov 2026: an
+/// agent bringing its history into Geniuz keeps each memory's own date). Same forms
+/// as `--since`: `2026-03-21`, `2026-03-21 14:00` (local), RFC 3339, or `3d` ago. A
+/// date alone is the start of that local day. Never in the future. Returns the stored
+/// form, UTC `YYYY-MM-DD HH:MM:SS`.
+pub fn moment(raw: &str) -> Result<String, String> {
+    moment_at(raw, Utc::now())
+}
+
+/// [`moment`] against a fixed "now", for tests.
+pub fn moment_at(raw: &str, now: DateTime<Utc>) -> Result<String, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("--at needs a time: a date (2026-03-21), a local time (2026-03-21 14:00) or RFC 3339".into());
+    }
+    let t = bound(raw, now, false).map_err(|e| format!("--at {e}"))?;
+    if t > now + Duration::seconds(60) {
+        return Err(format!("--at {raw} is in the future; a memory can only be dated when it happened"));
+    }
+    Ok(t.format(SQL_TS).to_string())
+}
+
 /// One bound as a UTC instant. An `until` that names a day or a minute covers
 /// all of it, so the exclusive bound is the start of the next one.
 fn bound(raw: &str, now: DateTime<Utc>, is_until: bool) -> Result<DateTime<Utc>, String> {
@@ -195,6 +217,21 @@ mod tests {
 
     fn now() -> DateTime<Utc> {
         Utc.with_ymd_and_hms(2026, 9, 30, 12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn moment_dates_a_memory_and_refuses_the_future() {
+        let now = Utc.with_ymd_and_hms(2026, 11, 8, 5, 0, 0).unwrap();
+        // RFC 3339 is exact; the stored form is UTC with a space.
+        assert_eq!(moment_at("2026-03-21T14:00:00Z", now).unwrap(), "2026-03-21 14:00:00");
+        // A date alone is the start of that LOCAL day, so it stays on its date locally.
+        let d = moment_at("2026-03-21", now).unwrap();
+        let local = Utc.datetime_from_str(&d, SQL_TS).unwrap().with_timezone(&Local);
+        assert_eq!(local.format("%Y-%m-%d %H:%M").to_string(), "2026-03-21 00:00");
+        assert_eq!(moment_at("3d", now).unwrap(), "2026-11-05 05:00:00");
+        assert!(moment_at("2026-12-01", now).unwrap_err().contains("future"));
+        assert!(moment_at("", now).is_err());
+        assert!(moment_at("next tuesday", now).is_err());
     }
 
     #[test]

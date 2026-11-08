@@ -30,6 +30,31 @@ fn db_path() -> Result<String, String> {
 /// can't land in a folder that isn't the one on screen.
 static SHOWN: std::sync::Mutex<Shown> = std::sync::Mutex::new(Shown::NotYet);
 
+/// The folder the person chose to look at in this window. Looking is not choosing
+/// where memories go (Jack, 7 Nov 2026: "B ... most definitely. this is an oddity of
+/// the older geniuz with just one station"): picking a folder here changes only what
+/// this window shows. The folder in use for Claude, the CLI and the MCP changes only
+/// elsewhere: the menu bar's picker, `geniuz folder use`. Keep here starts on the folder
+/// on screen and writes where its pulldown says (Jack: "local data, not global for the mac").
+/// Kept across page reloads; a new launch opens on the folder in use.
+static VIEW: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// The folder in use, Mac-wide (the `current` file), as its UUID.
+fn in_use_uuid(reg: &Registry) -> Option<String> {
+    let using = reg.resolve(None, None, None).ok().map(|p| std::fs::canonicalize(&p).unwrap_or(p))?;
+    reg.scan().folders.iter()
+        .find(|f| std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()) == using)
+        .map(|f| f.uuid.clone())
+}
+
+/// The folder this window shows: the one chosen here, else the folder in use.
+fn shown_uuid(reg: &Registry) -> Option<String> {
+    if let Ok(slot) = SHOWN.lock() {
+        if let Shown::Folder(u) = &*slot { return Some(u.clone()); }
+    }
+    in_use_uuid(reg)
+}
+
 #[derive(Clone)]
 enum Shown {
     NotYet,
@@ -254,9 +279,17 @@ fn get_station_stats() -> Result<StationStats, String> {
 }
 
 #[tauri::command]
-fn get_recent_memories(limit: Option<u32>) -> Result<Vec<RecentMemory>, String> {
+fn get_recent_memories(
+    limit: Option<u32>,
+    offset: Option<u32>,
+    oldest_first: Option<bool>,
+) -> Result<Vec<RecentMemory>, String> {
     let db = open_db()?;
-    let mut entries = db.recent(limit.unwrap_or(24) as usize)?;
+    let mut entries = db.page(
+        oldest_first.unwrap_or(false),
+        offset.unwrap_or(0) as usize,
+        limit.unwrap_or(24) as usize,
+    )?;
     // recent() returns gists only; the stream reads each memory in place, so
     // fetch the words for the ones it shows (as get_thread_chain does).
     for e in &mut entries {
@@ -516,7 +549,11 @@ struct FolderRow {
     memories: i64,
     last_written: Option<String>,
     location: String,
+    /// The folder this window shows.
     current: bool,
+    /// The folder in use: where Claude, the CLI and the MCP keep memories when
+    /// no folder is named. Not the same as `current` once you look elsewhere.
+    in_use: bool,
     /// The first folder lives beside the others, so it stays where it is.
     fixed: bool,
     pinned: bool,
@@ -534,7 +571,7 @@ struct FolderList {
     unavailable: usize,
 }
 
-fn folder_row(f: &Folder, current: Option<&str>, pinned: bool) -> FolderRow {
+fn folder_row(f: &Folder, current: Option<&str>, in_use: Option<&str>, pinned: bool) -> FolderRow {
     let canonical = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let (memories, last_written) = f.stats().unwrap_or((0, None));
     let dir = f.db_path.parent().unwrap_or(&f.db_path);
@@ -547,6 +584,7 @@ fn folder_row(f: &Folder, current: Option<&str>, pinned: bool) -> FolderRow {
         last_written,
         location: dir.to_string_lossy().into_owned(),
         current: current.is_some_and(|c| c.eq_ignore_ascii_case(&f.uuid)),
+        in_use: in_use.is_some_and(|c| c.eq_ignore_ascii_case(&f.uuid)),
         fixed: canonical(dir) == canonical(&geniuz::data_dir()),
         pinned,
         tree: tree_of(dir),
@@ -562,38 +600,45 @@ fn tree_of(dir: &std::path::Path) -> &'static str {
 #[tauri::command]
 fn list_folders() -> FolderList {
     let reg = Registry::from_env();
-    let using = reg.resolve(None, None, None).ok().map(|p| std::fs::canonicalize(&p).unwrap_or(p));
-    let scan = reg.scan();
-    let uuid = scan
-        .folders
-        .iter()
-        .find(|f| using.as_deref() == Some(std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()).as_path()))
-        .map(|f| f.uuid.clone());
-    folder_list(&reg, uuid.as_deref())
+    let shown = shown_uuid(&reg);
+    folder_list(&reg, shown.as_deref())
 }
 
 /// The list, with `current` marking exactly this folder.
 fn folder_list(reg: &Registry, current: Option<&str>) -> FolderList {
+    let in_use = in_use_uuid(reg);
     let scan = reg.scan();
     let pins = reg.pinned();
     FolderList {
         folders: scan
             .folders
             .iter()
-            .map(|f| folder_row(f, current, pins.iter().any(|p| p.eq_ignore_ascii_case(&f.uuid))))
+            .map(|f| folder_row(f, current, in_use.as_deref(), pins.iter().any(|p| p.eq_ignore_ascii_case(&f.uuid))))
             .collect(),
-        archived: reg.archived().iter().map(|f| folder_row(f, None, false)).collect(),
+        archived: reg.archived().iter().map(|f| folder_row(f, None, None, false)).collect(),
         blocked: scan.blocked.len(),
         unavailable: scan.unavailable.len() + scan.pending_moves.len(),
     }
 }
 
-/// Called once per page load: show the current folder, and stay with it.
+/// Called once per page load: show the folder chosen in this window, else the
+/// folder in use, and stay with it.
 #[tauri::command]
 fn bind_current_folder() -> Result<FolderList, String> {
     let reg = Registry::from_env();
+    let viewed = VIEW.lock().ok().and_then(|v| v.clone()).and_then(|u| reg.find(&u).ok()).map(|f| f.uuid);
+    if let Some(uuid) = viewed {
+        let mut slot = SHOWN.lock().map_err(|_| "The app is in a bad state.".to_string())?;
+        *slot = Shown::Folder(uuid.clone());
+        return Ok(folder_list(&reg, Some(&uuid)));
+    }
     // One decision: what's bound is exactly what the page is told it's showing.
-    let chosen = reg.resolve(None, None, None).and_then(|p| {
+    // With no default folder set, the window opens on the first folder: looking
+    // needs no default, only writing without a folder does.
+    let resolved = reg.resolve(None, None, None).or_else(|e| {
+        if reg.no_default() { reg.ensure_default() } else { Err(e) }
+    });
+    let chosen = resolved.and_then(|p| {
         let path = std::fs::canonicalize(&p).unwrap_or(p);
         let scan = reg.scan();
         let found = scan.folders.iter().find(|f| {
@@ -605,6 +650,9 @@ fn bind_current_folder() -> Result<FolderList, String> {
     match chosen {
         Ok(uuid) => {
             *slot = Shown::Folder(uuid.clone());
+            // What's on screen stays on screen: a later change of the default
+            // folder elsewhere doesn't move this window (review, 7 Nov).
+            if let Ok(mut v) = VIEW.lock() { v.get_or_insert_with(|| uuid.clone()); }
             Ok(folder_list(&reg, Some(&uuid)))
         }
         Err(why) => {
@@ -614,17 +662,29 @@ fn bind_current_folder() -> Result<FolderList, String> {
     }
 }
 
+/// Make this the folder in use, Mac-wide: where Claude, the CLI and the MCP keep
+/// memories when none is named. The dashboard no longer calls it (the menu bar's picker
+/// and `geniuz folder use` set it); kept for whatever asks explicitly.
 #[tauri::command]
 fn use_folder(uuid: String) -> Result<(), String> {
     Registry::from_env().use_folder(&uuid).map(|_| ())
 }
 
-/// A new folder becomes the one in use: making one means you're about to use it.
+/// Show this folder in this window. Changes nothing anywhere else.
+#[tauri::command]
+fn view_folder(uuid: String) -> Result<(), String> {
+    let f = Registry::from_env().find(&uuid)?;
+    *VIEW.lock().map_err(|_| "The app is in a bad state.".to_string())? = Some(f.uuid);
+    Ok(())
+}
+
+/// A new folder opens here; it becomes the folder in use only if chosen for that.
 #[tauri::command]
 fn create_folder(name: String, description: String) -> Result<(), String> {
     let reg = Registry::from_env();
     let f = reg.create(&name, &description, None)?;
-    reg.use_folder(&f.uuid).map(|_| ())
+    *VIEW.lock().map_err(|_| "The app is in a bad state.".to_string())? = Some(f.uuid);
+    Ok(())
 }
 
 #[tauri::command]
@@ -992,6 +1052,7 @@ pub fn run() {
             open_link,
             get_app_version,
             get_update,
+            view_folder,
             remember_memory,
             get_station_stats,
             get_recent_memories,

@@ -80,7 +80,7 @@ fn tool_definitions() -> Value {
     let mut tools = base_tool_definitions();
     let folder = json!({
         "type": "string",
-        "description": "Which folder to use, by name or 8-character ID. Choose one with the folders tool. Left out, this uses the current folder. An unknown name is an error, never a different folder."
+        "description": "Which folder to use, by name or 8-character ID. Choose one with the folders tool. Left out, this uses the default folder; if none is set, name one. An unknown name is an error, never a different folder."
     });
     for tool in tools["tools"].as_array_mut().into_iter().flatten() {
         if tool["name"] != "folders" {
@@ -110,6 +110,10 @@ fn base_tool_definitions() -> Value {
                         "thread": {
                             "type": "string",
                             "description": "Optional. Short UUID or address of a memory in the same folder to thread this to. Builds chains — prospect to client, draft to final, problem to solution. A memory in another folder can't be threaded to: keep this in that folder, or put its address in the content instead."
+                        },
+                        "at": {
+                            "type": "string",
+                            "description": "Optional. When this happened, if not now: a date ('2026-03-21'), a local time ('2026-03-21 14:00') or RFC 3339. Use it when bringing older memories in, so each keeps its own date. Never in the future."
                         }
                     },
                     "required": ["content", "gist"]
@@ -201,9 +205,16 @@ fn execute_keep(
     };
     let gist = params.get("gist").and_then(|g| g.as_str());
     let thread = params.get("thread").and_then(|t| t.as_str());
+    let at = match params.get("at").and_then(|a| a.as_str()).filter(|a| !a.trim().is_empty()) {
+        Some(a) => match geniuz::window::moment(a) {
+            Ok(t) => Some(t),
+            Err(e) => return (format!("Error: {}", e.replacen("--at", "at", 1)), true),
+        },
+        None => None,
+    };
 
-    match db.signal_with_backend(content, gist, thread, None, backend) {
-        Ok(result) if result.embedded => (format!("Kept ({})", result.uuid), false),
+    match db.signal_with_backend(content, gist, thread, at.as_deref(), backend) {
+        Ok(result) if result.embedded => (format!("Kept ({})", db.address(&result.uuid)), false),
         // State, not instruction. This server exposes three tools and none of
         // them runs the CLI, so telling the caller to run `backfill` is a
         // command it may be unable to follow — while some hosts have a shell
@@ -212,7 +223,7 @@ fn execute_keep(
         Ok(result) => (
             format!(
                 "Kept ({}) — saved without a semantic embedding; keyword-searchable until 'geniuz backfill' runs.",
-                result.uuid
+                db.address(&result.uuid)
             ),
             false,
         ),
@@ -416,6 +427,9 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
     }
     if let Some(t) = tail {
         lines.push(t);
+    }
+    if current.is_none() && reg.no_default() {
+        lines.push("No default folder is set here: name a folder on every keep and recall.".to_string());
     }
     if !scan.blocked.is_empty() {
         lines.push(format!("{} blocked as copies of each other, until one is moved.", scan.blocked.len()));
