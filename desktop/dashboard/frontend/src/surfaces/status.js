@@ -114,6 +114,27 @@ export async function mount(container) {
     row('Config path', pathValue, 'ok'),
   ]));
 
+  // ---- Version section -----------------------------------------------------
+  // The menu-bar app checks for releases; this shows its last answer. The one
+  // action on this page: a newer release opens in the browser.
+  const [version, checked] = await Promise.all([
+    api.getAppVersion().catch(() => null),
+    api.getUpdate().catch(() => null),
+  ]);
+  const update = checked?.newer || null;
+  const when = checked?.checked_at ? new Date(checked.checked_at) : null;
+  const lastCheck = when && !isNaN(when) ? when.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : null;
+  const versionSection = section('Version', [
+    row('Geniuz', version ? escapeHtml(version) : '—', update ? 'warn' : 'ok'),
+    update
+      ? row('Update available', `${escapeHtml(update.version)} · <button type="button" class="status-row__link" data-update>Download</button>`, 'warn')
+      : row('Updates', lastCheck ? `Up to date (checked ${escapeHtml(lastCheck)})` : 'Not checked yet · the menu bar app checks', 'ok'),
+  ]);
+  versionSection.querySelector('[data-update]')?.addEventListener('click', () => {
+    api.openLink(update.url).catch((e) => console.error('[geniuz] opening the update failed:', e));
+  });
+  body.appendChild(versionSection);
+
   container.innerHTML = '';
   container.appendChild(root);
 }

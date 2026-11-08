@@ -87,6 +87,60 @@ private struct FolderListing: Decodable {
     let folders: [FolderOption]
 }
 
+// MARK: - Updates
+//
+// "Update available" (Jack, 7 Nov: "it's how good apps work"). The app asks
+// GitHub for the latest published release (drafts and pre-releases are never
+// "latest") and compares versions. It downloads nothing and installs nothing:
+// Download opens the disk image in the browser. Installing in place (Sparkle)
+// needs an update-signing key, which is Jack's decision.
+
+let releasesAPI = URL(string: "https://api.github.com/repos/jackccrawford/Geniuz/releases/latest")!
+let releasesPage = URL(string: "https://github.com/jackccrawford/Geniuz/releases/latest")!
+
+struct AvailableUpdate: Equatable {
+    let version: String
+    let url: URL
+}
+
+/// "v5.0.10" > "5.0.9": compare numerically, part by part; a missing part is 0.
+/// Anything after a "-" (a pre-release tag) is ignored, and a malformed part counts as 0.
+func isNewer(_ candidate: String, than current: String) -> Bool {
+    func parts(_ v: String) -> [Int] {
+        let trimmed: String = v.trimmingCharacters(in: .whitespaces)
+        let bare: Substring = trimmed.drop(while: { $0 == "v" || $0 == "V" })
+        let core: Substring = bare.split(separator: "-", maxSplits: 1).first ?? ""
+        return core.split(separator: ".").map { Int($0) ?? 0 }
+    }
+    let a = parts(candidate), b = parts(current)
+    for i in 0..<max(a.count, b.count) {
+        let x = i < a.count ? a[i] : 0, y = i < b.count ? b[i] : 0
+        if x != y { return x > y }
+    }
+    return false
+}
+
+private struct GitHubRelease: Decodable {
+    struct Asset: Decodable {
+        let name: String
+        let browserDownloadURL: URL
+        enum CodingKeys: String, CodingKey {
+            case name
+            case browserDownloadURL = "browser_download_url"
+        }
+    }
+    let tagName: String
+    let htmlURL: URL
+    let draft: Bool
+    let prerelease: Bool
+    let assets: [Asset]
+    enum CodingKeys: String, CodingKey {
+        case tagName = "tag_name"
+        case htmlURL = "html_url"
+        case draft, prerelease, assets
+    }
+}
+
 class GeniuzService: ObservableObject {
     @Published var folders: [FolderOption] = []
     @Published var memoryCount: Int = 0
@@ -103,6 +157,10 @@ class GeniuzService: ObservableObject {
     @Published var cliOnPath: Bool = false
     @Published var cliInstallFailed: Bool = false
     @Published var settings: GeniuzSettings = GeniuzSettings()
+    @Published var availableUpdate: AvailableUpdate?
+    /// The result of the last check people asked for, shown under the button.
+    @Published var updateCheckMessage: String?
+    @Published var checkingForUpdate = false
 
     /// Optional callback fired after each state refresh so non-SwiftUI surfaces
     /// (the NSStatusItem button tooltip) can re-read derived strings.
@@ -245,6 +303,7 @@ class GeniuzService: ObservableObject {
 
     init() {
         NSLog("[geniuz-app] init — realHome=%@ stationPath=%@", realHome, stationPath)
+        availableUpdate = readUpdateFile()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -289,8 +348,116 @@ class GeniuzService: ObservableObject {
                 self.cliOnPath = onPath
                 self.settings = s
                 self.onStateChange?()
+                self.checkForUpdateIfDue()
             }
         }
+    }
+
+    // MARK: - Update check
+
+    private let lastUpdateCheckKey = "geniuz.lastUpdateCheck"
+    /// After a failed check: try again at this time, whatever the cadence.
+    private let updateRetryKey = "geniuz.updateRetryAt"
+
+    var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+    }
+
+    /// Where the dashboard reads the last check's answer, so both surfaces agree
+    /// without the dashboard asking GitHub too.
+    var updateFilePath: String { "\(dataDir)/update.json" }
+
+    /// Runs on the 10-second refresh; does nothing until a check is due. Daily or
+    /// weekly as settings say; "manual", or updates turned off, means never.
+    private func checkForUpdateIfDue() {
+        guard settings.autoupdateEnabled, !checkingForUpdate else { return }
+        let interval: TimeInterval
+        switch settings.updateCheckFrequency {
+        case "daily": interval = 86_400
+        case "weekly": interval = 7 * 86_400
+        default: return
+        }
+        let now = Date()
+        if let retry = UserDefaults.standard.object(forKey: updateRetryKey) as? Date,
+           retry > now, retry.timeIntervalSince(now) <= 3600 {
+            return  // a failed check waits its hour (a clock set back can't stretch it)
+        }
+        let last = UserDefaults.standard.object(forKey: lastUpdateCheckKey) as? Date ?? .distantPast
+        // A clock set back must not stop checks for good.
+        guard now.timeIntervalSince(last) >= interval || last > now else { return }
+        checkForUpdate(userAsked: false)
+    }
+
+    /// Ask GitHub for the latest release. `userAsked` reports the outcome in
+    /// Settings, including "up to date" and failures; a background check stays quiet.
+    func checkForUpdate(userAsked: Bool) {
+        guard !checkingForUpdate else { return }
+        checkingForUpdate = true
+        if userAsked { updateCheckMessage = "Checking…" }
+        var request = URLRequest(url: releasesAPI, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("Geniuz/\(appVersion)", forHTTPHeaderField: "User-Agent")
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = status == 200 ? data : nil
+            DispatchQueue.main.async {
+                // Decoded here, on the main thread, where the types live (a few KB).
+                let release = body.flatMap { try? JSONDecoder().decode(GitHubRelease.self, from: $0) }
+                self.checkingForUpdate = false
+                guard let release = release, !release.draft, !release.prerelease else {
+                    // A failed check doesn't count as a check: try again in an hour,
+                    // not every 10 seconds and not a whole day later.
+                    UserDefaults.standard.set(Date().addingTimeInterval(3600), forKey: self.updateRetryKey)
+                    if userAsked {
+                        self.updateCheckMessage = status == 0
+                            ? "Couldn't reach GitHub to check. Try again later."
+                            : "GitHub didn't answer the check (HTTP \(status)). Try again later."
+                    }
+                    NSLog("[geniuz-app] update check failed: status=%d %@", status, error?.localizedDescription ?? "")
+                    return
+                }
+                UserDefaults.standard.set(Date(), forKey: self.lastUpdateCheckKey)
+                UserDefaults.standard.removeObject(forKey: self.updateRetryKey)
+                let latest = String(release.tagName.drop(while: { $0 == "v" || $0 == "V" }))
+                let dmg = release.assets.first(where: { $0.name == "Geniuz.dmg" })?.browserDownloadURL
+                if isNewer(latest, than: self.appVersion) {
+                    self.availableUpdate = AvailableUpdate(version: latest, url: dmg ?? release.htmlURL)
+                    if userAsked { self.updateCheckMessage = "Geniuz \(latest) is available." }
+                } else {
+                    self.availableUpdate = nil
+                    if userAsked { self.updateCheckMessage = "Geniuz \(self.appVersion) is up to date." }
+                }
+                self.writeUpdateFile()
+            }
+        }.resume()
+    }
+
+    /// {"latest": "5.0.4", "url": "...", "checked_at": "..."} or {"latest": null, ...}.
+    private func writeUpdateFile() {
+        var out: [String: Any] = ["checked_at": ISO8601DateFormatter().string(from: Date())]
+        out["latest"] = availableUpdate?.version ?? NSNull()
+        out["url"] = availableUpdate?.url.absoluteString ?? NSNull()
+        guard let data = try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys]) else { return }
+        try? FileManager.default.createDirectory(atPath: dataDir, withIntermediateDirectories: true)
+        try? data.write(to: URL(fileURLWithPath: updateFilePath), options: .atomic)
+    }
+
+    /// The last check's answer, so a found update survives a restart. Only a
+    /// release newer than this app, and only a link to the project's releases.
+    private func readUpdateFile() -> AvailableUpdate? {
+        guard let data = FileManager.default.contents(atPath: updateFilePath),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let latest = obj["latest"] as? String,
+              let link = obj["url"] as? String,
+              link.hasPrefix("https://github.com/jackccrawford/Geniuz/releases/"),
+              let url = URL(string: link),
+              isNewer(latest, than: appVersion) else { return nil }
+        return AvailableUpdate(version: latest, url: url)
+    }
+
+    func openUpdate() {
+        NSWorkspace.shared.open(availableUpdate?.url ?? releasesPage)
     }
 
     // MARK: - Settings load/save

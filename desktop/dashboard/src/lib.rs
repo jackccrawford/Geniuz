@@ -140,6 +140,69 @@ fn get_app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
+/// A newer release, if the menu-bar app's last check found one. The menu-bar
+/// app asks GitHub and writes `update.json` in the data directory; the dashboard
+/// only reads it, so the two never disagree and GitHub is asked once.
+#[derive(serde::Serialize)]
+struct UpdateInfo {
+    version: String,
+    url: String,
+}
+
+/// Numeric, part by part ("5.0.10" > "5.0.9"); a pre-release suffix is ignored.
+fn version_newer(candidate: &str, current: &str) -> bool {
+    let parts = |v: &str| -> Vec<u64> {
+        v.trim().trim_start_matches(['v', 'V']).split('-').next().unwrap_or("")
+            .split('.').map(|p| p.parse().unwrap_or(0)).collect()
+    };
+    let (a, b) = (parts(candidate), parts(current));
+    for i in 0..a.len().max(b.len()) {
+        let (x, y) = (a.get(i).copied().unwrap_or(0), b.get(i).copied().unwrap_or(0));
+        if x != y {
+            return x > y;
+        }
+    }
+    false
+}
+
+/// What the last check found: when it ran, and a newer release if there was one.
+#[derive(serde::Serialize)]
+struct UpdateStatus {
+    checked_at: String,
+    newer: Option<UpdateInfo>,
+}
+
+#[tauri::command]
+fn get_update() -> Option<UpdateStatus> {
+    let raw = std::fs::read_to_string(geniuz::data_dir().join("update.json")).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let checked_at = v.get("checked_at")?.as_str()?.to_string();
+    let newer = (|| {
+        let latest = v.get("latest")?.as_str()?;
+        let url = v.get("url")?.as_str()?;
+        // Only a link to the project's own releases opens from here.
+        if !url.starts_with("https://github.com/jackccrawford/Geniuz/releases/") {
+            return None;
+        }
+        version_newer(latest, env!("CARGO_PKG_VERSION"))
+            .then(|| UpdateInfo { version: latest.to_string(), url: url.to_string() })
+    })();
+    Some(UpdateStatus { checked_at, newer })
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::version_newer;
+    #[test]
+    fn compares_versions_by_number() {
+        assert!(version_newer("5.0.10", "5.0.9"));
+        assert!(version_newer("v5.1", "5.0.3"));
+        assert!(!version_newer("5.0.3", "5.0.3"));
+        assert!(!version_newer("5.0.2", "5.0.3"));
+        assert!(!version_newer("5.0.3-rc.1", "5.0.3"));
+    }
+}
+
 /// Persist a new memory. `gist` is optional — if blank/None, the chassis
 /// auto-derives one from the first 200 chars of content. Returns the short
 /// (8-char) UUID prefix of the new memory.
@@ -928,6 +991,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_link,
             get_app_version,
+            get_update,
             remember_memory,
             get_station_stats,
             get_recent_memories,

@@ -9,6 +9,9 @@ struct GeniuzMenu: View {
         // connection message takes a row only when there's something to do.
         VStack(alignment: .leading, spacing: 0) {
             header
+            if let update = service.availableUpdate {
+                updateRow(update)
+            }
             if needsAttention {
                 connectionStatus
             }
@@ -90,6 +93,27 @@ struct GeniuzMenu: View {
             }
             .menuStyle(.borderlessButton)
         }
+    }
+
+    // MARK: - Update available
+
+    /// Shown only when GitHub has a newer release. Download opens the disk
+    /// image; installing is the usual drag to Applications.
+    private func updateRow(_ update: AvailableUpdate) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.down.circle.fill")
+                .foregroundColor(.accentColor)
+                .font(.system(size: 13))
+            Text("Geniuz \(update.version) is available")
+                .font(.system(size: 12))
+                .lineLimit(1)
+            Spacer()
+            Button("Download") { service.openUpdate() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 
     // MARK: - Connection, quiet when fine
@@ -417,6 +441,30 @@ struct GeniuzSettingsView: View {
                     .foregroundColor(.secondary)
             }
 
+            Section("Updates") {
+                Toggle("Check for updates automatically", isOn: autoupdateBinding)
+                if service.settings.autoupdateEnabled {
+                    Picker("How often", selection: frequencyBinding) {
+                        Text("Daily").tag("daily")
+                        Text("Weekly").tag("weekly")
+                        Text("Only when I ask").tag("manual")
+                    }
+                }
+                HStack {
+                    Button("Check Now") { service.checkForUpdate(userAsked: true) }
+                        .disabled(service.checkingForUpdate)
+                    if let update = service.availableUpdate {
+                        Button("Download \(update.version)") { service.openUpdate() }
+                    }
+                }
+                if let msg = service.updateCheckMessage {
+                    Text(msg).font(.caption2).foregroundColor(.secondary)
+                }
+                Text("A check asks GitHub for the latest Geniuz release. GitHub sees this Mac's internet address and the Geniuz version; none of your memories or folders are sent.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
             Section("About") {
                 LabeledContent("Version") {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")
@@ -435,6 +483,20 @@ struct GeniuzSettingsView: View {
         Binding(
             get: { service.settings.launchAtLogin },
             set: { v in service.updateSettings { $0.launchAtLogin = v } }
+        )
+    }
+
+    private var autoupdateBinding: Binding<Bool> {
+        Binding(
+            get: { service.settings.autoupdateEnabled },
+            set: { v in service.updateSettings { $0.autoupdateEnabled = v } }
+        )
+    }
+
+    private var frequencyBinding: Binding<String> {
+        Binding(
+            get: { service.settings.updateCheckFrequency },
+            set: { v in service.updateSettings { $0.updateCheckFrequency = v } }
         )
     }
 

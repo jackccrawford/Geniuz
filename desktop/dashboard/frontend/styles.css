@@ -1461,3 +1461,10 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 /* Expand all / Collapse all sit together on the right of the list controls. */
 .list-controls__all { margin-left: auto; font-size: 12px; }
 .list-controls__all + .list-controls__all { margin-left: 0; }
+
+/* Status: the one action on the page, a newer release to download. */
+.status-row__link {
+  font: inherit; color: var(--accent, #2a7f86); background: none; border: 0; padding: 0;
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.status-row__link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }

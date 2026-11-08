@@ -16,6 +16,11 @@ export function getAppVersion() {
   return invoke('get_app_version');
 }
 
+/** { checked_at, newer: { version, url } | null } from the menu-bar app's last check, or null if it never checked. */
+export function getUpdate() {
+  return invoke('get_update');
+}
+
 export function bindCurrentFolder() {
   return invoke('bind_current_folder');
 }
