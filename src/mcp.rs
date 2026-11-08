@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{self, BufRead, Write};
 
-use geniuz::db::{DatabaseManager, SignalEntry};
+use geniuz::db::{DatabaseManager, MemoryEntry};
 use geniuz::embedding::{self, EmbeddingBackend};
 use geniuz::folders::{parse_address, search_across, Registry, Search};
 use geniuz::window::Window;
@@ -213,7 +213,7 @@ fn execute_keep(
         None => None,
     };
 
-    match db.signal_with_backend(content, gist, thread, at.as_deref(), backend) {
+    match db.keep_with_backend(content, gist, thread, at.as_deref(), backend) {
         Ok(result) if result.embedded => (format!("Kept ({})", db.address(&result.uuid)), false),
         // State, not instruction. This server exposes three tools and none of
         // them runs the CLI, so telling the caller to run `backfill` is a
@@ -721,7 +721,7 @@ fn scope(db: &DatabaseManager, window: &Window, mode: &str) -> String {
     }
 }
 
-fn format_entries(entries: &[SignalEntry], full: bool, db: &DatabaseManager) -> String {
+fn format_entries(entries: &[MemoryEntry], full: bool, db: &DatabaseManager) -> String {
     let mut lines = Vec::new();
     for e in entries {
         let head = entry_line(e);
@@ -739,7 +739,7 @@ fn format_entries(entries: &[SignalEntry], full: bool, db: &DatabaseManager) -> 
 /// One result line, in the CLI's shape: `UUID | time | gist <- PARENT (score)`.
 /// The parent arrow is what lets an MCP caller see the threads it builds with
 /// `thread:` — without it, chains were stored but invisible through this door.
-fn entry_line(e: &SignalEntry) -> String {
+fn entry_line(e: &MemoryEntry) -> String {
     let ts = crate::shorten_ts(&e.created_at);
     let mut suffix = String::new();
     if let Some(ref p) = e.parent_uuid {
@@ -755,8 +755,8 @@ fn entry_line(e: &SignalEntry) -> String {
 mod tests {
     use super::*;
 
-    fn entry(parent: Option<&str>, score: Option<f32>) -> SignalEntry {
-        SignalEntry {
+    fn entry(parent: Option<&str>, score: Option<f32>) -> MemoryEntry {
+        MemoryEntry {
             memory_uuid: "5B1A36D9-0000-0000-0000-000000000000".into(),
             gist: "test: child".into(),
             created_at: "2026-09-27 07:19:39".into(),
@@ -779,7 +779,7 @@ mod tests {
     fn an_empty_windowed_answer_carries_its_scope() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        db.signal("an old note", Some("old"), None, Some("2020-01-01 00:00:00")).unwrap();
+        db.keep("an old note", Some("old"), None, Some("2020-01-01 00:00:00")).unwrap();
         let (out, is_err) = execute_recall_recent(&db, &json!({"since": "7d"}));
         assert!(!is_err, "{out}");
         assert!(out.ends_with("searched: 0 memories · since 7d · recent"), "{out}");
@@ -795,8 +795,8 @@ mod tests {
     fn an_answer_ends_with_its_harvest_then_its_scope() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        db.signal("Review notes\nThe PR went to Devin, see 00000000:87C1FADC.", Some("reviews"), None, None).unwrap();
-        db.signal("More review\nAsked Devin again.", Some("reviews again"), None, None).unwrap();
+        db.keep("Review notes\nThe PR went to Devin, see 00000000:87C1FADC.", Some("reviews"), None, None).unwrap();
+        db.keep("More review\nAsked Devin again.", Some("reviews again"), None, None).unwrap();
         let (out, _) = execute_recall_recent(&db, &json!({}));
         let lines: Vec<&str> = out.lines().collect();
         let n = lines.len();
@@ -809,9 +809,9 @@ mod tests {
     fn a_pointer_to_a_memory_here_is_offered_as_live() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        let first = db.signal("the original", Some("first"), None, None).unwrap().uuid;
+        let first = db.keep("the original", Some("first"), None, None).unwrap().uuid;
         let id = first[..8].to_uppercase();
-        db.signal(&format!("see {id}"), Some("second"), None, None).unwrap();
+        db.keep(&format!("see {id}"), Some("second"), None, None).unwrap();
         let (out, _) = execute_recall(&db, &json!({ "query": "second", "limit": 1 }));
         assert!(!out.contains("not found here"), "{out}");
     }
@@ -821,7 +821,7 @@ mod tests {
     fn recall_with_grep_returns_the_matching_lines() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        db.signal("Roundup\nCubic reviewed the PR.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
+        db.keep("Roundup\nCubic reviewed the PR.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
         let (out, is_err) = execute_recall(&db, &json!({"grep": "cubic"}));
         assert!(!is_err, "{out}");
         assert!(out.contains(" · Cubic reviewed the PR."), "{out}");
@@ -836,9 +836,9 @@ mod tests {
     fn recall_with_thread_reads_the_whole_conversation() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        let root = db.signal("the question", Some("question"), None, Some("2026-09-01 00:00:00")).unwrap().uuid;
-        let reply = db.signal("the answer", Some("answer"), Some(&root), Some("2026-09-02 00:00:00")).unwrap().uuid;
-        db.signal("elsewhere", Some("elsewhere"), None, Some("2026-09-03 00:00:00")).unwrap();
+        let root = db.keep("the question", Some("question"), None, Some("2026-09-01 00:00:00")).unwrap().uuid;
+        let reply = db.keep("the answer", Some("answer"), Some(&root), Some("2026-09-02 00:00:00")).unwrap().uuid;
+        db.keep("elsewhere", Some("elsewhere"), None, Some("2026-09-03 00:00:00")).unwrap();
         let (out, is_err) = execute_recall(&db, &json!({"thread": reply}));
         assert!(!is_err, "{out}");
         let q = out.find("question").unwrap();
@@ -892,7 +892,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
         for gist in ["one", "two", "three", "four", "five"] {
-            db.signal("body", Some(gist), None, Some("2026-09-01 00:00:00")).unwrap();
+            db.keep("body", Some(gist), None, Some("2026-09-01 00:00:00")).unwrap();
         }
         let (out, _) = execute_recall(&db, &json!({ "limit": 1 }));
         assert!(out.contains("five"), "{out}");
@@ -919,7 +919,7 @@ mod tests {
         let reg = Registry::new(&home);
         let work = reg.create("Work", "", None).unwrap();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        db.signal("the whole body", Some("the gist"), None, None).unwrap();
+        db.keep("the whole body", Some("the gist"), None, None).unwrap();
         let (out, _) = call_tool(&reg, None, "recall", &json!({ "all": true, "full": true }));
         assert!(out.contains("the gist") && out.contains("the whole body"), "{out}");
         let (out, _) = call_tool(&reg, None, "recall", &json!({ "all": true }));
@@ -955,7 +955,7 @@ mod tests {
         let reg = Registry::new(&home);
         let work = reg.create("Work", "", None).unwrap();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        let id = db.signal("the whole body", Some("the gist"), None, None).unwrap().uuid;
+        let id = db.keep("the whole body", Some("the gist"), None, None).unwrap().uuid;
         let address = format!("{}:{}", work.short_id(), &id[..8]);
 
         let (out, is_err) = call_tool(&reg, None, "recall", &json!({ "query": address }));
@@ -992,7 +992,7 @@ mod tests {
     fn grep_across_folders_searches_and_shows_addresses() {
         let (_tmp, reg, work) = registry_with_work();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        let id = db.signal("first line\nThe Cubic review passed.", Some("g"), None, None).unwrap().uuid;
+        let id = db.keep("first line\nThe Cubic review passed.", Some("g"), None, None).unwrap().uuid;
 
         let (text, is_err) = call_tool(&reg, None, "recall", &json!({ "all": true, "grep": "cubic" }));
         assert!(!is_err, "{text}");
@@ -1008,7 +1008,7 @@ mod tests {
     fn an_address_opens_even_when_all_is_set() {
         let (_tmp, reg, work) = registry_with_work();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        let id = db.signal("the whole body", Some("g"), None, None).unwrap().uuid;
+        let id = db.keep("the whole body", Some("g"), None, None).unwrap().uuid;
         let address = format!("{}:{}", work.short_id(), &id[..8]);
         let (text, _) = call_tool(&reg, None, "recall", &json!({ "query": address, "all": true }));
         assert!(text.contains("the whole body"), "{text}");
@@ -1018,7 +1018,7 @@ mod tests {
     fn an_empty_folder_says_where_the_memories_are() {
         let (_tmp, reg, work) = registry_with_work();
         let empty = reg.create("Empty", "", None).unwrap();
-        DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap().signal("x", Some("g"), None, None).unwrap();
+        DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap().keep("x", Some("g"), None, None).unwrap();
         let (text, _) = call_tool(&reg, None, "recall", &json!({ "folder": empty.name }));
         assert!(text.contains("Work (1)"), "{text}");
     }

@@ -256,7 +256,7 @@ pub struct CachedEmbedding {
     pub embedding: Vec<f32>,
 }
 
-pub struct ScoredSignal {
+pub struct ScoredMemory {
     pub memory_uuid: String,
     pub gist: String,
     pub created_at: String,
@@ -265,7 +265,7 @@ pub struct ScoredSignal {
 
 pub fn semantic_search_cached(
     query: &str, cached: Vec<CachedEmbedding>, limit: usize,
-) -> Result<Vec<ScoredSignal>, String> {
+) -> Result<Vec<ScoredMemory>, String> {
     let backend = create_backend()?;
     let query_embedding = backend.embed(query)?;
     Ok(rank_cached(&query_embedding, cached, limit))
@@ -274,10 +274,10 @@ pub fn semantic_search_cached(
 /// Rank cached embeddings against an already-embedded query, best first.
 pub fn rank_cached(
     query_embedding: &[f32], cached: Vec<CachedEmbedding>, limit: usize,
-) -> Vec<ScoredSignal> {
-    let mut scored: Vec<ScoredSignal> = cached.into_iter().map(|c| {
+) -> Vec<ScoredMemory> {
+    let mut scored: Vec<ScoredMemory> = cached.into_iter().map(|c| {
         let score = cosine_similarity(query_embedding, &c.embedding);
-        ScoredSignal { memory_uuid: c.memory_uuid, gist: c.gist, created_at: c.created_at, score }
+        ScoredMemory { memory_uuid: c.memory_uuid, gist: c.gist, created_at: c.created_at, score }
     }).collect();
     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(limit);

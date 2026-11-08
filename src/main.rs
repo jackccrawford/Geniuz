@@ -14,7 +14,7 @@ use std::path::PathBuf;
 /// variables, never as part of the command it parses, so an apostrophe cannot
 /// break the command and shell syntax in a memory cannot run. Every byte
 /// arrives intact.
-fn watch_exec_command(template: &str, e: &geniuz::db::SignalEntry) -> (String, Vec<(&'static str, String)>) {
+fn watch_exec_command(template: &str, e: &geniuz::db::MemoryEntry) -> (String, Vec<(&'static str, String)>) {
     let uuid_short = &e.memory_uuid[..8.min(e.memory_uuid.len())];
     let parent_short = e.parent_uuid.as_deref().map(|p| &p[..8.min(p.len())]).unwrap_or("");
     let content = e.content.as_deref().unwrap_or("");
@@ -500,7 +500,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 if split {
                     let sections = adapter::split_sections(content);
                     let root_gist = format!("{}capture: {}", prefix, filename);
-                    let root_uuid = match db.signal_with_backend(content, Some(&root_gist), None, None, Some(backend.as_ref())) {
+                    let root_uuid = match db.keep_with_backend(content, Some(&root_gist), None, None, Some(backend.as_ref())) {
                         Ok(result) => {
                             created += 1;
                             result.uuid
@@ -516,7 +516,7 @@ fn run(cli: Cli) -> Result<String, String> {
                             Some(h) => format!("{}capture: {}: {}", prefix, filename, h),
                             None => format!("{}capture: {} (section {})", prefix, filename, i + 1),
                         };
-                        match db.signal_with_backend(&section.content, Some(&gist), Some(&root_uuid), None, Some(backend.as_ref())) {
+                        match db.keep_with_backend(&section.content, Some(&gist), Some(&root_uuid), None, Some(backend.as_ref())) {
                             Ok(_) => { created += 1; }
                             Err(e) => {
                                 eprintln!("[capture] Failed: {}", e);
@@ -526,7 +526,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     }
                 } else {
                     let gist = format!("{}capture: {}", prefix, filename);
-                    match db.signal_with_backend(content, Some(&gist), None, None, Some(backend.as_ref())) {
+                    match db.keep_with_backend(content, Some(&gist), None, None, Some(backend.as_ref())) {
                         Ok(_) => { created += 1; }
                         Err(e) => {
                             eprintln!("[capture] Failed: {}", e);
@@ -576,7 +576,7 @@ fn run(cli: Cli) -> Result<String, String> {
             };
 
             let db = get_db()?;
-            let result = db.signal(&resolved, gist.as_deref(), parent.as_deref(), at.as_deref())?;
+            let result = db.keep(&resolved, gist.as_deref(), parent.as_deref(), at.as_deref())?;
 
             let address = db.address(&result.uuid);
             if json {
@@ -944,7 +944,7 @@ fn run(cli: Cli) -> Result<String, String> {
             let db = get_db()?;
             db.set_embedding_model(geniuz::embedding::model_id())?;
 
-            let uncached = db.get_uncached_signals()?;
+            let uncached = db.unembedded_memories()?;
             if uncached.is_empty() {
                 return Ok("All memories cached.".to_string());
             }
@@ -972,19 +972,19 @@ fn run(cli: Cli) -> Result<String, String> {
 
         Command::Status => {
             let db = get_db()?;
-            let signals = db.count()?;
+            let memories = db.count()?;
             let embeddings = db.embedding_count()?;
             let path = resolve_db_path()?.to_string_lossy().to_string();
 
             let mut lines = vec![
                 format!("Folder: {}", path),
-                format!("Memories: {}", signals),
-                format!("Embeddings: {}/{} cached", embeddings, signals),
+                format!("Memories: {}", memories),
+                format!("Searchable by meaning: {} of {}", embeddings, memories),
             ];
-            if embeddings < signals {
-                lines.push("Run 'geniuz backfill' to cache remaining.".to_string());
-            } else if signals > 0 {
-                lines.push("Semantic search: ready".to_string());
+            if embeddings < memories {
+                lines.push("Run 'geniuz backfill' to make the rest searchable by meaning.".to_string());
+            } else if memories > 0 {
+                lines.push("Search by meaning: ready".to_string());
             }
             Ok(lines.join("\n"))
         }
@@ -1039,7 +1039,7 @@ mod watch_exec_tests {
     use super::watch_exec_command;
 
     fn run(template: &str, gist: &str, content: &str) -> (String, bool) {
-        let e = geniuz::db::SignalEntry {
+        let e = geniuz::db::MemoryEntry {
             memory_uuid: "ABCDEF12-0000-0000-0000-000000000000".into(),
             gist: gist.into(),
             created_at: "2026-11-02 00:00:00".into(),

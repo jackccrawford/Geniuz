@@ -20,7 +20,7 @@ use ratatui::{
 };
 use std::io::{self, IsTerminal};
 
-use geniuz::db::{DatabaseManager, SignalEntry};
+use geniuz::db::{DatabaseManager, MemoryEntry};
 
 /// Public entry point invoked by the `geniuz tui` subcommand.
 pub fn run() -> std::result::Result<(), String> {
@@ -65,13 +65,13 @@ enum ComposeFocus {
 
 struct App {
     db: DatabaseManager,
-    memories: Vec<SignalEntry>,
+    memories: Vec<MemoryEntry>,
     list_state: ListState,
     input: String,
     status: String,
     hint: String,
     mode: Mode,
-    detail: Option<(SignalEntry, Option<String>)>,
+    detail: Option<(MemoryEntry, Option<String>)>,
     should_quit: bool,
     total: usize,
     compose_gist: String,
@@ -88,12 +88,12 @@ struct App {
 /// first memory at the top level, ordered by the thread's latest activity,
 /// and each reply under what it answers, oldest first, one level deeper.
 /// A reply whose thread began before the window stays at the top level.
-fn thread_order(entries: Vec<SignalEntry>, newest_first: bool) -> (Vec<SignalEntry>, Vec<usize>) {
+fn thread_order(entries: Vec<MemoryEntry>, newest_first: bool) -> (Vec<MemoryEntry>, Vec<usize>) {
     use std::collections::{HashMap, HashSet};
     let key = |u: &str| u.to_ascii_uppercase();
     let index: HashMap<String, usize> =
         entries.iter().enumerate().map(|(i, e)| (key(&e.memory_uuid), i)).collect();
-    let parent_of = |e: &SignalEntry| -> Option<usize> {
+    let parent_of = |e: &MemoryEntry| -> Option<usize> {
         let p = e.parent_uuid.as_deref()?;
         if p.eq_ignore_ascii_case(&e.memory_uuid) {
             return None;
@@ -111,7 +111,7 @@ fn thread_order(entries: Vec<SignalEntry>, newest_first: bool) -> (Vec<SignalEnt
     for list in kids.values_mut() {
         list.sort_by(|a, b| entries[*a].created_at.cmp(&entries[*b].created_at));
     }
-    fn latest(i: usize, entries: &[SignalEntry], kids: &HashMap<usize, Vec<usize>>, seen: &mut HashSet<usize>) -> String {
+    fn latest(i: usize, entries: &[MemoryEntry], kids: &HashMap<usize, Vec<usize>>, seen: &mut HashSet<usize>) -> String {
         if !seen.insert(i) {
             return String::new();
         }
@@ -143,7 +143,7 @@ fn thread_order(entries: Vec<SignalEntry>, newest_first: bool) -> (Vec<SignalEnt
         walk(i, 0, &kids, &mut seen, &mut order);
     }
     let rows = order.iter().map(|&(_, d)| d).collect();
-    let mut slots: Vec<Option<SignalEntry>> = entries.into_iter().map(Some).collect();
+    let mut slots: Vec<Option<MemoryEntry>> = entries.into_iter().map(Some).collect();
     let ordered = order.iter().filter_map(|&(i, _)| slots[i].take()).collect();
     (ordered, rows)
 }
@@ -381,7 +381,7 @@ impl App {
         let gist_opt = if gist.is_empty() { None } else { Some(gist.as_str()) };
         let result = self
             .db
-            .signal(&content, gist_opt, None, None)
+            .keep(&content, gist_opt, None, None)
             .map_err(|e| anyhow::anyhow!(e))?;
         self.total = self.db.count().map_err(|e| anyhow::anyhow!(e))?;
         self.load_recent(24)?;
@@ -898,7 +898,7 @@ fn region_uses_12h(locale: &str) -> bool {
 /// Where a memory sits in its folder's tree, the only mark beside it: a dot
 /// starts a thread, a hook answers one, as in the dashboard and the menu bar.
 /// From the parent the store records; nothing is read out of the words.
-fn node_mark(e: &SignalEntry) -> Span<'static> {
+fn node_mark(e: &MemoryEntry) -> Span<'static> {
     let reply = e
         .parent_uuid
         .as_deref()
@@ -925,8 +925,8 @@ fn truncate(s: &str, n: usize) -> String {
 mod tests {
     use super::*;
 
-    fn e(id: &str, parent: Option<&str>, at: &str) -> SignalEntry {
-        SignalEntry {
+    fn e(id: &str, parent: Option<&str>, at: &str) -> MemoryEntry {
+        MemoryEntry {
             memory_uuid: id.into(),
             gist: id.into(),
             created_at: at.into(),

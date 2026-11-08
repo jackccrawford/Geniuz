@@ -5,7 +5,7 @@
 // directly or maintain its own data layer. One source of truth for schema
 // and query logic, used by the CLI, the MCP server, and this dashboard alike.
 
-use geniuz::db::{DatabaseManager, SignalEntry};
+use geniuz::db::{DatabaseManager, MemoryEntry};
 use geniuz::folders::{Folder, Registry};
 use geniuz::settings::Settings;
 use serde::{Deserialize, Serialize};
@@ -242,7 +242,7 @@ fn remember_memory(
         Some(uuid) => DatabaseManager::open_existing(&Registry::from_env().find(&uuid)?.db_path.to_string_lossy())?,
         None => open_db()?,
     };
-    // A reply goes under a memory in this same folder. db.signal starts a new
+    // A reply goes under a memory in this same folder. db.keep starts a new
     // thread when the parent doesn't resolve; here that would quietly lose the
     // reply the person asked for, so say so instead.
     let parent = match parent.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
@@ -254,7 +254,7 @@ fn remember_memory(
         None => None,
     };
     let gist_trimmed = gist.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty());
-    db.signal(content.trim(), gist_trimmed, parent.as_deref(), None)
+    db.keep(content.trim(), gist_trimmed, parent.as_deref(), None)
         .map(|r| r.uuid)
 }
 
@@ -364,7 +364,7 @@ fn find(
             }
         }
     };
-    let mut memories: Vec<(SignalEntry, &Folder)> = Vec::new();
+    let mut memories: Vec<(MemoryEntry, &Folder)> = Vec::new();
     let mut lines: Vec<FindLine> = Vec::new();
     let mode_text;
 
@@ -859,7 +859,7 @@ fn get_data_dir() -> String {
 // No category is read out of a gist. Meaning is the writer's, in the words,
 // and the app shows the gist whole.
 
-fn map_recent(e: SignalEntry) -> RecentMemory {
+fn map_recent(e: MemoryEntry) -> RecentMemory {
     RecentMemory {
         uuid: e.memory_uuid,
         gist: e.gist,
@@ -871,7 +871,7 @@ fn map_recent(e: SignalEntry) -> RecentMemory {
     }
 }
 
-fn map_detail(e: SignalEntry) -> MemoryDetail {
+fn map_detail(e: MemoryEntry) -> MemoryDetail {
     MemoryDetail {
         uuid: e.memory_uuid,
         gist: e.gist,
@@ -1269,8 +1269,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("GENIUZ_HOME", &dir);
         let db = open_db().unwrap();
-        db.signal("Roundup\nCubic reviewed the PR; see 13625F6B:D824ADA7.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
-        db.signal("Asked Devin to retest.", Some("follow-up"), None, None).unwrap();
+        db.keep("Roundup\nCubic reviewed the PR; see 13625F6B:D824ADA7.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
+        db.keep("Asked Devin to retest.", Some("follow-up"), None, None).unwrap();
 
         let r = find("Devin".into(), "exact".into(), Some("24h".into()), None, None).unwrap();
         let lines: Vec<&str> = r.lines.iter().map(|l| l.line.as_str()).collect();

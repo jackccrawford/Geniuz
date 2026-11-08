@@ -25,7 +25,7 @@
 //! Reads use a read-only connection and never `DatabaseManager::new`, which
 //! applies the schema on open: listing must not change a file it doesn't own.
 
-use crate::db::SignalEntry;
+use crate::db::MemoryEntry;
 use crate::embedding::EmbeddingBackend;
 use crate::window::Window;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
@@ -822,7 +822,7 @@ pub enum Search<'a> {
 /// One result, with the folder it came from.
 pub struct Hit {
     pub folder: Folder,
-    pub entry: SignalEntry,
+    pub entry: MemoryEntry,
 }
 
 impl Hit {
@@ -2210,9 +2210,9 @@ mod tests {
         let a = reg.create("Alpha", "", None).unwrap();
         let b = reg.create("Beta", "", None).unwrap();
         let open = |f: &Folder| crate::db::DatabaseManager::new(&f.db_path.to_string_lossy()).unwrap();
-        open(&a).signal("the older note", Some("older"), None, Some("2026-01-01 00:00:00")).unwrap();
-        open(&b).signal("the newer note", Some("newer"), None, Some("2026-02-01 00:00:00")).unwrap();
-        open(&b).signal("unrelated", Some("other"), None, Some("2026-03-01 00:00:00")).unwrap();
+        open(&a).keep("the older note", Some("older"), None, Some("2026-01-01 00:00:00")).unwrap();
+        open(&b).keep("the newer note", Some("newer"), None, Some("2026-02-01 00:00:00")).unwrap();
+        open(&b).keep("unrelated", Some("other"), None, Some("2026-03-01 00:00:00")).unwrap();
 
         let window = Window::parse(None, None).unwrap();
         let found = search_across(&reg, &Search::Keyword("note"), &window, 10);
