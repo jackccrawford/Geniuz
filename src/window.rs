@@ -11,7 +11,7 @@
 //! results are shown in — and an `until` date means through the end of that
 //! day.
 
-use chrono::{DateTime, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, NaiveDateTime, TimeZone, Utc};
 
 const SQL_TS: &str = "%Y-%m-%d %H:%M:%S";
 
@@ -144,8 +144,13 @@ pub fn moment_at(raw: &str, now: DateTime<Utc>) -> Result<String, String> {
         return Err("--at needs a time: a date (2026-03-21), a local time (2026-03-21 14:00) or RFC 3339".into());
     }
     let t = bound(raw, now, false).map_err(|e| format!("--at {e}"))?;
-    if t > now + Duration::seconds(60) {
+    if t > now {
         return Err(format!("--at {raw} is in the future; a memory can only be dated when it happened"));
+    }
+    // Before 1970 is a typo, not a memory, and SQLite's date functions misread
+    // years outside 0000-9999 (cubic, PR #30).
+    if t.year() < 1970 {
+        return Err(format!("--at {raw} is before 1970; give the date the memory happened"));
     }
     Ok(t.format(SQL_TS).to_string())
 }
@@ -154,7 +159,8 @@ pub fn moment_at(raw: &str, now: DateTime<Utc>) -> Result<String, String> {
 /// all of it, so the exclusive bound is the start of the next one.
 fn bound(raw: &str, now: DateTime<Utc>, is_until: bool) -> Result<DateTime<Utc>, String> {
     if let Some(d) = relative(raw) {
-        return Ok(now - d);
+        // A huge offset is an error, not a panic (cubic, PR #30).
+        return now.checked_sub_signed(d).ok_or_else(|| format!("`{raw}` reaches before any date there is"));
     }
     if let Ok(t) = DateTime::parse_from_rfc3339(raw) {
         let t = t.with_timezone(&Utc);
@@ -178,7 +184,10 @@ fn bound(raw: &str, now: DateTime<Utc>, is_until: bool) -> Result<DateTime<Utc>,
 
 /// `24h`, `7d`, `2w`.
 fn relative(raw: &str) -> Option<Duration> {
-    let (n, unit) = raw.split_at(raw.len().checked_sub(1)?);
+    // Split before the last character, not the last byte: input can end in any
+    // character, and a byte index inside one panics (cubic, PR #30).
+    let (cut, _) = raw.char_indices().last()?;
+    let (n, unit) = raw.split_at(cut);
     let n: i64 = n.parse().ok().filter(|n| *n >= 0)?;
     match unit {
         "h" => Duration::try_hours(n),
@@ -226,12 +235,17 @@ mod tests {
         assert_eq!(moment_at("2026-03-21T14:00:00Z", now).unwrap(), "2026-03-21 14:00:00");
         // A date alone is the start of that LOCAL day, so it stays on its date locally.
         let d = moment_at("2026-03-21", now).unwrap();
-        let local = Utc.datetime_from_str(&d, SQL_TS).unwrap().with_timezone(&Local);
+        let local = NaiveDateTime::parse_from_str(&d, SQL_TS).unwrap().and_utc().with_timezone(&Local);
         assert_eq!(local.format("%Y-%m-%d %H:%M").to_string(), "2026-03-21 00:00");
         assert_eq!(moment_at("3d", now).unwrap(), "2026-11-05 05:00:00");
         assert!(moment_at("2026-12-01", now).unwrap_err().contains("future"));
         assert!(moment_at("", now).is_err());
         assert!(moment_at("next tuesday", now).is_err());
+        // Input that once panicked is an error now.
+        assert!(moment_at("昨日", now).is_err());
+        assert!(moment_at("99999999999d", now).is_err());
+        assert!(moment_at("1066-10-14", now).unwrap_err().contains("1970"));
+        assert!(Window::parse_at(Some("9999999999w"), None, now).is_err());
     }
 
     #[test]

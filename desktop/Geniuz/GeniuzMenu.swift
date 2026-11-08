@@ -125,15 +125,18 @@ struct GeniuzMenu: View {
     // MARK: - Connection, quiet when fine
 
     /// Something to do about the connection: not connected, or a restart owed.
+    /// An unreadable Claude config counts too, so its message row shows (cubic, PR #30).
     private var needsAttention: Bool {
-        (!service.mcpInstalled && service.claudeFound && !service.claudeConfigUnreadable)
+        (!service.mcpInstalled && service.claudeFound)
             || (service.mcpInstalled && service.restartRequired)
     }
 
-    /// The header's small status mark: a quiet check when connected, an orange
-    /// mark when the row below asks for something.
+    /// The header's small status mark: a check only when connected; orange when
+    /// the row below asks for something; a plain circle otherwise (Claude Desktop
+    /// not installed), never a check that looks like "connected".
     private var statusMark: some View {
-        Image(systemName: needsAttention ? "exclamationmark.circle.fill" : "checkmark.circle")
+        Image(systemName: needsAttention ? "exclamationmark.circle.fill"
+              : service.mcpInstalled ? "checkmark.circle" : "circle")
             .font(.system(size: 13))
             .foregroundColor(needsAttention ? .orange : .secondary)
             .help(service.restartRequired && service.mcpInstalled ? "Restart Claude to finish connecting" : connectionText)

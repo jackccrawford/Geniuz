@@ -63,7 +63,6 @@ geniuz recall --random
 
 # Bulk-load existing files
 geniuz capture ./docs/
-geniuz capture --openclaw
 
 # Build embedding cache (once, then automatic)
 geniuz backfill

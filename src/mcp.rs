@@ -398,12 +398,12 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
         }
         let homes = scan.folders.iter().filter(|f| in_agents_tree(&f.db_path)).count();
         let rest = scan.folders.len() - picked.len();
-        tail = Some(format!(
+        if rest > 0 { tail = Some(format!(
             "{} more folders not shown ({} total{}). Pass filter with a word from a name or description to find one, e.g. filter: \"genesis\".",
             rest,
             scan.folders.len(),
             if homes > 0 { format!(", {} of them agents' homes", homes) } else { String::new() }
-        ));
+        )); }
         chosen = picked;
     }
     let mut lines = Vec::new();

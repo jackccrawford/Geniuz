@@ -945,6 +945,7 @@ fn build_menu(app: &tauri::AppHandle, shortcuts: bool) -> tauri::Result<Menu<tau
             .collect();
         recent.sort_by(|a, b| b.last_written.cmp(&a.last_written));
         let mut out: Vec<&FolderRow> = Vec::new();
+        // The folder on screen first (what this window shows), then pinned, then recent.
         for f in list.folders.iter().filter(|f| f.current)
             .chain(list.folders.iter().filter(|f| f.pinned))
             .chain(recent.into_iter().take(10))

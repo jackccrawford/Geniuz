@@ -299,7 +299,8 @@ impl Registry {
 
     /// Which database a command should use. In order: the `--in` flag, the
     /// `GENIUZ_DB` file path, a `.geniuz-folder` file here or in a parent
-    /// directory, the current folder, then the first folder.
+    /// directory, the default folder, then the first folder. If the default was
+    /// set to none, there is no last step: it's an error asking for a folder.
     pub fn resolve(
         &self,
         flag: Option<&str>,
@@ -321,8 +322,8 @@ impl Registry {
             }
         }
         if self.no_default() {
-            return Err("No default folder is set, so name one: -f <folder> (or --in). \
-                        Choose a default in Settings, or with `geniuz folder use <folder>`."
+            return Err("No default folder is set, so name a folder: the folder argument, or -f <folder> \
+                        on the command line. A default can be chosen in Settings, or with `geniuz folder use`."
                 .to_string());
         }
         if let Some(q) = self.current() {

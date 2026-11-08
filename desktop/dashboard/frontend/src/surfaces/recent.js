@@ -110,6 +110,7 @@ export async function mount(container) {
   const total = stats.total_memories ?? recent.length;
   const numberAt = (i) => (direction === 'asc' ? i + 1 : total - i);
   let loaded = recent;
+  let served = recent.length;
   let more = recent.length === PAGE;
 
   // The stream (2026-10-21, from Geniuz Team's room), with threads as a tree
@@ -370,7 +371,11 @@ export async function mount(container) {
     if (!more || loading) return;
     loading = true;
     try {
-      const next = await api.getRecentMemories(PAGE, loaded.length, direction === 'asc');
+      // The offset counts rows the server has handed over, not rows kept: memories
+      // written while reading shift the newest-first list, and counting only the
+      // kept ones could ask for the same page forever (cubic, PR #30).
+      const next = await api.getRecentMemories(PAGE, served, direction === 'asc');
+      served += next.length;
       const have = new Set(loaded.map((m) => m.uuid));
       loaded = loaded.concat(next.filter((m) => !have.has(m.uuid)));
       more = next.length === PAGE;

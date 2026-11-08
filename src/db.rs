@@ -382,14 +382,30 @@ impl DatabaseManager {
     /// second share it, and "after" by time skips all but one of them (full-tree
     /// test, 7 Nov 2026). Takes a UUID, a prefix, or an address FOLDER:MEMORY.
     pub fn position_of(&self, id: &str) -> Result<Option<(String, i64)>, String> {
-        let memory = id.rsplit(':').next().unwrap_or(id).trim();
+        let (folder, memory) = match id.split_once(':') {
+            Some((f, m)) => (Some(f.trim()), m.trim()),
+            None => (None, id.trim()),
+        };
         if memory.is_empty() {
             return Ok(None);
         }
+        // An address names its folder: one that isn't this folder is an error that
+        // says so, not "not found" (cubic, PR #30).
+        if let Some(f) = folder.filter(|f| !f.is_empty()) {
+            let here: Option<String> = self.conn()?
+                .query_row("SELECT value FROM _meta WHERE key = 'folder_uuid'", [], |r| r.get(0))
+                .ok();
+            if here.is_some_and(|h| !h.to_uppercase().starts_with(&f.to_uppercase())) {
+                return Err(format!("{} is in folder {}, not this one: watch that folder with -f {}",
+                    id.to_uppercase(), f.to_uppercase(), f.to_uppercase()));
+            }
+        }
+        // An ambiguous prefix is an error, never a guess (resolve_uuid).
+        let Some(uuid) = self.resolve_uuid(memory)? else { return Ok(None) };
         let conn = self.conn()?;
         conn.query_row(
-            "SELECT created_at, rowid FROM memories WHERE memory_uuid LIKE ?1 ORDER BY created_at, rowid LIMIT 1",
-            rusqlite::params![format!("{}%", memory.to_uppercase())],
+            "SELECT created_at, rowid FROM memories WHERE memory_uuid = ?1",
+            rusqlite::params![uuid],
             |row| Ok((row.get(0)?, row.get(1)?)),
         ).optional().map_err(|e| format!("Query failed: {}", e))
     }
