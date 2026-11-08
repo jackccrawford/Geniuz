@@ -8,11 +8,14 @@ use std::path::PathBuf;
     about = "Your AI remembers now",
     long_about = "GENIUZ: Your AI remembers now.\n\nPersistent memory for AI agents. Keep what matters, recall it later.\nWorks with any agent framework — Claude Code, Cursor, Windsurf, Aider,\nor anything that can run a shell command.",
     before_help = "Start here: 'geniuz recall' to see what's in your folder.",
-    after_help = "Examples:\n  geniuz tui                                 Browse memories in a terminal UI\n  geniuz keep -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recall                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nFolders: 'geniuz folder list' shows them, and --in <name> uses one for a command.\n  Multiple agents can share a folder for shared memory.\n\nData: Kept in .geniuz in your home directory\n  Override with GENIUZ_HOME to change where Geniuz keeps its data\n  Override with GENIUZ_DB for a specific memory.db file\n\nUse \"geniuz [command] --help\" for more information."
+    after_help = "Examples:\n  geniuz tui                                 Browse memories in a terminal UI\n  geniuz keep -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recall                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nFolders: 'geniuz folder list' shows them, and --in <name> (or -s) uses one for a command.\n  Multiple agents can share a folder for shared memory.\n\nData: Kept in .geniuz in your home directory\n  Override with GENIUZ_HOME to change where Geniuz keeps its data\n  Override with GENIUZ_DB for a specific memory.db file\n\nUse \"geniuz [command] --help\" for more information."
 )]
 pub struct Cli {
+    // -s and --station as well: relay's `-s` names a station, and relay's stations are Geniuz
+    // folders with the same IDs (Jack, 7 Nov 2026: "relay -s ... needs a corresponding flag in
+    // geniuz"; "we can change flags. this is the first agent implementation").
     /// Use this folder for the command: a name or its 8-character ID
-    #[arg(long = "in", global = true, value_name = "FOLDER")]
+    #[arg(short = 's', long = "in", alias = "station", global = true, value_name = "FOLDER")]
     pub in_folder: Option<String>,
 
     #[command(subcommand)]
@@ -188,8 +191,9 @@ pub enum Command {
         #[arg(short, long, default_value = "300")]
         interval: u64,
 
+        // No short form: -s names the folder, as in relay.
         /// Only show memories after this UUID
-        #[arg(short, long)]
+        #[arg(long)]
         since: Option<String>,
 
         /// Run command for each new memory (supports {uuid}, {gist}, {content}, {created_at}, {parent}, {json}; memory text arrives as a shell variable, so use double quotes, not single)
