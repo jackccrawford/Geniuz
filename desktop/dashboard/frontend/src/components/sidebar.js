@@ -32,9 +32,11 @@ export function wireCollapse(shell, topbar) {
   let pref = readPref();
   let narrow = window.innerWidth < NARROW_BELOW;
   let openedWhileNarrow = false;
+  // Wide, collapsed by choice, opened for a moment (All folders…): not saved.
+  let shownForNow = false;
 
   const toggles = [];
-  const collapsed = () => (narrow ? !openedWhileNarrow : pref);
+  const collapsed = () => (narrow ? !openedWhileNarrow : pref && !shownForNow);
   const apply = () => {
     const on = collapsed();
     shell.classList.toggle('is-collapsed', on);
@@ -48,10 +50,19 @@ export function wireCollapse(shell, topbar) {
   const toggle = () => {
     if (narrow) {
       openedWhileNarrow = !openedWhileNarrow;
+    } else if (shownForNow) {
+      shownForNow = false; // back to the saved choice, which was collapsed
     } else {
       pref = !pref;
       writePref(pref);
     }
+    apply();
+  };
+  // Open the sidebar for now, leaving the saved choice alone.
+  toggle.reveal = () => {
+    if (!collapsed()) return;
+    if (narrow) openedWhileNarrow = true;
+    else shownForNow = true;
     apply();
   };
 
@@ -298,7 +309,10 @@ function folderButton(f, buttons, { mirror = false } = {}) {
       const mark = document.createElement('span');
       mark.className = 'sidebar-folder__in-use';
       mark.title = 'New memories go here: Claude, the command line and the MCP use this folder when none is named';
-      mark.setAttribute('aria-label', 'In use for new memories');
+      mark.id = `in-use-${f.id}`;
+      mark.textContent = '';
+      mark.setAttribute('aria-label', 'Default folder: new memories go here');
+      btn.setAttribute('aria-describedby', mark.id);
       btn.appendChild(mark);
     }
     // The pin: shown on hover, and always once it's pinned. A span, because a

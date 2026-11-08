@@ -77,7 +77,8 @@ struct GeniuzMenu: View {
             }
         } else {
             Menu {
-                ForEach(shortlist(service.folders, showing: shownFolder?.uuid)) { folder in
+                let picks = shortlist(service.folders, showing: shownFolder?.uuid)
+                ForEach(picks) { folder in
                     Button(action: { service.showFolder(folder) }) {
                         if folder.uuid == shownFolder?.uuid {
                             Label(folder.name, systemImage: "checkmark")
@@ -86,7 +87,7 @@ struct GeniuzMenu: View {
                         }
                     }
                 }
-                if shortlist(service.folders, showing: shownFolder?.uuid).count < service.folders.count {
+                if picks.count < service.folders.count {
                     Divider()
                     Button("All \(service.folders.count) Folders…") { service.openDashboard() }
                 }

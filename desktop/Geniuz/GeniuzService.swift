@@ -57,9 +57,6 @@ struct FolderOption: Decodable, Identifiable, Equatable {
     }
 }
 
-/// With many folders, a menu of all of them is a wall. Show the one in use,
-/// the pinned ones and those written in the last week (newest first, up to
-/// ten); the dashboard has the rest.
 /// Geniuz stores times as UTC "yyyy-MM-dd HH:mm:ss". A fixed-format parser
 /// needs the POSIX locale, or a 12-hour or non-Gregorian setting breaks it.
 private let storedTime: DateFormatter = {
@@ -71,6 +68,9 @@ private let storedTime: DateFormatter = {
     return fmt
 }()
 
+/// With many folders, a menu of all of them is a wall. Show the one in use,
+/// the pinned ones and those written in the last week (newest first, up to
+/// ten); the dashboard has the rest.
 func shortlist(_ folders: [FolderOption], showing: String? = nil, over limit: Int = 20) -> [FolderOption] {
     guard folders.count > limit else { return folders }
     let weekAgo = Date().addingTimeInterval(-7 * 86400)
@@ -456,7 +456,9 @@ class GeniuzService: ObservableObject {
                     if userAsked {
                         self.updateCheckMessage = status == 0
                             ? "Couldn't reach GitHub to check. Try again later."
-                            : "GitHub didn't answer the check (HTTP \(status)). Try again later."
+                            : status == 200
+                                ? "GitHub answered, but not with a release Geniuz could read. Try again later."
+                                : "GitHub didn't answer the check (HTTP \(status)). Try again later."
                     }
                     NSLog("[geniuz-app] update check failed: status=%d %@", status, error?.localizedDescription ?? "")
                     return

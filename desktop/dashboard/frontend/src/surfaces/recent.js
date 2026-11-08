@@ -201,6 +201,12 @@ export async function mount(container) {
 
   const stream = document.createElement('div');
   stream.className = 'stream';
+  // The memory last read, kept across redraws (another page, a tree opening).
+  let readUuid = null;
+  const markRead = () => {
+    if (!readUuid) return;
+    for (const x of stream.querySelectorAll(`.smsg[data-uuid="${CSS.escape(readUuid)}"]`)) x.classList.add('is-read');
+  };
   function drawStream() {
     let html = '';
     let lastDay = '';
@@ -217,6 +223,7 @@ export async function mount(container) {
       html += `<div class="s-thread" data-key="${k}">${card(m, { count, opened })}<div class="s-thread__tree"></div></div>`;
     }
     stream.innerHTML = html;
+    markRead();
   }
   drawStream();
 
@@ -246,10 +253,12 @@ export async function mount(container) {
     const rootKey = key8(rootEntry.uuid);
     if (rootKey === k) {
       host.innerHTML = treeHtml(entries, k, null, 1);
+      markRead();
     } else {
       // A reply whose thread began earlier: the whole tree from its first
       // memory, this one marked where it sits.
       host.innerHTML = `<div class="stree" style="--d:1"><div class="stree__node">${card(rootEntry, { depth: 1, count: 1, opened: true })}${treeHtml(entries, rootKey, k, 2)}</div></div>`;
+      markRead();
     }
     clampCheck(host);
   }
@@ -311,6 +320,7 @@ export async function mount(container) {
   function read(card) {
     for (const x of stream.querySelectorAll('.smsg.is-read')) x.classList.remove('is-read');
     card.classList.add('is-read');
+    readUuid = card.dataset.uuid;
     openMemory(card.dataset.uuid);
   }
 

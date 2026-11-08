@@ -128,7 +128,7 @@ export async function mount(container) {
     row('Geniuz', version ? escapeHtml(version) : '—', update ? 'warn' : 'ok'),
     update
       ? row('Update available', `${escapeHtml(update.version)} · <button type="button" class="status-row__link" data-update>Download</button>`, 'warn')
-      : row('Updates', lastCheck ? `Up to date (checked ${escapeHtml(lastCheck)})` : 'Not checked yet · the menu bar app checks', 'ok'),
+      : row('Updates', lastCheck ? `Up to date (checked ${escapeHtml(lastCheck)})` : 'Not checked yet · the menu bar app checks', lastCheck ? 'ok' : 'none'),
   ]);
   versionSection.querySelector('[data-update]')?.addEventListener('click', () => {
     api.openLink(update.url).catch((e) => console.error('[geniuz] opening the update failed:', e));
@@ -155,6 +155,7 @@ function row(label, valueHtml, dotState) {
   const dotClass =
     dotState === 'warn' ? 'status-row__dot is-warn'
     : dotState === 'bad' ? 'status-row__dot is-bad'
+    : dotState === 'none' ? 'status-row__dot is-none'
     : 'status-row__dot';
   return `
     <div class="status-row">
