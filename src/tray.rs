@@ -38,8 +38,10 @@ struct Status {
     recent_gists: Vec<String>,
     claude_configured: bool,
     restart_required: bool,
-    /// UUID, name, and whether it's the one in use.
+    /// UUID, name, and whether it's the default folder.
     folders: Vec<(String, String, bool)>,
+    /// The default was set to none: every memory must name its folder.
+    no_default: bool,
 }
 
 impl Status {
@@ -49,6 +51,7 @@ impl Status {
 
     fn fetch(restart_required: bool) -> Self {
         let reg = geniuz::folders::Registry::from_env();
+        let no_default = reg.no_default();
         let station_path = reg
             .resolve(None, None, None)
             .unwrap_or_else(|_| geniuz::data_dir().join("memory.db"));
@@ -58,11 +61,15 @@ impl Status {
             .folders
             .into_iter()
             .map(|f| {
-                let current = std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()) == in_use;
+                // Under "none" no folder is the default, whatever the fallback path is.
+                let current = !no_default
+                    && std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()) == in_use;
                 (f.uuid, f.name, current)
             })
             .collect();
-        let (memory_count, recent_gists, station_exists) = if station_path.exists() {
+        let (memory_count, recent_gists, station_exists) = if no_default {
+            (0, Vec::new(), true)
+        } else if station_path.exists() {
             match geniuz::db::DatabaseManager::open_existing(&station_path.to_string_lossy()) {
                 Ok(db) => {
                     let count = db.count().unwrap_or(0);
@@ -82,6 +89,7 @@ impl Status {
 
         Status {
             folders,
+            no_default,
             memory_count,
             station_exists,
             recent_gists,
@@ -96,6 +104,9 @@ impl Status {
         } else {
             format!("{} memories", self.memory_count)
         };
+        if self.no_default {
+            return "Geniuz · No default folder: each memory names its folder".to_string();
+        }
         // Two-line tooltip: identity + count on top, most-recent gist on bottom.
         // Connection status moved to the menu (popup) where it belongs — tooltip
         // is for the pulse the user actually wants on every glance.
@@ -189,6 +200,9 @@ struct MenuBuild {
     folder_ids: Vec<(MenuId, String)>,
 }
 
+/// The "None: ask which folder" row, told apart from folder UUIDs by this name.
+const NO_DEFAULT_CHOICE: &str = "none";
+
 fn build_menu(status: &Status) -> MenuBuild {
     let menu = Menu::new();
 
@@ -201,17 +215,25 @@ fn build_menu(status: &Status) -> MenuBuild {
     menu.append(&header).ok();
     menu.append(&PredefinedMenuItem::separator()).ok();
 
-    // Folders — one needs no choosing, so this only appears with two or more.
+    // The default folder: where Claude, the command line and the MCP keep a memory
+    // that names no folder. Choosing here is the setting itself, as Settings → Default
+    // folder is on a Mac; the tray shows recent memories from this folder. One folder
+    // needs no choosing, so this appears with two or more, or when set to none.
     let mut folder_ids = Vec::new();
-    if status.folders.len() > 1 {
-        let name = status.current_folder().unwrap_or("Folders");
-        let submenu = Submenu::new(truncate_for_menu(name, 40), true);
+    if status.folders.len() > 1 || status.no_default {
+        let name = if status.no_default { "None" } else { status.current_folder().unwrap_or("not chosen") };
+        let submenu = Submenu::new(truncate_for_menu(&format!("Default folder: {}", name), 50), true);
         for (uuid, folder, current) in &status.folders {
             let label = if *current { format!("✓  {}", folder) } else { format!("    {}", folder) };
             let item = MenuItem::new(truncate_for_menu(&label, 60), true, None);
             folder_ids.push((item.id().clone(), uuid.clone()));
             submenu.append(&item).ok();
         }
+        submenu.append(&PredefinedMenuItem::separator()).ok();
+        let none_label = if status.no_default { "✓  None: ask which folder" } else { "    None: ask which folder" };
+        let none = MenuItem::new(none_label, true, None);
+        folder_ids.push((none.id().clone(), NO_DEFAULT_CHOICE.to_string()));
+        submenu.append(&none).ok();
         menu.append(&submenu).ok();
         menu.append(&PredefinedMenuItem::separator()).ok();
     }
@@ -327,8 +349,10 @@ impl ApplicationHandler for TrayApp {
             }
             let chosen = self.folder_ids.iter().find(|(id, _)| *id == event.id).map(|(_, uuid)| uuid.clone());
             if let Some(uuid) = chosen {
-                if let Err(e) = geniuz::folders::Registry::from_env().use_folder(&uuid) {
-                    eprintln!("[geniuz-tray] switching folder failed: {}", e);
+                let reg = geniuz::folders::Registry::from_env();
+                let set = if uuid == NO_DEFAULT_CHOICE { reg.clear_default() } else { reg.use_folder(&uuid).map(|_| ()) };
+                if let Err(e) = set {
+                    eprintln!("[geniuz-tray] setting the default folder failed: {}", e);
                 }
                 self.rebuild_menu();
                 return;
