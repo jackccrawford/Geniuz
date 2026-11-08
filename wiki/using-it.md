@@ -4,8 +4,8 @@
 
 | You have | Do this |
 |---|---|
-| A Mac | Download [Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg) and drag it to Applications. To use `geniuz` in a terminal, use **Settings → Copy Install Command** in the menubar. |
-| Linux | Run the command below, or see the [releases](https://github.com/jackccrawford/geniuz/releases/latest) for `.deb`, AppImage and tarballs (x86_64 and arm64). |
+| A Mac with Apple silicon (M1 or later) | Download [Geniuz.dmg](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz.dmg) and drag it to Applications. To use `geniuz` in a terminal, use **Settings → Copy Install Command** in the menubar. |
+| Linux | Run the command below, or see the [releases](https://github.com/jackccrawford/geniuz/releases/latest) for `.deb`, AppImage and tarballs (x86_64 and arm64). The arm64 build runs on a Raspberry Pi 4 or later, with a 64-bit OS. |
 | Windows 11 | Download [Geniuz-Setup.exe](https://github.com/jackccrawford/geniuz/releases/latest/download/Geniuz-Setup.exe). It installs per user, with no admin prompt. |
 
 ```bash
