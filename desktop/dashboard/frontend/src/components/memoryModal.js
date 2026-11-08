@@ -1,8 +1,8 @@
-// memoryModal.js — reading one memory (Jack, 2026-11-02: "user navigates tree,
-// clicks on memory, it pops up a modal"). The stream or Find stays exactly
+// memoryModal.js — reading one memory: click a memory in the tree and it opens
+// here. The stream or Find stays exactly
 // where it was behind it; closing returns there. Read-only: moving through a
 // thread is the tree's job. Its one way out is Reply, which opens Keep pointed
-// at this memory (Jack, 2026-11-06).
+// at this memory.
 
 import * as api from '../api.js';
 import * as su from '../stream-ui.js';

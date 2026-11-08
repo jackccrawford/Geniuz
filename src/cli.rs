@@ -11,10 +11,8 @@ use std::path::PathBuf;
     after_help = "Examples:\n  geniuz tui                                 Browse memories in a terminal UI\n  geniuz keep -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recall                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nFolders: 'geniuz folder list' shows them, and --in <name> (or -f) uses one for a command.\n  Multiple agents can share a folder for shared memory.\n\nData: Kept in .geniuz in your home directory\n  Override with GENIUZ_HOME to change where Geniuz keeps its data\n  Override with GENIUZ_DB for a specific memory.db file\n\nUse \"geniuz [command] --help\" for more information."
 )]
 pub struct Cli {
-    // -f and --folder as well: a short flag that names the folder, as relay's -s names a
-    // station (Jack, 7 Nov 2026: "relay -s ... needs a corresponding flag in geniuz", then
-    // "could we use -f instead of -s"; "we can change flags. this is the first agent
-    // implementation"). --full keeps its long form only.
+    // -f and --folder as well: agents name a folder on most calls, so it gets a short
+    // flag. --full keeps its long form only.
     /// Use this folder for the command: a name or its 8-character ID
     #[arg(short = 'f', long = "in", alias = "folder", global = true, value_name = "FOLDER")]
     pub in_folder: Option<String>,

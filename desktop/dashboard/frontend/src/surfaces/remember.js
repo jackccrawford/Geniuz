@@ -5,7 +5,7 @@
 // from the first 200 chars of content. Submit calls `remember_memory` which
 // wraps `db::signal()` — same write path as the CLI and TUI.
 //
-// Reply to (Jack, 2026-11-06: "select a memory to thread to"): optional. Empty
+// Reply to: optional, the memory this one threads to. Empty
 // starts a new thread, as before. Pick a memory by searching the chosen folder,
 // by pasting an address, or with Reply on a memory's own window, which opens
 // this page already pointed at it. A reply lives in the folder of the memory it
@@ -194,7 +194,7 @@ export async function mount(container) {
     replyResults.querySelector('.reply-result.is-active')?.scrollIntoView({ block: 'nearest' });
   };
 
-  // A keep wakes whoever reads it next (Jack, 2026-11-06), so the gist is the
+  // A keep wakes whoever reads it next, so the gist is the
   // doorbell: it says who it's for and what it asks. A reply already knows who.
   const gistHint = form.querySelector('.gist-hint');
   const setGistHint = () => {

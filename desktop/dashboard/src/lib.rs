@@ -31,11 +31,10 @@ fn db_path() -> Result<String, String> {
 static SHOWN: std::sync::Mutex<Shown> = std::sync::Mutex::new(Shown::NotYet);
 
 /// The folder the person chose to look at in this window. Looking is not choosing
-/// where memories go (Jack, 7 Nov 2026: "B ... most definitely. this is an oddity of
-/// the older geniuz with just one station"): picking a folder here changes only what
+/// where memories go: picking a folder here changes only what
 /// this window shows. The folder in use for Claude, the CLI and the MCP changes only
 /// elsewhere: the menu bar's picker, `geniuz folder use`. Keep here starts on the folder
-/// on screen and writes where its pulldown says (Jack: "local data, not global for the mac").
+/// on screen and writes where its pulldown says. This is the window's own state, not the machine's.
 /// Kept across page reloads; a new launch opens on the folder in use.
 static VIEW: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
@@ -651,9 +650,9 @@ fn bind_current_folder() -> Result<FolderList, String> {
         Ok(uuid) => {
             *slot = Shown::Folder(uuid.clone());
             // What's on screen stays on screen: a later change of the default
-            // folder elsewhere doesn't move this window (review, 7 Nov).
+            // folder elsewhere doesn't move this window.
             // Replace, not keep: a viewed folder that vanished must not pull the window
-            // back when it returns (Firn's review, PR #30).
+            // back when it returns.
             if let Ok(mut v) = VIEW.lock() { *v = Some(uuid.clone()); }
             Ok(folder_list(&reg, Some(&uuid)))
         }
@@ -858,7 +857,7 @@ fn get_data_dir() -> String {
 // -------------------------------------------------------------------------
 
 // No category is read out of a gist. Meaning is the writer's, in the words,
-// and the app shows the gist whole (Jack, 2026-11-06).
+// and the app shows the gist whole.
 
 fn map_recent(e: SignalEntry) -> RecentMemory {
     RecentMemory {
@@ -1024,7 +1023,7 @@ fn build_menu(app: &tauri::AppHandle, shortcuts: bool) -> tauri::Result<Menu<tau
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /// Open a link from a memory in the viewer's browser. Only web addresses:
 /// a memory is words someone wrote, and a click must never run anything
-/// local. (Same as Geniuz Team's exchange_open_link.)
+/// local.
 #[tauri::command]
 fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
     let u = url.trim();

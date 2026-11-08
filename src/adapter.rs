@@ -1,7 +1,7 @@
 //! Splitting markdown into sections, for `geniuz capture --split`.
 //!
-//! This file held the OpenClaw workspace import until 5.0.5 (Jack, 7 Nov 2026:
-//! removed; an agent brings its own memory in with keep, and people use capture).
+//! This file held the OpenClaw workspace import until 5.0.5, when it was
+//! removed: an agent brings its own memory in with keep, and people use capture).
 
 pub struct Section {
     pub header: Option<String>,

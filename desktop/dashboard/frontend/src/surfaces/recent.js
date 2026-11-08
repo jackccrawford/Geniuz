@@ -18,7 +18,7 @@ import { openFolderDialog } from '../components/folderDialog.js';
 export async function mount(container) {
   container.innerHTML = `<div class="surface-loading">Loading your memory…</div>`;
 
-  // A page at a time (Jack, 7 Nov: Genesis showed 40 of its 5,587). The first page
+  // A page at a time, so a folder of thousands is all reachable. The first page
   // is read in the chosen order, so oldest first starts at the oldest memory.
   const PAGE = 100;
   let stats, recent;
@@ -113,9 +113,8 @@ export async function mount(container) {
   let served = recent.length;
   let more = recent.length === PAGE;
 
-  // The stream (2026-10-21, from Geniuz Team's room), with threads as a tree
-  // (Jack: "for threads, I suggest tree navigation, like windows file
-  // manager"). The top level holds memories that answer nothing on screen,
+  // The stream, with threads as a tree, like a file manager's folders.
+  // The top level holds memories that answer nothing on screen,
   // ordered by their thread's latest activity; a thread folds under its first
   // memory behind a disclosure arrow, and opening it draws the whole thread
   // as a tree that folds at every level. What is open stays open.
@@ -155,8 +154,7 @@ export async function mount(container) {
   const card = (m, { depth = 0, here = false, count = 0, opened = false } = {}) => {
     const text = su.bodyAfterGist(m.content, m.gist);
     const num = numOf.get(key8(m.uuid));
-    // The gist as written, nothing singled out (Jack, 2026-11-06: "the app
-    // just shows the gist"). Its first words are the writer's, not a category.
+    // The gist as written, nothing singled out. Its first words are the writer's, not a category.
     const head = `<span class="smsg__gist">${su.esc(m.gist || '(no gist)')}</span>`;
     const twisty = count || depth === 0 && parentOf(m)
       ? `<button type="button" class="stwisty${opened ? ' is-open' : ''}" data-twisty="${su.esc(m.uuid)}" aria-expanded="${opened}" aria-label="${opened ? 'Fold' : 'Open'} this thread"><svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M4 2.5 8 6 4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`
@@ -273,7 +271,7 @@ export async function mount(container) {
     }
   }
 
-  // Expand all / Collapse all (Jack, 7 Nov): every thread loaded on screen,
+  // Expand all / Collapse all: every thread loaded on screen,
   // at every depth. Folding one afterwards still works, since what's open is
   // the same set a single fold changes.
   let expandingAll = false;
@@ -373,14 +371,14 @@ export async function mount(container) {
     try {
       // The offset counts rows the server has handed over, not rows kept: memories
       // written while reading shift the newest-first list, and counting only the
-      // kept ones could ask for the same page forever (cubic, PR #30).
+      // kept ones could ask for the same page forever.
       const next = await api.getRecentMemories(PAGE, served, direction === 'asc');
       served += next.length;
       const have = new Set(loaded.map((m) => m.uuid));
       loaded = loaded.concat(next.filter((m) => !have.has(m.uuid)));
       more = next.length === PAGE;
       // Keep the reader's place by the thread they're looking at, not by pixels:
-      // a reply arriving on this page can move its thread (review, 7 Nov).
+      // a reply arriving on this page can move its thread.
       const view = body.getBoundingClientRect();
       const anchor = [...stream.querySelectorAll('.s-thread')].find((t) => t.getBoundingClientRect().bottom > view.top);
       const anchorKey = anchor?.dataset.key;

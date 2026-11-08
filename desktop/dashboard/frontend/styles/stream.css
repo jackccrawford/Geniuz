@@ -1,5 +1,5 @@
 /* ============================================================================
-   The new look, from Geniuz Team's room (2026-10-21): a deep-teal sidebar
+   The look: a deep-teal sidebar
    with cream type, solid paper to read on, and memories as a stream you can
    read in place. Palette: teal #2F94A6 · deep #1A6E7C · ground #12414B ·
    cream #F2EADA · amber #E0A43B · terracotta #CF5535 · ink #1B2A30.
@@ -112,7 +112,7 @@ html.os-linux .sidebar {
 .smsg__more[hidden] { display: none; }
 .smsg__replies { margin-top: 4px; font-size: 13px; font-weight: 700; color: var(--s-deep); }
 
-/* ---- Threads as a tree (Jack: "like windows file manager") ------------------ */
+/* ---- Threads as a tree, like a file manager ------------------------------- */
 
 .smsg__gutter { gap: 2px; justify-content: flex-end; align-items: center; padding-right: 8px; padding-top: 0; height: 22px; }
 .smsg { grid-template-columns: 52px minmax(0, 1fr); }

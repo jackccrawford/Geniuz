@@ -1,6 +1,5 @@
 // stream-ui.js — the pieces the memory stream draws with: a memory's place
-// in its tree, its words, and times. The same hand as Geniuz Team's room
-// (exchange-ui.js), without the people. Nothing here reads a category or a
+// in its tree, its words, and times. Nothing here reads a category or a
 // speaker out of the words: those belong to the writer.
 
 import { parseSqliteIso } from './format.js';
@@ -32,9 +31,8 @@ export function bodyAfterGist(text, gist) {
 
 /**
  * Where a memory sits in its folder's tree: a dot starts a thread, a hook
- * answers one. Structure only, from the parent the substrate records (Jack,
- * 2026-11-06: "a folder contains a tree with 0 to n levels and 0 to n
- * nodes"). Meaning is the writer's, in the words, so no colour or icon here
+ * answers one. Structure only, from the parent the substrate records: a
+ * folder holds a tree of any depth and width. Meaning is the writer's, in the words, so no colour or icon here
  * stands for a kind of memory. The menu bar draws the same two marks.
  */
 export function node(isReply) {

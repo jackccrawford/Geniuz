@@ -464,7 +464,7 @@ fn run_app<B: Backend>(terminal: &mut Terminal<B>) -> Result<()> {
         // Ratatui redraws only the cells that changed. Some terminal fonts draw
         // an underscore a little below its own cell, and the cell beneath it,
         // blank before and after, is never repainted, so fragments of the last
-        // screen linger (Jack, 6 Nov, after thoughtform gists). Repaint the
+        // screen linger. Repaint the
         // whole screen when the view changes; typing doesn't count, so the
         // input line doesn't flicker. The clear and the redraw go out as one
         // synchronised update, so a terminal that supports it never shows the
@@ -633,7 +633,7 @@ fn render_list(f: &mut Frame, app: &mut App, area: Rect) {
                 Span::styled(local_time(&m.created_at, false), Style::default().fg(Color::DarkGray)),
             ]);
             // The gist as written. Its first words are the writer's, not a
-            // category (Jack, 2026-11-06: "the app just shows the gist").
+            // category.
             let body_line = Line::from(vec![
                 Span::raw(format!("    {}", indent)),
                 Span::styled(truncate(m.gist.trim(), 240), Style::default().fg(Color::Gray)),
@@ -829,8 +829,8 @@ fn render_compose(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// A stored time (UTC, "YYYY-MM-DD HH:MM:SS") in this machine's time zone and
-/// clock style (Jack, 6 Nov: "match local time and localization of the
-/// machine ... am/pm in USA"). The date stays year first, so the order reads.
+/// clock style (12- or 24-hour, as the machine
+/// is set). The date stays year first, so the order reads.
 fn local_time(stamp: &str, seconds: bool) -> String {
     use chrono::{Local, NaiveDateTime, TimeZone, Utc};
     let Ok(at) = NaiveDateTime::parse_from_str(stamp.trim(), "%Y-%m-%d %H:%M:%S") else {

@@ -140,7 +140,7 @@ static IN_FOLDER: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new
 
 /// Which database this command uses. One resolver for everything in this binary.
 /// One specific memory file. `GENIUZ_STATION` is its older name, still honored
-/// because fleet scripts may set it.
+/// because older scripts may set it.
 fn explicit_db_env() -> Option<String> {
     std::env::var("GENIUZ_DB").or_else(|_| std::env::var("GENIUZ_STATION")).ok()
 }
@@ -813,7 +813,7 @@ fn run(cli: Cli) -> Result<String, String> {
 
         Command::Watch { interval, since, exec, once, json } => {
             // An address names its own folder: watch that one, as recall opens it,
-            // whatever the default (Firn's review, PR #30). With -f too, they must agree.
+            // whatever the default. With -f too, they must agree.
             let db = match since.as_deref().and_then(geniuz::folders::parse_address) {
                 Some((folder, _)) => {
                     let reg = geniuz::folders::Registry::from_env();

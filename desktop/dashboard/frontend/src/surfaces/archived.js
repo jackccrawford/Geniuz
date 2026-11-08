@@ -1,5 +1,5 @@
 // archived.js — what has been archived, and the way back. A page rather than a
-// dialog, because it's a place you go to, like Status or Settings (Jack, 2026-11-02).
+// dialog, because it's a place you go to, like Status or Settings.
 
 import * as api from '../api.js';
 import * as su from '../stream-ui.js';

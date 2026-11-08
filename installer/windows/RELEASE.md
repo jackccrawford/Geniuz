@@ -4,7 +4,7 @@ Build on the Mac, sign on the Mac; a clean Windows machine (`$WIN`, its
 ssh address) only builds the Windows binaries and tests the install. This replaced the
 May 2026 YubiKey/SSL.com playbook; Trusted Signing is the signer now.
 
-From mars, for release `vX.Y.Z` at commit `C`:
+From the Mac that signs, for release `vX.Y.Z` at commit `C`:
 
 ```bash
 # 1. A fresh export to a versioned folder on that machine (never a checkout there).

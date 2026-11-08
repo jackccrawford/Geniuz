@@ -90,8 +90,7 @@ async function bootstrap() {
 
   // Re-render whenever the surface changes, then render it. Subscribe
   // first: a surface that changes state while it mounts would otherwise
-  // change it before anyone listened, and draw nothing (found in Geniuz
-  // Team's dashboard, which shares this code, 2026-10-21).
+  // change it before anyone listened, and draw nothing.
   subscribe((s) => renderSurface(mainHost));
   await renderSurface(mainHost);
 }
@@ -223,7 +222,7 @@ async function refreshFolderCounts(list) {
 }
 
 // The window keeps showing the folder chosen here (looking is not choosing where
-// memories go, Jack 7 Nov); when the folder in use changes elsewhere, the counts
+// memories go); when the folder in use changes elsewhere, the counts
 // refresh above moves its mark. A reload here only follows a folder that vanished.
 window.addEventListener('focus', async () => {
   if (!api.isTauri()) return;
@@ -258,7 +257,7 @@ document.addEventListener('click', async (ev) => {
     } else {
       chip.classList.add('is-missing');
       chip.title = 'No memory at this address in your folders';
-      // Say so where they clicked: a faded pill alone read as a dead click (Jack, 7 Nov).
+      // Say so where they clicked: a faded pill alone read as a dead click.
       noteUnderChip(chip, `Not in your folders: ${chip.textContent.trim()}`);
     }
   } catch (e) {

@@ -359,7 +359,7 @@ impl Registry {
     }
 
     /// Whether the default was set to none: a command that names no folder must
-    /// ask for one rather than guess (Jack and SSH, 7 Nov 2026: on a machine many
+    /// ask for one rather than guess: on a machine many
     /// agents share, a memory in the wrong folder can't be moved afterwards).
     pub fn no_default(&self) -> bool {
         std::fs::read_to_string(self.current_path())

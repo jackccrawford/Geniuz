@@ -1,7 +1,7 @@
 //! Time windows for recall: `--since` / `--until`.
 //!
 //! Relevance with no date is a popularity contest across all time: a week-old
-//! answer loses to months of older neighbours (Pumpkin's test, 2026-09-30).
+//! answer loses to months of older neighbours.
 //! A window narrows the corpus BEFORE ranking, so every reader — recent,
 //! keyword, semantic — answers inside it.
 //!
@@ -128,8 +128,8 @@ pub fn scope_line(station: Option<&str>, memories: usize, window: &Window, mode:
     format!("searched: {}", parts.join(" · "))
 }
 
-/// When a memory happened, for `keep --at` and the MCP's `at` (Jack, 7 Nov 2026: an
-/// agent bringing its history into Geniuz keeps each memory's own date). Same forms
+/// When a memory happened, for `keep --at` and the MCP's `at`: an
+/// agent bringing its history into Geniuz keeps each memory's own date. Same forms
 /// as `--since`: `2026-03-21`, `2026-03-21 14:00` (local), RFC 3339, or `3d` ago. A
 /// date alone is the start of that local day. Never in the future. Returns the stored
 /// form, UTC `YYYY-MM-DD HH:MM:SS`.
@@ -148,7 +148,7 @@ pub fn moment_at(raw: &str, now: DateTime<Utc>) -> Result<String, String> {
         return Err(format!("--at {raw} is in the future; a memory can only be dated when it happened"));
     }
     // Before 1970 is a typo, not a memory, and SQLite's date functions misread
-    // years outside 0000-9999 (cubic, PR #30).
+    // years outside 0000-9999.
     if t.year() < 1970 {
         return Err(format!("--at {raw} is before 1970; give the date the memory happened"));
     }
@@ -159,7 +159,7 @@ pub fn moment_at(raw: &str, now: DateTime<Utc>) -> Result<String, String> {
 /// all of it, so the exclusive bound is the start of the next one.
 fn bound(raw: &str, now: DateTime<Utc>, is_until: bool) -> Result<DateTime<Utc>, String> {
     if let Some(d) = relative(raw) {
-        // A huge offset is an error, not a panic (cubic, PR #30).
+        // A huge offset is an error, not a panic.
         return now.checked_sub_signed(d).ok_or_else(|| format!("`{raw}` reaches before any date there is"));
     }
     if let Ok(t) = DateTime::parse_from_rfc3339(raw) {
@@ -185,10 +185,10 @@ fn bound(raw: &str, now: DateTime<Utc>, is_until: bool) -> Result<DateTime<Utc>,
 /// `24h`, `7d`, `2w`.
 fn relative(raw: &str) -> Option<Duration> {
     // Split before the last character, not the last byte: input can end in any
-    // character, and a byte index inside one panics (cubic, PR #30).
+    // character, and a byte index inside one panics.
     let (cut, _) = raw.char_indices().last()?;
     let (n, unit) = raw.split_at(cut);
-    // Digits only: "+3d" or " 3d" is not a relative time (Firn's review, PR #30).
+    // Digits only: "+3d" or " 3d" is not a relative time.
     if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) {
         return None;
     }
