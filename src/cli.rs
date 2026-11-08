@@ -207,7 +207,7 @@ pub enum Command {
         json: bool,
     },
 
-    /// Build embedding cache for semantic search
+    /// Make memories that missed it searchable by meaning
     #[command(
         after_help = "Embeds all content using ONNX (paraphrase-multilingual-MiniLM-L12-v2).\nFirst run downloads the model (~118MB). Subsequent runs only process new memories."
     )]
