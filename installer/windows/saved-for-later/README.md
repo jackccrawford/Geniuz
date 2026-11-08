@@ -41,16 +41,16 @@ curl -L -o onnxruntime-win-x64-1.22.0.zip \
 ```
 
 Extract it somewhere persistent on the build machine — we used
-`C:\Users\<you>\ort-win\onnxruntime-win-x64-1.22.0\`.
+`%USERPROFILE%\ort-win\onnxruntime-win-x64-1.22.0\`.
 
 ### 2. Build Geniuz against that ORT with dynamic linking
 
 On the Windows build machine:
 
 ```
-cd C:\Users\<you>\Dev\Geniuz
+cd %USERPROFILE%\Dev\Geniuz
 cargo clean
-set ORT_LIB_LOCATION=C:\Users\<you>\ort-win\onnxruntime-win-x64-1.22.0\lib
+set ORT_LIB_LOCATION=%USERPROFILE%\ort-win\onnxruntime-win-x64-1.22.0\lib
 set ORT_PREFER_DYNAMIC_LINK=1
 cargo build --release --features tray
 ```
