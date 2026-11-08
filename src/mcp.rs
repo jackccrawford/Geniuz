@@ -1271,11 +1271,12 @@ Drag Geniuz to Applications, open it from there, and run this again.".to_string(
         }
     }
 
-    // The folder Claude will use when it names none, if there is one: counted
-    // there, not in the first folder.
-    if let Ok(path) = crate::resolve_db_path() {
+    // The folder Claude will use when it names none. Claude starts Geniuz with no
+    // -f, no GENIUZ_DB and not from this directory, so only the default applies:
+    // resolved the same way here, not as this command would.
+    if let Ok(path) = geniuz::folders::Registry::from_env().resolve(None, None, None) {
         if path.exists() {
-            if let Ok(db) = crate::get_db() {
+            if let Ok(db) = geniuz::db::DatabaseManager::open_existing(&path.to_string_lossy()) {
                 let count = db.count().unwrap_or(0);
                 if count > 0 {
                     let name = geniuz::folders::identity_at(&path)

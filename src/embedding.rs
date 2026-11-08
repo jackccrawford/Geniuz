@@ -212,6 +212,14 @@ impl EmbeddingBackend for OllamaBackend {
 // Backend selection + search
 // =============================================================================
 
+/// `scheme://host:port` of an address, without any user, password, path or query.
+fn host_of(url: &str) -> String {
+    let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    if scheme.is_empty() { host.to_string() } else { format!("{}://{}", scheme, host) }
+}
+
 pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
     match BuiltinBackend::new() {
         Ok(b) => Ok(Box::new(b)),
@@ -231,9 +239,20 @@ pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
                 .replace("/api/tagsdings", "/api/tags"); // fix over-replace on legacy URL
             match agent.get(&tags_url).call() {
                 Ok(_) => Ok(Box::new(backend)),
-                Err(_) => Err(format!("Search by meaning is unavailable: Ollama didn't answer at {}", tags_url)),
+                // Only the host is named: the configured address may carry a password
+                // or token, and this message can end up in logs.
+                Err(_) => Err(format!("Search by meaning is unavailable: Ollama didn't answer at {}", host_of(&tags_url))),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    #[test]
+    fn an_address_is_named_by_its_host_only() {
+        assert_eq!(super::host_of("http://user:secret@gpu.lan:11434/api/tags?token=x"), "http://gpu.lan:11434");
+        assert_eq!(super::host_of("http://localhost:11434/api/tags"), "http://localhost:11434");
     }
 }
 
