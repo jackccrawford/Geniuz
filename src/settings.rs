@@ -111,6 +111,20 @@ impl Settings {
         }
     }
 
+    /// Load from disk, refusing a file that exists but can't be read as settings.
+    /// For the command line: showing defaults as if they were the person's settings,
+    /// or saving defaults over a damaged file, would lose what's in it.
+    pub fn load_strict() -> Result<Self, String> {
+        let path = Self::path();
+        match fs::read_to_string(&path) {
+            Ok(content) => serde_json::from_str(&content).map_err(|e| {
+                format!("{} can't be read as settings ({}). Fix it, or move it aside to start from defaults.", path.display(), e)
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(e) => Err(format!("Couldn't read {}: {}", path.display(), e)),
+        }
+    }
+
     /// Save to disk atomically (write to temp file, then rename).
     pub fn save(&self) -> Result<(), String> {
         let path = Self::path();
@@ -168,8 +182,10 @@ impl Settings {
     /// helpful for debugging.
     pub fn list(&self) -> String {
         format!(
-            "launch_at_login = {}\nrecent_memories_count = {}",
+            "launch_at_login = {}\nautoupdate_enabled = {}\nupdate_check_frequency = {}\nrecent_memories_count = {}",
             self.launch_at_login,
+            self.autoupdate_enabled,
+            self.update_check_frequency.as_str(),
             self.recent_memories_count,
         )
     }

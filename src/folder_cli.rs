@@ -179,16 +179,17 @@ fn show(reg: &Registry, name: Option<&str>, json: bool) -> Result<String, String
     let using = in_use();
     let folder = match name {
         Some(q) => reg.find(q)?,
-        None => reg
-            .scan()
-            .folders
-            .into_iter()
-            .find(|f| is_in_use(f, &using))
-            .ok_or_else(|| if reg.no_default() && using.is_none() {
-                "No default folder is set. Name one: geniuz folder show <folder>.".to_string()
-            } else {
-                "The database in use isn't one of your folders. GENIUZ_DB may be set.".to_string()
-            })?,
+        None => {
+            // Say why there's no folder in use, as the command that resolves it would.
+            if using.is_none() {
+                crate::resolve_db_path()?;
+            }
+            reg.scan()
+                .folders
+                .into_iter()
+                .find(|f| is_in_use(f, &using))
+                .ok_or_else(|| "The database in use isn't one of your folders: GENIUZ_DB names a file outside them.".to_string())?
+        }
     };
     if json {
         return serde_json::to_string_pretty(&folder_json(&folder, is_in_use(&folder, &using)))

@@ -406,6 +406,9 @@ fn run(cli: Cli) -> Result<String, String> {
 
             let mut files: Vec<PathBuf> = Vec::new();
             let mut rejected: Vec<PathBuf> = Vec::new();
+            // A directory is read one level deep: memories can't be removed, so a whole
+            // tree is never taken in by accident. Subfolders are named, not passed over.
+            let mut subdirs: Vec<PathBuf> = Vec::new();
             for p in &paths {
                 let path = PathBuf::from(p);
                 if path.is_dir() {
@@ -413,7 +416,11 @@ fn run(cli: Cli) -> Result<String, String> {
                         Ok(entries) => {
                             for entry in entries.flatten() {
                                 let ep = entry.path();
-                                if ep.is_file() {
+                                if ep.is_dir() {
+                                    if !entry.file_name().to_string_lossy().starts_with('.') {
+                                        subdirs.push(ep);
+                                    }
+                                } else if ep.is_file() {
                                     if force || is_prose_ext(&ep) {
                                         files.push(ep);
                                     } else {
@@ -435,6 +442,14 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
             }
             files.sort();
+            subdirs.sort();
+
+            if !subdirs.is_empty() {
+                eprintln!("[capture] {} subfolder(s) not read (capture reads one level; name a subfolder to include it):", subdirs.len());
+                for d in &subdirs {
+                    eprintln!("  not read: {}/", d.display());
+                }
+            }
 
             if !rejected.is_empty() {
                 eprintln!("[capture] {} file(s) refused (non-prose extensions; embeddings would be noisy):", rejected.len());
@@ -994,7 +1009,7 @@ fn run(cli: Cli) -> Result<String, String> {
             use geniuz::settings::Settings;
             match settings_cmd {
                 SettingsCommand::List { json } => {
-                    let s = Settings::load();
+                    let s = Settings::load_strict()?;
                     if json {
                         serde_json::to_string_pretty(&s).map_err(|e| format!("serialize: {}", e))
                     } else {
@@ -1002,10 +1017,10 @@ fn run(cli: Cli) -> Result<String, String> {
                     }
                 }
                 SettingsCommand::Get { key } => {
-                    Settings::load().get(&key)
+                    Settings::load_strict()?.get(&key)
                 }
                 SettingsCommand::Set { key, value } => {
-                    let mut s = Settings::load();
+                    let mut s = Settings::load_strict()?;
                     let stored = s.set(&key, &value)?;
                     s.save()?;
                     Ok(format!("{} = {}", key, stored))
