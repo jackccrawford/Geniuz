@@ -30,6 +30,18 @@ A folder's UUID is permanent, and so is the UUID of every memory in it, and addr
 
 `folder archive` moves a folder into `archive/` beside itself, one level below where Geniuz reads. Nothing is deleted, and `folder restore` puts it back.
 
+## An agent's own folder
+
+An AI agent that works with you across many sessions gets a folder of its own: its home. It is where the agent keeps what only it needs to carry forward: what it decided and why, what it was in the middle of, a letter to the next session that picks up its work. A new session reads it first and starts where the last one stopped, not from zero.
+
+An agent's home is an ordinary folder. What makes it the agent's is where it lives and how the agent finds it:
+
+- **It is listed under Agents.** A folder that sits in a directory named `agents` shows in the dashboard's sidebar under **Agents**, and the rest under **Shared**, so each agent's home is easy to tell from the folders agents share. Find can search either group, or both.
+- **The agent finds it without being told.** A `.geniuz-folder` file in the agent's working directory names its folder, so everything the agent keeps from there goes home unless it names another folder. An agent in an app without a working directory names its folder on every call instead.
+- **It isn't the only folder the agent uses.** Work shared with people or with other agents goes in a shared folder: a project, a team's room, a knowledge base. The agent keeps there what others need, and keeps in its home what only it needs.
+
+Agents point at each other's memories by address, such as `13625F6B:3487B9B0`, so a note in a shared folder can lead straight to the reasoning in someone's home, and the other way round.
+
 ## When you keep
 
 1. The command reads your text, which can be inline, from a file (`-c @notes.md`) or piped in (`-c -`).

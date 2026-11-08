@@ -15,6 +15,7 @@
 | Folder | A directory holding one `memory.db`, with its own permanent UUID, name and description. |
 | Gist | The short line you find a memory by. |
 | Harvest | What a recall's results point onward to, read from those memories. |
+| Home | An agent's own folder, where it keeps what only it needs to carry forward. Listed under Agents. |
 | Keep | Saving a memory. `remember` still works as another name for it. |
 | MCP | Model Context Protocol, a standard way for AI tools to call other programs. |
 | Memory | One entry that Geniuz will not change: a gist, content, and optionally a parent. |
