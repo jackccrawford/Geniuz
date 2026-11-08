@@ -1437,6 +1437,12 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .sptr { cursor: pointer; }
 .sptr:hover { text-decoration: underline; }
 .sptr.is-missing { opacity: 0.6; cursor: default; text-decoration: none; }
+.sptr-note {
+  position: fixed; z-index: 50; max-width: 300px; padding: 6px 10px; border-radius: 6px;
+  font-size: 12px; font-family: var(--font-ui); color: var(--ink-1);
+  background: var(--bg-elevated); border: 1px solid var(--hairline-1);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12); pointer-events: none;
+}
 .folder-welcome__title { font-size: 18px; font-weight: 600; color: var(--ink-1); }
 .folder-welcome__actions { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; margin-top: 14px; }
 .shortcut-control { display: flex; align-items: center; gap: 8px; }

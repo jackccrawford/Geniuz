@@ -255,11 +255,29 @@ document.addEventListener('click', async (ev) => {
     } else {
       chip.classList.add('is-missing');
       chip.title = 'No memory at this address in your folders';
+      // Say so where they clicked: a faded pill alone read as a dead click (Jack, 7 Nov).
+      noteUnderChip(chip, `Not in your folders: ${chip.textContent.trim()}`);
     }
   } catch (e) {
     console.error('[geniuz] opening an address failed:', e);
   }
 }, true);
+
+/** A short note just under a pill, gone after a few seconds or on the next click. */
+function noteUnderChip(chip, text) {
+  document.querySelector('.sptr-note')?.remove();
+  const note = document.createElement('div');
+  note.className = 'sptr-note';
+  note.setAttribute('role', 'status');
+  note.textContent = text;
+  const r = chip.getBoundingClientRect();
+  note.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 320))}px`;
+  note.style.top = `${r.bottom + 6}px`;
+  document.body.appendChild(note);
+  const gone = () => { note.remove(); document.removeEventListener('scroll', gone, true); };
+  setTimeout(gone, 3500);
+  document.addEventListener('scroll', gone, true);
+}
 
 bootstrap();
 wireMenuEvents();
