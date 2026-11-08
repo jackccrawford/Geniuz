@@ -40,7 +40,7 @@ impl Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Keep a memory — what you learned, decided, or discovered
+    /// Keep a memory: what you learned, decided, or discovered
     #[command(
         alias = "remember",
         arg_required_else_help = true,
@@ -51,7 +51,7 @@ pub enum Command {
         #[arg(short, long)]
         content: String,
 
-        /// Compressed insight — how future agents find this
+        /// The short line it's found by: write it for whoever reads it next
         #[arg(short, long)]
         gist: Option<String>,
 
@@ -68,7 +68,7 @@ pub enum Command {
         json: bool,
     },
 
-    /// Search your memories — semantic by default
+    /// Search your memories, by meaning unless you ask for exact words
     #[command(
         after_help = "Examples:\n  geniuz recall \"auth token\"                  Semantic search\n  geniuz recall --keyword \"auth\"               Keyword fallback\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n  geniuz recall --grep Cubic --since 7d        Lines naming Cubic, past week\n\nTip: Run 'geniuz backfill' first to enable semantic search."
     )]
@@ -228,15 +228,15 @@ pub enum Command {
     /// Launch the graphical dashboard app
     #[command(
         alias = "gui",
-        after_help = "Launches the Geniuz Dashboard window. The dashboard is the\ngraphical companion to the CLI — same memories, same data layer,\nbut rendered as a native window with sidebar nav and surfaces for\nMemories, Remember, Find, Status, Data & Export, and Settings.\n\nResolves the dashboard binary from known install locations per\nplatform. Errors with a helpful message if the dashboard isn't\ninstalled (e.g. CLI-only install via curl install.sh)."
+        after_help = "Launches the Geniuz Dashboard window. The dashboard is the\ngraphical companion to the CLI: the same memories, in a window with\nyour folders in a sidebar, and pages for Memories, Keep, Find,\nStatus, Data & Export, and Settings.\n\nResolves the dashboard binary from known install locations per\nplatform. Errors with a helpful message if the dashboard isn't\ninstalled (e.g. CLI-only install via curl install.sh)."
     )]
     Dashboard,
 
-    /// MCP server — run, install, or check status
+    /// Connect your AI through MCP: run the server, install it, or check it
     #[command(subcommand)]
     Mcp(McpCommand),
 
-    /// User settings — read or change preferences
+    /// Your settings: read or change them
     #[command(subcommand)]
     Settings(SettingsCommand),
 }
