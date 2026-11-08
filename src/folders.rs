@@ -567,6 +567,14 @@ impl Registry {
             return Err("Your first folder can't be archived, because other folders live beside it.".into());
         }
         refuse_symlink(&dir)?;
+        // The default folder is a setting someone chose; archiving it would quietly
+        // send memories somewhere else. Ask for the setting to change first.
+        if self.current().map(|c| c.eq_ignore_ascii_case(&folder.uuid)).unwrap_or(false) {
+            return Err(format!(
+                "\"{}\" is the default folder. Choose another default first (Settings, or `geniuz folder use <folder>`), then archive it.",
+                folder.name
+            ));
+        }
         if self.added().iter().any(|d| canonical(d) == canonical(&dir)) {
             return Err(format!(
                 "{} was added directly. Take it off the list with `geniuz folder remove`.",
@@ -585,10 +593,6 @@ impl Registry {
         }
         std::fs::rename(&dir, &target)
             .map_err(|e| format!("Couldn't move {}: {}", dir.display(), e))?;
-
-        if self.current().map(|c| c.eq_ignore_ascii_case(&folder.uuid)).unwrap_or(false) {
-            let _ = std::fs::rename(self.current_path(), self.home.join("current.archived"));
-        }
         Ok(target)
     }
 
@@ -968,11 +972,20 @@ fn replace_meta(db: &Path, key: &str, value: &str) -> Result<(), String> {
     let mut conn = open_read_write(db)?;
     let tx = conn.transaction().map_err(|e| format!("Couldn't save {}: {}", key, e))?;
     if let Some(old) = get_meta(&tx, key) {
-        tx.execute(
-            "INSERT OR IGNORE INTO _meta (key, value) VALUES (?1, ?2)",
-            [format!("{}@{}", key, now()), old],
-        )
-        .map_err(|e| format!("Couldn't save {}: {}", key, e))?;
+        // The earlier wording is kept under key@time. Two changes in the same second
+        // would share that key, so a later one is numbered (#2, #3) rather than lost.
+        let stamp = format!("{}@{}", key, now());
+        let mut n = 1;
+        loop {
+            let name = if n == 1 { stamp.clone() } else { format!("{}#{}", stamp, n) };
+            let added = tx
+                .execute("INSERT OR IGNORE INTO _meta (key, value) VALUES (?1, ?2)", [name, old.clone()])
+                .map_err(|e| format!("Couldn't save {}: {}", key, e))?;
+            if added == 1 {
+                break;
+            }
+            n += 1;
+        }
     }
     set_meta(&tx, key, value)?;
     tx.commit().map_err(|e| format!("Couldn't save {}: {}", key, e))
@@ -2319,13 +2332,27 @@ mod tests {
     fn archive_moves_without_deleting_and_the_folder_stays_hidden() {
         let (_tmp, reg) = setup();
         let f = reg.create("Scratch", "", None).unwrap();
-        reg.use_folder("Scratch").unwrap();
 
         let moved = reg.archive("Scratch").unwrap();
         assert!(moved.join(DB_FILE).is_file());
         assert!(!f.db_path.exists());
         assert!(reg.find("Scratch").is_err());
-        assert_eq!(reg.resolve(None, None, None).unwrap().parent().unwrap(), reg.home);
+    }
+
+    #[test]
+    fn the_default_folder_is_not_archived_until_another_is_chosen() {
+        let (_tmp, reg) = setup();
+        let f = reg.create("Scratch", "", None).unwrap();
+        reg.use_folder("Scratch").unwrap();
+
+        let err = reg.archive("Scratch").unwrap_err();
+        assert!(err.contains("default folder"), "{err}");
+        assert!(f.db_path.exists(), "nothing moved");
+        assert!(reg.current().unwrap().eq_ignore_ascii_case(&f.uuid), "the default is unchanged");
+
+        reg.ensure_default().unwrap();
+        reg.use_folder(DEFAULT_NAME).unwrap();
+        assert!(reg.archive("Scratch").is_ok());
     }
 
     #[test]
@@ -2380,6 +2407,26 @@ mod tests {
         let dir = f.db_path.parent().unwrap().to_path_buf();
         copy_then_retire(&dir, &dest, &f, quiesce(&f.db_path).unwrap()).unwrap();
         assert!(reg.archived().is_empty());
+    }
+
+    #[test]
+    fn every_earlier_description_is_kept_even_within_one_second() {
+        let (_tmp, reg) = setup();
+        let f = reg.create("Work", "one", None).unwrap();
+        reg.describe("Work", "two").unwrap();
+        reg.describe("Work", "three").unwrap();
+        reg.describe("Work", "four").unwrap();
+        let conn = open_read_only(&f.db_path).unwrap();
+        let mut kept: Vec<String> = conn
+            .prepare("SELECT value FROM _meta WHERE key LIKE 'folder_description@%'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        kept.sort();
+        assert_eq!(kept, ["one", "three", "two"]);
+        assert_eq!(reg.find("Work").unwrap().description, "four");
     }
 
     #[test]
