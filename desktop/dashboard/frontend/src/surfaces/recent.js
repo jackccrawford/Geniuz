@@ -18,11 +18,14 @@ import { openFolderDialog } from '../components/folderDialog.js';
 export async function mount(container) {
   container.innerHTML = `<div class="surface-loading">Loading your memory…</div>`;
 
+  // A page at a time (Jack, 7 Nov: Genesis showed 40 of its 5,587). The first page
+  // is read in the chosen order, so oldest first starts at the oldest memory.
+  const PAGE = 100;
   let stats, recent;
   try {
     [stats, recent] = await Promise.all([
       api.getStationStats(),
-      api.getRecentMemories(40),
+      api.getRecentMemories(PAGE, 0, (getState().sortDirection || 'desc') === 'asc'),
     ]);
   } catch (e) {
     container.innerHTML = `
@@ -48,7 +51,7 @@ export async function mount(container) {
   header.innerHTML = `
     <div class="main-header__titles">
       <h1 class="main-header__title">${escapeHtml(folder?.name || 'Your memory')}</h1>
-      ${folder ? '<button type="button" class="folder-edit" data-action="edit-folder">Edit</button>' : ''}
+      ${folder ? `<button type="button" class="folder-edit" data-action="edit-folder" aria-label="Edit folder" title="Edit the name and description"><svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11.2 2.3a1.6 1.6 0 0 1 2.3 2.3L5.6 12.5 2.5 13.5l1-3.1z"/><path d="M10 3.5l2.5 2.5"/></svg></button>` : ''}
     </div>
     ${folder?.description ? `<p class="folder-description">${escapeHtml(folder.description)}</p>` : ''}
     <p class="main-header__sub">${fmt.number(stats.total_memories)} ${stats.total_memories === 1 ? 'memory' : 'memories'} · ${fmt.number(stats.this_week)} this week</p>
@@ -101,16 +104,14 @@ export async function mount(container) {
   // toggle stays put instead of sliding up under the stats when scrolling.
   root.insertBefore(controls, body);
 
-  // Memory "number": newest = total count, counts down stably regardless of
-  // sort direction. The number is assigned by position in newest-first order,
-  // so flipping to oldest-first just reverses the visual list — each memory
-  // keeps its number.
+  // Memory "number": the oldest is #1 and the newest is the total, whichever way
+  // the list runs, so a memory keeps its number when the order flips. Pages
+  // arrive in the order shown, so a memory's number follows from its position.
   const total = stats.total_memories ?? recent.length;
-
-  // Number each memory once based on its newest-first position. Then reverse
-  // the working list if asc — numbers stay stable per memory.
-  const numbered = recent.map((m, i) => ({ ...m, _num: total - i }));
-  const working = direction === 'asc' ? [...numbered].reverse() : numbered;
+  const numberAt = (i) => (direction === 'asc' ? i + 1 : total - i);
+  let loaded = recent;
+  let served = recent.length;
+  let more = recent.length === PAGE;
 
   // The stream (2026-10-21, from Geniuz Team's room), with threads as a tree
   // (Jack: "for threads, I suggest tree navigation, like windows file
@@ -119,15 +120,23 @@ export async function mount(container) {
   // memory behind a disclosure arrow, and opening it draws the whole thread
   // as a tree that folds at every level. What is open stays open.
   const key8 = (u) => String(u || '').slice(0, 8).toUpperCase();
-  const byKey = new Map(numbered.map((m) => [key8(m.uuid), m]));
   const parentOf = (m) => { const p = key8(m.parent_uuid); return p && p !== key8(m.uuid) ? p : null; };
-  const kids = new Map();
-  for (const m of numbered) {
-    const p = parentOf(m);
-    if (p && byKey.has(p)) {
-      if (!kids.has(p)) kids.set(p, []);
-      kids.get(p).push(m);
+  // Rebuilt whenever a page arrives: what's loaded, who answers whom, the top level.
+  let numbered, byKey, kids, top, numOf;
+  function index() {
+    numbered = loaded.map((m, i) => ({ ...m, _num: numberAt(i) }));
+    byKey = new Map(numbered.map((m) => [key8(m.uuid), m]));
+    kids = new Map();
+    for (const m of numbered) {
+      const p = parentOf(m);
+      if (p && byKey.has(p)) {
+        if (!kids.has(p)) kids.set(p, []);
+        kids.get(p).push(m);
+      }
     }
+    top = numbered.filter((m) => !(parentOf(m) && byKey.has(parentOf(m))));
+    top.sort((a, b) => (direction === 'asc' ? 1 : -1) * activity(a).localeCompare(activity(b)));
+    numOf = new Map(numbered.map((m) => [key8(m.uuid), m._num]));
   }
   const subtree = (k, seen = new Set()) => {
     if (seen.has(k)) return [];
@@ -136,15 +145,13 @@ export async function mount(container) {
     for (const c of kids.get(k) || []) out.push(c, ...subtree(key8(c.uuid), seen));
     return out;
   };
-  const top = numbered.filter((m) => !(parentOf(m) && byKey.has(parentOf(m))));
   const activity = (m) => [m, ...subtree(key8(m.uuid))].reduce((a, x) => (x.created_at > a ? x.created_at : a), m.created_at);
-  top.sort((a, b) => (direction === 'asc' ? 1 : -1) * activity(a).localeCompare(activity(b)));
+  index();
 
   const OPEN_KEY = 'geniuz.tree.open';
   const open = (() => { try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY) || '[]')); } catch { return new Set(); } })();
   const saveOpen = () => { try { localStorage.setItem(OPEN_KEY, JSON.stringify([...open].slice(-300))); } catch { /* a convenience */ } };
 
-  const numOf = new Map(numbered.map((m) => [key8(m.uuid), m._num]));
   const card = (m, { depth = 0, here = false, count = 0, opened = false } = {}) => {
     const text = su.bodyAfterGist(m.content, m.gist);
     const num = numOf.get(key8(m.uuid));
@@ -196,27 +203,32 @@ export async function mount(container) {
 
   const stream = document.createElement('div');
   stream.className = 'stream';
-  let html = '';
-  let lastDay = '';
-  for (const m of top) {
-    const when = activity(m);
-    const day = su.dayKey(when);
-    if (day !== lastDay) {
-      html += `<div class="s-day"><span>${su.esc(su.dayLabel(when))}</span></div>`;
-      lastDay = day;
+  function drawStream() {
+    let html = '';
+    let lastDay = '';
+    for (const m of top) {
+      const when = activity(m);
+      const day = su.dayKey(when);
+      if (day !== lastDay) {
+        html += `<div class="s-day"><span>${su.esc(su.dayLabel(when))}</span></div>`;
+        lastDay = day;
+      }
+      const k = key8(m.uuid);
+      const count = subtree(k).length;
+      const opened = open.has(k);
+      html += `<div class="s-thread" data-key="${k}">${card(m, { count, opened })}<div class="s-thread__tree"></div></div>`;
     }
-    const k = key8(m.uuid);
-    const count = subtree(k).length;
-    const opened = open.has(k);
-    html += `<div class="s-thread" data-key="${k}">${card(m, { count, opened })}<div class="s-thread__tree"></div></div>`;
+    stream.innerHTML = html;
   }
-  stream.innerHTML = html;
+  drawStream();
 
   async function drawTree(threadEl) {
     const k = threadEl.dataset.key;
     const host = threadEl.querySelector('.s-thread__tree');
     const m = byKey.get(k);
     if (!open.has(k)) { host.innerHTML = ''; return; }
+    // Whether this draw belongs to an Expand all, decided now, not after the wait.
+    const all = expandingAll;
     let entries;
     try {
       entries = await api.getThreadChain(m.uuid, 500);
@@ -224,7 +236,14 @@ export async function mount(container) {
       host.innerHTML = `<p class="s-tree-err">${su.esc(e)}</p>`;
       return;
     }
+    // Folded while this was loading (Collapse all, or a click): stay folded.
+    if (!open.has(k)) { host.innerHTML = ''; return; }
     for (const e of entries) if (!numOf.has(key8(e.uuid))) e._num = null;
+    // Expand all reaches every depth: open each reply that has replies of its own.
+    if (all) {
+      const parentsHere = new Set(entries.map(parentOf).filter(Boolean));
+      for (const e of entries) if (parentsHere.has(key8(e.uuid))) open.add(key8(e.uuid));
+    }
     const rootEntry = entries.find((e) => !parentOf(e) || !entries.some((x) => key8(x.uuid) === parentOf(e))) || entries[0];
     const rootKey = key8(rootEntry.uuid);
     if (rootKey === k) {
@@ -245,11 +264,48 @@ export async function mount(container) {
     if (threadEl) {
       const head = threadEl.querySelector(':scope > .smsg');
       head.outerHTML = card(byKey.get(k), { count: subtree(k).length, opened: open.has(k) });
+      clampCheck(threadEl);
       drawTree(threadEl);
     } else {
       // A fold inside an open tree: redraw that tree.
       const owner = stream.querySelector(`.smsg[data-uuid="${uuid}"]`)?.closest('.s-thread');
       if (owner) drawTree(owner);
+    }
+  }
+
+  // Expand all / Collapse all (Jack, 7 Nov): every thread loaded on screen,
+  // at every depth. Folding one afterwards still works, since what's open is
+  // the same set a single fold changes.
+  let expandingAll = false;
+  async function setAll(openEverything) {
+    const threads = [...stream.querySelectorAll('.s-thread')];
+    if (openEverything) {
+      for (const t of threads) if (subtree(t.dataset.key).length) open.add(t.dataset.key);
+    } else {
+      open.clear();
+    }
+    for (const t of threads) {
+      const k = t.dataset.key;
+      t.querySelector(':scope > .smsg').outerHTML = card(byKey.get(k), { count: subtree(k).length, opened: open.has(k) });
+    }
+    // Re-drawn cards start with "Read all" hidden; show it where text is cut.
+    clampCheck(stream);
+    expandingAll = openEverything;
+    try {
+      await Promise.all(threads.map((t) => drawTree(t)));
+    } finally {
+      expandingAll = false;
+      saveOpen();
+    }
+  }
+  if (top.some((m) => subtree(key8(m.uuid)).length)) {
+    for (const [label, everything] of [['Expand all', true], ['Collapse all', false]]) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'sort-toggle list-controls__all';
+      b.textContent = label;
+      b.addEventListener('click', () => setAll(everything));
+      controls.appendChild(b);
     }
   }
 
@@ -299,6 +355,57 @@ export async function mount(container) {
   }
   clampCheck(stream);
   for (const t of stream.querySelectorAll('.s-thread')) if (open.has(t.dataset.key)) drawTree(t);
+
+  // The next page arrives as the end of the list comes into view. A memory written
+  // while reading shifts the pages by one; one seen twice is kept once.
+  const pager = document.createElement('div');
+  pager.className = 'stream-pager';
+  pager.setAttribute('role', 'status');
+  const showPager = (text) => {
+    pager.textContent = text ?? (more ? 'Loading more…' : (total > PAGE ? `All ${fmt.number(total)} memories shown` : ''));
+  };
+  showPager();
+  body.appendChild(pager);
+  let loading = false;
+  async function loadMore() {
+    if (!more || loading) return;
+    loading = true;
+    try {
+      // The offset counts rows the server has handed over, not rows kept: memories
+      // written while reading shift the newest-first list, and counting only the
+      // kept ones could ask for the same page forever (cubic, PR #30).
+      const next = await api.getRecentMemories(PAGE, served, direction === 'asc');
+      served += next.length;
+      const have = new Set(loaded.map((m) => m.uuid));
+      loaded = loaded.concat(next.filter((m) => !have.has(m.uuid)));
+      more = next.length === PAGE;
+      // Keep the reader's place by the thread they're looking at, not by pixels:
+      // a reply arriving on this page can move its thread (review, 7 Nov).
+      const view = body.getBoundingClientRect();
+      const anchor = [...stream.querySelectorAll('.s-thread')].find((t) => t.getBoundingClientRect().bottom > view.top);
+      const anchorKey = anchor?.dataset.key;
+      const anchorOffset = anchor ? anchor.getBoundingClientRect().top - view.top : 0;
+      const y = body.scrollTop;
+      index();
+      drawStream();
+      const again = anchorKey && stream.querySelector(`.s-thread[data-key="${anchorKey}"]`);
+      body.scrollTop = again ? body.scrollTop + (again.getBoundingClientRect().top - body.getBoundingClientRect().top) - anchorOffset : y;
+      clampCheck(stream);
+      for (const t of stream.querySelectorAll('.s-thread')) if (open.has(t.dataset.key)) drawTree(t);
+      showPager();
+    } catch (e) {
+      showPager(`Couldn't load more: ${e?.message || e}`);
+      loading = false;
+      return; // a failure must not retry in a loop
+    } finally {
+      loading = false;
+    }
+    // Replies fold under their threads, so a page can add little height and leave
+    // the end still in view; the observer won't fire again by itself, so ask here.
+    if (more && pager.getBoundingClientRect().top < body.getBoundingClientRect().bottom + 800) loadMore();
+  }
+  new IntersectionObserver((seen) => { if (seen.some((x) => x.isIntersecting)) loadMore(); },
+    { root: body, rootMargin: '0px 0px 800px 0px' }).observe(pager);
 
   container.innerHTML = '';
   container.appendChild(root);

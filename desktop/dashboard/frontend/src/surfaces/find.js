@@ -36,6 +36,9 @@ const WINDOWS = [
 ];
 
 const DEBOUNCE_MS = 250;
+// Up to this many folders, chips; past it, the picker (a wall of chips stops
+// being readable somewhere around a screenful).
+const PICKER_FROM = 8;
 const RESULT_LIMIT = 40;
 
 export async function mount(container) {
@@ -137,7 +140,19 @@ export async function mount(container) {
   controls.appendChild(windowToggle);
 
   // ---- Which folders --------------------------------------------------
-  if (allFolders.length > 1) {
+  // Many folders: one line that opens a solid, filterable, grouped list.
+  if (allFolders.length > PICKER_FROM) {
+    body.appendChild(scopePicker({
+      allFolders,
+      getChosen: () => chosen,
+      setChosen: (next) => {
+        chosen = next;
+        setState({ searchFolders: [...chosen] });
+        runSearch(input.value, /* immediate */ true);
+      },
+      onScreen,
+    }));
+  } else if (allFolders.length > 1) {
     const picker = document.createElement('div');
     picker.className = 'find-folders';
     picker.setAttribute('role', 'group');
@@ -424,4 +439,180 @@ function escapeHtml(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * "Search in" for many folders: one line showing what's chosen, which opens a
+ * solid list to filter and tick, grouped into Agents and Folders when there are
+ * agents' homes. The choice is never empty; "All folders" toggles everything,
+ * and from all, back to the folder on screen (as the chips did).
+ */
+function scopePicker({ allFolders, getChosen, setChosen, onScreen }) {
+  const wrap = document.createElement('div');
+  wrap.className = 'find-folders find-scope';
+  const label = document.createElement('span');
+  label.className = 'find-folders__label';
+  label.textContent = 'Search in';
+  wrap.appendChild(label);
+
+  const summary = document.createElement('div');
+  summary.className = 'find-scope__summary';
+  wrap.appendChild(summary);
+
+  const trigger = document.createElement('button');
+  trigger.type = 'button';
+  trigger.className = 'find-scope__trigger';
+  trigger.setAttribute('aria-haspopup', 'listbox');
+  trigger.setAttribute('aria-expanded', 'false');
+  trigger.setAttribute('aria-label', 'Choose folders to search');
+  trigger.innerHTML = '<span class="find-scope__caret" aria-hidden="true"></span>';
+  wrap.appendChild(trigger);
+
+  const panel = document.createElement('div');
+  panel.className = 'find-scope__panel';
+  panel.hidden = true;
+  const filter = document.createElement('input');
+  filter.type = 'search';
+  filter.className = 'find-scope__filter';
+  filter.placeholder = 'Filter folders';
+  filter.setAttribute('aria-label', 'Filter folders');
+  panel.appendChild(filter);
+  const list = document.createElement('div');
+  list.className = 'find-scope__list';
+  list.setAttribute('role', 'listbox');
+  list.setAttribute('aria-multiselectable', 'true');
+  panel.appendChild(list);
+  wrap.appendChild(panel);
+
+  const all = () => getChosen().size === allFolders.length;
+  const byId = new Map(allFolders.map((f) => [f.uuid, f]));
+
+  const paintSummary = () => {
+    summary.innerHTML = '';
+    if (all()) {
+      const t = document.createElement('button');
+      t.type = 'button';
+      t.className = 'find-scope__all';
+      t.textContent = `All folders · ${allFolders.length}`;
+      t.addEventListener('click', () => open());
+      summary.appendChild(t);
+      return;
+    }
+    const picked = [...getChosen()].map((id) => byId.get(id)).filter(Boolean);
+    for (const f of picked.slice(0, 3)) {
+      const chip = document.createElement('span');
+      chip.className = 'find-scope__chip';
+      chip.textContent = f.name;
+      if (picked.length > 1) {
+        const x = document.createElement('button');
+        x.type = 'button';
+        x.className = 'find-scope__remove';
+        x.setAttribute('aria-label', `Stop searching ${f.name}`);
+        x.textContent = '×';
+        x.addEventListener('click', () => {
+          const next = new Set(getChosen());
+          next.delete(f.uuid);
+          if (next.size) setChosen(next);
+          paint();
+        });
+        chip.appendChild(x);
+      }
+      summary.appendChild(chip);
+    }
+    if (picked.length > 3) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'find-scope__more';
+      more.textContent = `+${picked.length - 3} more`;
+      more.addEventListener('click', () => open());
+      summary.appendChild(more);
+    }
+  };
+
+  const rows = [];
+  const row = (text, count, id) => {
+    const r = document.createElement('button');
+    r.type = 'button';
+    r.className = 'find-scope__row';
+    r.setAttribute('role', 'option');
+    r.dataset.name = text.toLowerCase();
+    r.innerHTML = '<span class="find-scope__tick" aria-hidden="true"></span><span class="find-scope__name"></span><span class="find-scope__count"></span>';
+    r.querySelector('.find-scope__name').textContent = text;
+    r.querySelector('.find-scope__count').textContent = count ?? '';
+    r.addEventListener('click', () => {
+      const cur = getChosen();
+      let next;
+      if (!id) {
+        next = all() ? new Set(onScreen ? [onScreen] : [allFolders[0].uuid]) : new Set(allFolders.map((f) => f.uuid));
+      } else {
+        next = new Set(cur);
+        if (next.has(id)) { if (next.size === 1) return; next.delete(id); } else next.add(id);
+      }
+      setChosen(next);
+      paint();
+    });
+    rows.push({ r, id });
+    return r;
+  };
+
+  list.appendChild(row('All folders', allFolders.length, null));
+  const hasAgents = allFolders.some((f) => f.tree === 'agents');
+  const groups = hasAgents
+    ? [['Agents', allFolders.filter((f) => f.tree === 'agents')], ['Shared', allFolders.filter((f) => f.tree !== 'agents')]]
+    : [[null, allFolders]];
+  const heads = [];
+  for (const [title, fs] of groups) {
+    if (title) {
+      const h = document.createElement('div');
+      h.className = 'find-scope__group';
+      h.textContent = `${title} · ${fs.length}`;
+      list.appendChild(h);
+      heads.push({ h, fs });
+    }
+    for (const f of fs) list.appendChild(row(f.name, f.memories, f.uuid));
+  }
+
+  const paintRows = () => {
+    for (const { r, id } of rows) {
+      const on = id ? getChosen().has(id) : all();
+      r.classList.toggle('is-on', on);
+      r.setAttribute('aria-selected', String(on));
+    }
+  };
+  const paint = () => { paintSummary(); paintRows(); };
+
+  filter.addEventListener('input', () => {
+    const q = filter.value.trim().toLowerCase();
+    for (const { r, id } of rows) r.hidden = !!q && (!id || !r.dataset.name.includes(q));
+    for (const { h, fs } of heads) h.hidden = !!q && !fs.some((f) => f.name.toLowerCase().includes(q));
+  });
+
+  const close = () => {
+    panel.hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('mousedown', outside, true);
+  };
+  const outside = (ev) => { if (!wrap.contains(ev.target)) close(); };
+  const open = () => {
+    if (!panel.hidden) return close();
+    panel.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    filter.value = '';
+    filter.dispatchEvent(new Event('input'));
+    document.addEventListener('mousedown', outside, true);
+    filter.focus();
+  };
+  trigger.addEventListener('click', open);
+  panel.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') { ev.stopPropagation(); close(); trigger.focus(); return; }
+    if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+    ev.preventDefault();
+    const visible = rows.map((x) => x.r).filter((r) => !r.hidden);
+    const at = visible.indexOf(document.activeElement);
+    const next = ev.key === 'ArrowDown' ? visible[Math.min(at + 1, visible.length - 1)] : (at <= 0 ? filter : visible[at - 1]);
+    next?.focus();
+  });
+
+  paint();
+  return wrap;
 }

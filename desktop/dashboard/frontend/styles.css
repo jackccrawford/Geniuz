@@ -1261,11 +1261,14 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 
 .main-header__titles { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 .main-header__titles .main-header__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Edit: a pencil (Jack, 7 Nov 2026), quiet until pointed at. */
 .folder-edit {
-  flex: none; padding: 0; border: 0; background: none; cursor: pointer;
-  color: var(--muted, inherit); font: inherit; font-size: 13px; text-decoration: underline;
-  text-underline-offset: 2px;
+  flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: 0; border-radius: 6px; background: none; cursor: pointer;
+  color: var(--ink-3, inherit); align-self: center;
 }
+.folder-edit:hover { color: var(--ink-1, inherit); background: var(--bg-elevated, rgba(0,0,0,0.06)); }
+.folder-edit:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
 .folder-description {
   margin: 4px 0 0; max-width: 65ch; font-size: 14px; line-height: 1.45;
   white-space: pre-line; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
@@ -1292,6 +1295,60 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
    folders scrolls by itself, so the search box stays in reach. */
 .find-folders { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: var(--s-2); max-height: 112px; overflow-y: auto; }
 .find-folders__label { color: var(--ink-3); font-size: 13px; margin-right: 4px; }
+
+/* The picker for many folders: one line, a solid list beneath (as Reply to). */
+.find-scope { position: relative; flex-wrap: nowrap; max-height: none; overflow: visible; }
+.find-scope__summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.find-scope__all, .find-scope__more, .find-scope__trigger {
+  appearance: none; font: inherit; font-size: 13px; cursor: pointer; color: var(--ink-1);
+  background: transparent; border: 1px solid var(--hairline-2); border-radius: 999px; padding: 3px 10px;
+}
+.find-scope__more { color: var(--ink-2); }
+.find-scope__trigger { display: inline-grid; place-items: center; width: 28px; height: 26px; padding: 0; }
+.find-scope__caret {
+  width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor;
+}
+.find-scope__trigger[aria-expanded="true"] .find-scope__caret { transform: rotate(180deg); }
+.find-scope__chip {
+  display: inline-flex; align-items: center; gap: 4px; font-size: 13px; padding: 3px 4px 3px 10px; border-radius: 999px;
+  color: var(--ink-1); background: color-mix(in srgb, var(--accent, AccentColor) 14%, transparent);
+  max-width: 220px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.find-scope__remove {
+  appearance: none; border: 0; background: none; color: var(--ink-2); font: inherit; font-size: 14px; line-height: 1;
+  width: 18px; height: 18px; border-radius: 50%; cursor: pointer;
+}
+.find-scope__remove:hover { color: var(--ink-1); background: color-mix(in srgb, var(--ink-1) 10%, transparent); }
+.find-scope__panel {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 6; width: min(420px, 100%);
+  padding: 6px; background: var(--s-paper); border: 1px solid var(--s-line); border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
+.find-scope__filter {
+  width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; padding: 6px 8px; margin-bottom: 4px;
+  color: var(--ink-1); background: transparent; border: 1px solid var(--hairline-2); border-radius: 6px;
+}
+.find-scope__list { max-height: 340px; overflow-y: auto; }
+.find-scope__group {
+  padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3);
+}
+.find-scope__group[hidden], .find-scope__row[hidden] { display: none; }
+.find-scope__row {
+  display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 10px; border: none; border-radius: 6px; background: transparent; color: var(--ink-1);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.find-scope__row:hover, .find-scope__row:focus-visible {
+  outline: none; background: color-mix(in srgb, var(--accent, AccentColor) 12%, transparent);
+}
+.find-scope__name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.find-scope__count { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.find-scope__tick { width: 14px; height: 14px; border: 1.5px solid var(--ink-3); border-radius: 3px; }
+.find-scope__row.is-on .find-scope__tick {
+  border-color: var(--accent, AccentColor); background: var(--accent, AccentColor);
+  box-shadow: inset 0 0 0 2px var(--s-paper);
+}
 .find-folder {
   appearance: none; font: inherit; font-size: 13px; padding: 3px 10px; cursor: pointer;
   max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -1319,6 +1376,62 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 .is-collapsed .sidebar-folders__filter { display: none; }
 .find-folders__filter { width: 140px; color: var(--ink-1); background: transparent; border: 1px solid var(--hairline-2); }
 .sidebar-folder[hidden], .find-folder[hidden] { display: none; }
+
+/* Groups: Recent, Agents, Folders (only once agents' homes exist), as separate
+   sections, the way Keep and Find stand apart (Jack, 6 Nov). The list itself
+   doesn't scroll; each heading is a plain row that stays put, and each open
+   group's own body scrolls. Open groups share the height, closed ones take a line. */
+.sidebar-folders.has-groups { overflow: hidden; max-height: 62vh; flex: 1 1 auto; min-height: 0; gap: 0; }
+/* Open groups share the area equally, so a short one is never squeezed under a
+   long one; the area takes its full height only while something is open. */
+.sidebar-folders.has-groups:has(.sidebar-group:not(.is-closed)),
+.sidebar-folders.has-groups.is-filtering { height: 62vh; }
+/* No `max-height: max-content` here: the app's WebKit sizes a flex: 1 1 0 group
+   down to its heading with it, so every open group showed no folders (5.0.3,
+   7 Nov; Chromium draws it fine, which is how it got through). Recent, at most
+   12 folders, takes its own height up to about five rows instead. */
+.sidebar-group { display: flex; flex-direction: column; flex: 1 1 0; min-height: 28px; }
+.sidebar-group.is-closed { flex: none; }
+.sidebar-group--recent:not(.is-closed) { flex: 0 0 auto; }
+.sidebar-group--recent .sidebar-group__body { max-height: 168px; }
+.sidebar-group__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.sidebar-group__head {
+  flex: none; height: 28px; box-sizing: border-box;
+  display: flex; align-items: center; gap: 6px; width: 100%; padding: 0 10px 0 8px;
+  font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: rgba(250, 244, 232, 0.55); background: none; border: 0; cursor: pointer; text-align: left;
+}
+.sidebar-group__head:hover { color: rgba(250, 244, 232, 0.85); }
+.sidebar-group__head:focus-visible { outline: 2px solid rgba(250, 244, 232, 0.5); outline-offset: -2px; border-radius: 4px; }
+.sidebar-group__caret {
+  width: 0; height: 0; border-left: 4px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent;
+  transform: rotate(90deg); transition: transform 120ms ease;
+}
+.sidebar-group.is-closed .sidebar-group__caret { transform: none; }
+.sidebar-group__title { flex: 1; }
+.sidebar-group__count { font-variant-numeric: tabular-nums; font-weight: 500; }
+.sidebar-group.is-closed .sidebar-group__body { display: none; }
+.sidebar-folder.is-empty-folder { display: none; }
+.sidebar-group__body.shows-empty .sidebar-folder.is-empty-folder:not([hidden]) { display: flex; }
+.sidebar-group__empties {
+  display: block; width: 100%; padding: 3px 10px 3px 34px; font: inherit; font-size: 12px; text-align: left;
+  color: rgba(250, 244, 232, 0.5); background: none; border: 0; cursor: pointer;
+}
+.sidebar-group__empties:hover { color: rgba(250, 244, 232, 0.85); }
+/* While filtering: every group open, empties included, Recent set aside so a match shows once. */
+.sidebar-folders.is-filtering .sidebar-group--recent { display: none; }
+/* Matches are usually few, so each group takes only what it holds. */
+.sidebar-folders.is-filtering .sidebar-group { flex: 0 1 auto; }
+.sidebar-folders.is-filtering .sidebar-group.is-closed .sidebar-group__body { display: flex; }
+.sidebar-folders.is-filtering .sidebar-folder.is-empty-folder:not([hidden]) { display: flex; }
+.sidebar-folders.is-filtering .sidebar-group__empties { display: none; }
+.is-collapsed .sidebar-group__head, .is-collapsed .sidebar-group__empties { display: none; }
+/* Collapsed to the icon rail: only the current folder shows, once, whatever the
+   groups' open/closed, filter or show-empty state (these outrank the rules above). */
+.is-collapsed .sidebar-folder:not(.is-current),
+.is-collapsed .sidebar-folder.is-mirror { display: none !important; }
+.is-collapsed .sidebar-group.is-closed .sidebar-group__body { display: flex; }
+@media (prefers-reduced-motion: reduce) { .sidebar-group__caret { transition: none; } }
 .sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned) { margin-top: 6px; position: relative; }
 .sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned)::before {
   content: ''; position: absolute; left: 8px; right: 8px; top: -4px; height: 1px; background: rgba(250, 244, 232, 0.16);
@@ -1327,6 +1440,12 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 .sptr { cursor: pointer; }
 .sptr:hover { text-decoration: underline; }
 .sptr.is-missing { opacity: 0.6; cursor: default; text-decoration: none; }
+.sptr-note {
+  position: fixed; z-index: 50; max-width: 300px; padding: 6px 10px; border-radius: 6px;
+  font-size: 12px; font-family: var(--font-ui); color: var(--ink-1);
+  background: var(--bg-elevated); border: 1px solid var(--hairline-1);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12); pointer-events: none;
+}
 .folder-welcome__title { font-size: 18px; font-weight: 600; color: var(--ink-1); }
 .folder-welcome__actions { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; margin-top: 14px; }
 .shortcut-control { display: flex; align-items: center; gap: 8px; }
@@ -1346,3 +1465,22 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 .sidebar-folder__pin.is-on svg { fill: currentColor; }
 .sidebar-folder__pin:hover { opacity: 1; background: rgba(250, 244, 232, 0.14); }
 .is-collapsed .sidebar-folder__pin { display: none; }
+/* While filtering, every group shows its matches, so every caret says open. */
+.sidebar-folders.is-filtering .sidebar-group__caret { transform: rotate(90deg); }
+/* Expand all / Collapse all sit together on the right of the list controls. */
+.list-controls__all { margin-left: auto; font-size: 12px; }
+.list-controls__all + .list-controls__all { margin-left: 0; }
+
+/* Status: the one action on the page, a newer release to download. */
+.status-row__link {
+  font: inherit; color: var(--accent, #2a7f86); background: none; border: 0; padding: 0;
+  text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.status-row__link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
+
+/* The folder in use (where new memories go when none is named): a small clay dot,
+   the brand's own accent, beside the name. Looking at another folder doesn't move it. */
+.sidebar-folder__in-use {
+  flex: none; width: 6px; height: 6px; border-radius: 50%; background: #CF5535; margin-left: 4px;
+}
+.is-collapsed .sidebar-folder__in-use { display: none; }

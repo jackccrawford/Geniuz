@@ -167,6 +167,16 @@ impl DatabaseManager {
         if content.trim().is_empty() {
             return Err("Content cannot be empty".to_string());
         }
+        // Every time in the store has one shape, UTC `YYYY-MM-DD HH:MM:SS`: times are
+        // compared as text, so another shape sorts and filters wrongly (Talus's report,
+        // 7 Nov 2026: 11 such memories exist from older writers; none may be added).
+        if let Some(t) = created_at {
+            let ok = t.len() == 19
+                && chrono::NaiveDateTime::parse_from_str(t, "%Y-%m-%d %H:%M:%S").is_ok();
+            if !ok {
+                return Err(format!("A memory's time must be YYYY-MM-DD HH:MM:SS (UTC), not '{t}'"));
+            }
+        }
 
         let uuid = uuid::Uuid::new_v4().to_string().to_uppercase();
         let auto_gist = gist.map(|g| g.to_string()).unwrap_or_else(|| {
@@ -294,6 +304,30 @@ impl DatabaseManager {
         self.recent_in(&Window::all(), limit)
     }
 
+    /// One page of the whole folder, newest first or oldest first, `offset` memories in.
+    /// The dashboard reads a folder this way so a large one (Genesis: 5,587) is all
+    /// reachable, and "oldest first" starts at the oldest, not at the newest page reversed.
+    pub fn page(&self, oldest_first: bool, offset: usize, limit: usize) -> Result<Vec<SignalEntry>, String> {
+        let dir = if oldest_first { "ASC" } else { "DESC" };
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT memory_uuid,
+                    COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
+                    created_at, parent_uuid
+             FROM memories ORDER BY created_at {dir}, rowid {dir} LIMIT ?1 OFFSET ?2"
+        )).map_err(|e| format!("Query failed: {}", e))?;
+        let rows = stmt.query_map(rusqlite::params![limit as i64, offset as i64], |row| {
+            let uuid: String = row.get(0)?;
+            let parent: Option<String> = row.get(3)?;
+            let display_parent = parent.filter(|p| p != &uuid);
+            Ok(SignalEntry {
+                memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
+                parent_uuid: display_parent, content: None, score: None,
+            })
+        }).map_err(|e| format!("Query failed: {}", e))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
     /// The newest memories inside `window`, newest first.
     pub fn recent_in(&self, window: &Window, limit: usize) -> Result<Vec<SignalEntry>, String> {
         let (cond, wparams) = window.sql("created_at", 2);
@@ -340,6 +374,73 @@ impl DatabaseManager {
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
 
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    /// Where a memory sits in the folder's order, (created_at, rowid): the cursor
+    /// `watch` keeps. A time alone can't be a cursor: memories written in the same
+    /// second share it, and "after" by time skips all but one of them (full-tree
+    /// test, 7 Nov 2026). Takes a UUID, a prefix, or an address FOLDER:MEMORY.
+    pub fn position_of(&self, id: &str) -> Result<Option<(String, i64)>, String> {
+        let (folder, memory) = match id.split_once(':') {
+            Some((f, m)) => (Some(f.trim()), m.trim()),
+            None => (None, id.trim()),
+        };
+        if memory.is_empty() {
+            return Ok(None);
+        }
+        // An address names its folder: one that isn't this folder is an error that
+        // says so, not "not found" (cubic, PR #30).
+        if let Some(f) = folder.filter(|f| !f.is_empty()) {
+            let here: Option<String> = self.conn()?
+                .query_row("SELECT value FROM _meta WHERE key = 'folder_uuid'", [], |r| r.get(0))
+                .ok();
+            if here.is_some_and(|h| !h.to_uppercase().starts_with(&f.to_uppercase())) {
+                return Err(format!("{} is in folder {}, not this one: watch that folder with -f {}",
+                    id.to_uppercase(), f.to_uppercase(), f.to_uppercase()));
+            }
+        }
+        // An ambiguous prefix is an error, never a guess (resolve_uuid).
+        let Some(uuid) = self.resolve_uuid(memory)? else { return Ok(None) };
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT created_at, rowid FROM memories WHERE memory_uuid = ?1",
+            rusqlite::params![uuid],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional().map_err(|e| format!("Query failed: {}", e))
+    }
+
+    /// The newest memory's position, for a watch that starts "from now".
+    pub fn last_position(&self) -> Result<Option<(String, i64)>, String> {
+        let conn = self.conn()?;
+        conn.query_row(
+            "SELECT created_at, rowid FROM memories ORDER BY created_at DESC, rowid DESC LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional().map_err(|e| format!("Query failed: {}", e))
+    }
+
+    /// Memories after a position, oldest first, each with its own position.
+    pub fn after(&self, pos: &(String, i64), limit: usize) -> Result<Vec<((String, i64), SignalEntry)>, String> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT memory_uuid,
+                    COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)) as gist,
+                    created_at, parent_uuid, json_extract(payload, '$.content'), rowid
+             FROM memories
+             WHERE created_at > ?1 OR (created_at = ?1 AND rowid > ?2)
+             ORDER BY created_at ASC, rowid ASC LIMIT ?3"
+        ).map_err(|e| format!("Query failed: {}", e))?;
+        let rows = stmt.query_map(rusqlite::params![pos.0, pos.1, limit as i64], |row| {
+            let uuid: String = row.get(0)?;
+            let parent: Option<String> = row.get(3)?;
+            let created_at: String = row.get(2)?;
+            let rowid: i64 = row.get(5)?;
+            Ok(((created_at.clone(), rowid), SignalEntry {
+                memory_uuid: uuid.clone(), gist: row.get(1)?, created_at,
+                parent_uuid: parent.filter(|p| p != &uuid), content: row.get(4)?, score: None,
+            }))
+        }).map_err(|e| format!("Query failed: {}", e))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
@@ -1084,6 +1185,22 @@ pub struct SignalResult {
     pub embedded: bool,
 }
 
+impl DatabaseManager {
+    /// The full address of a memory in this folder, FOLDER:MEMORY (8 + 8), the form
+    /// that opens it from any folder (Jack, 7 Nov 2026: "I'd actually like to see the
+    /// return value with both numbers"). Just the memory's ID if the folder has none.
+    pub fn address(&self, memory_uuid: &str) -> String {
+        let short = |s: &str| s.chars().take(8).collect::<String>().to_uppercase();
+        let folder: Option<String> = self.conn().ok().and_then(|c| {
+            c.query_row("SELECT value FROM _meta WHERE key = 'folder_uuid'", [], |r| r.get(0)).ok()
+        });
+        match folder {
+            Some(f) if !f.trim().is_empty() => format!("{}:{}", short(f.trim()), short(memory_uuid)),
+            _ => short(memory_uuid),
+        }
+    }
+}
+
 pub struct SignalEntry {
     pub memory_uuid: String,
     pub gist: String,
@@ -1420,6 +1537,58 @@ mod tests {
         assert_eq!(entries[0].gist, "newest");
         assert_eq!(entries[1].gist, "middle");
         assert_eq!(entries[2].gist, "oldest");
+    }
+
+    #[test]
+    fn page_reaches_every_memory_in_either_order() {
+        let (db, _dir) = fresh_db();
+        for m in 1..=5 {
+            let at = format!("2026-0{}-01 00:00:00", m);
+            db.signal_with_backend(&format!("m{m}"), Some(&format!("m{m}")), None, Some(&at), Some(&MockBackend))
+                .unwrap();
+        }
+        let gists = |v: Vec<SignalEntry>| v.into_iter().map(|e| e.gist).collect::<Vec<_>>();
+        // Oldest first starts at the oldest, not at the newest page reversed.
+        assert_eq!(gists(db.page(true, 0, 2).unwrap()), ["m1", "m2"]);
+        assert_eq!(gists(db.page(true, 2, 2).unwrap()), ["m3", "m4"]);
+        assert_eq!(gists(db.page(true, 4, 2).unwrap()), ["m5"]);
+        assert_eq!(gists(db.page(false, 0, 2).unwrap()), ["m5", "m4"]);
+        assert_eq!(gists(db.page(false, 4, 2).unwrap()), ["m1"]);
+        assert!(db.page(false, 5, 2).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_time_in_any_other_shape_is_refused() {
+        let (db, _dir) = fresh_db();
+        for bad in ["2026-03-21T02:00:00", "2026-03-21T02:00:00Z", "2026-03-21", "2026-03-21 02:00", "21/03/2026 02:00:00"] {
+            let err = db.signal_with_backend("x", Some("x"), None, Some(bad), Some(&MockBackend)).unwrap_err();
+            assert!(err.contains("YYYY-MM-DD HH:MM:SS"), "{bad}: {err}");
+        }
+        assert!(db.signal_with_backend("x", Some("x"), None, Some("2026-03-21 02:00:00"), Some(&MockBackend)).is_ok());
+    }
+
+    #[test]
+    fn watch_position_sees_every_memory_in_the_same_second() {
+        let (db, _dir) = fresh_db();
+        let at = Some("2026-03-21 12:00:00");
+        let first = db.signal_with_backend("a", Some("a"), None, at, Some(&MockBackend)).unwrap();
+        for g in ["b", "c", "d"] {
+            db.signal_with_backend(g, Some(g), None, at, Some(&MockBackend)).unwrap();
+        }
+        db.signal_with_backend("e", Some("e"), None, Some("2026-03-21 12:00:01"), Some(&MockBackend)).unwrap();
+        let start = db.position_of(&first.uuid).unwrap().unwrap();
+        let gists = |v: Vec<((String, i64), SignalEntry)>| v.into_iter().map(|(_, e)| e.gist).collect::<Vec<_>>();
+        // After "a": the three in the same second, then the next second.
+        assert_eq!(gists(db.after(&start, 10).unwrap()), ["b", "c", "d", "e"]);
+        // A page boundary inside the second loses nothing.
+        let page = db.after(&start, 2).unwrap();
+        let next = page.last().unwrap().0.clone();
+        assert_eq!(gists(page), ["b", "c"]);
+        assert_eq!(gists(db.after(&next, 10).unwrap()), ["d", "e"]);
+        // An address works as well as a prefix; the newest is the end.
+        let addr = format!("ABCDEF12:{}", &first.uuid[..8]);
+        assert_eq!(db.position_of(&addr).unwrap(), Some(start));
+        assert!(db.after(&db.last_position().unwrap().unwrap(), 10).unwrap().is_empty());
     }
 
     #[test]

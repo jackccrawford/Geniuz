@@ -4,22 +4,26 @@ struct GeniuzMenu: View {
     @ObservedObject var service: GeniuzService
 
     var body: some View {
+        // Status is quiet in the header; the one action people come here for,
+        // Open Dashboard, sits on the folder line it opens (Jack, 7 Nov). The
+        // connection message takes a row only when there's something to do.
         VStack(alignment: .leading, spacing: 0) {
             header
+            if let update = service.availableUpdate {
+                updateRow(update)
+            }
+            if needsAttention {
+                connectionStatus
+            }
             Divider()
-            folderPicker
+            folderLine
+            Divider()
 
             if service.stationExists {
                 recentMemoriesList
             } else {
                 emptyState
             }
-
-            Divider()
-            connectionStatus
-
-            Divider()
-            openDashboardRow
 
             Divider()
             quitRow
@@ -30,56 +34,116 @@ struct GeniuzMenu: View {
 
     // MARK: - Folders
 
+    /// The folder this menu shows (a picker when there are two or more), and
+    /// beside it the way into the dashboard.
+    private var folderLine: some View {
+        HStack(spacing: 8) {
+            folderPicker
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(action: { service.openDashboard() }) {
+                Text("Open Dashboard")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            .fixedSize()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+    }
+
+    /// The folder this menu shows: picked here, else the default, else the first.
+    private var shownFolder: FolderOption? {
+        if let id = service.shownFolderID, let f = service.folders.first(where: { $0.uuid == id }) { return f }
+        // With no default set, the menu shows the first folder: name it and check it
+        // (Firn's review, PR #30).
+        return service.folders.first(where: { $0.inUse })
+            ?? service.folders.first(where: { $0.path == service.defaultStationPath })
+    }
+
+    private var currentFolderName: String {
+        shownFolder?.name ?? "My memory"
+    }
+
     /// Which folder this menu is showing, and the way to another. One folder
-    /// needs no choosing, so the row only appears with two or more.
+    /// needs no choosing, so it's just named.
     @ViewBuilder
     private var folderPicker: some View {
-        if service.folders.count > 1 {
+        if service.folders.count <= 1 {
+            HStack(spacing: 8) {
+                Image(systemName: "book").font(.system(size: 12))
+                Text(currentFolderName)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+            }
+        } else {
             Menu {
-                ForEach(service.folders) { folder in
-                    Button(action: { service.useFolder(folder) }) {
-                        if folder.inUse {
+                ForEach(shortlist(service.folders, showing: shownFolder?.uuid)) { folder in
+                    Button(action: { service.showFolder(folder) }) {
+                        if folder.uuid == shownFolder?.uuid {
                             Label(folder.name, systemImage: "checkmark")
                         } else {
                             Text(folder.name)
                         }
                     }
                 }
+                if shortlist(service.folders, showing: shownFolder?.uuid).count < service.folders.count {
+                    Divider()
+                    Button("All \(service.folders.count) Folders…") { service.openDashboard() }
+                }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "book")
                         .font(.system(size: 12))
-                    Text(service.folders.first(where: { $0.inUse })?.name ?? "My memory")
+                    Text(currentFolderName)
                         .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
-                    Spacer()
                 }
             }
             .menuStyle(.borderlessButton)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-
-            Divider()
         }
     }
 
-    // MARK: - Open Dashboard
+    // MARK: - Update available
 
-    private var openDashboardRow: some View {
-        Button(action: { service.openDashboard() }) {
-            HStack(spacing: 8) {
-                Image(systemName: "rectangle.grid.2x2")
-                    .font(.system(size: 12))
-                Text("Open Dashboard")
-                    .font(.system(size: 12, weight: .medium))
-                Spacer()
-            }
-            .foregroundColor(.primary)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .contentShape(Rectangle())
+    /// Shown only when GitHub has a newer release. Download opens the disk
+    /// image; installing is the usual drag to Applications.
+    private func updateRow(_ update: AvailableUpdate) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.down.circle.fill")
+                .foregroundColor(.accentColor)
+                .font(.system(size: 13))
+            Text("Geniuz \(update.version) is available")
+                .font(.system(size: 12))
+                .lineLimit(1)
+            Spacer()
+            Button("Download") { service.openUpdate() }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
+    // MARK: - Connection, quiet when fine
+
+    /// Something to do about the connection: not connected, or a restart owed.
+    /// An unreadable Claude config counts too, so its message row shows (cubic, PR #30).
+    private var needsAttention: Bool {
+        (!service.mcpInstalled && service.claudeFound)
+            || (service.mcpInstalled && service.restartRequired)
+    }
+
+    /// The header's small status mark: a check only when connected; orange when
+    /// the row below asks for something; a plain circle otherwise (Claude Desktop
+    /// not installed), never a check that looks like "connected".
+    private var statusMark: some View {
+        Image(systemName: needsAttention ? "exclamationmark.circle.fill"
+              : service.mcpInstalled ? "checkmark.circle" : "circle")
+            .font(.system(size: 13))
+            .foregroundColor(needsAttention ? .orange : .secondary)
+            .help(service.restartRequired && service.mcpInstalled ? "Restart Claude to finish connecting" : connectionText)
+            .accessibilityLabel(connectionText)
     }
 
     // MARK: - Header
@@ -115,6 +179,8 @@ struct GeniuzMenu: View {
             }
 
             Spacer()
+
+            statusMark
 
             Button(action: { service.openSettings() }) {
                 Image(systemName: "gearshape")
@@ -248,8 +314,8 @@ struct GeniuzMenu: View {
     private var connectionStatus: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
-                Image(systemName: service.mcpInstalled ? "checkmark.circle.fill" : "xmark.circle")
-                    .foregroundColor(service.mcpInstalled ? .green : .orange)
+                Image(systemName: service.mcpInstalled && !service.restartRequired ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+                    .foregroundColor(service.mcpInstalled && !service.restartRequired ? .green : .orange)
                     .font(.system(size: 13))
                 Text(connectionText)
                     .font(.system(size: 12))
@@ -281,6 +347,7 @@ struct GeniuzMenu: View {
     }
 
     private var connectionText: String {
+        if service.mcpInstalled && service.restartRequired { return "Connected. Restart Claude to finish." }
         if service.mcpInstalled { return "Claude Desktop connected" }
         if service.claudeConfigUnreadable { return "Claude Desktop's settings file couldn't be read, so Geniuz left it alone." }
         if !service.claudeFound { return "Geniuz will connect when Claude Desktop is installed." }
@@ -363,6 +430,25 @@ struct GeniuzSettingsView: View {
                 }
             }
 
+            Section("Default folder") {
+                Picker("New memories go to", selection: defaultFolderBinding) {
+                    Text("None: ask which folder").tag("none")
+                    if defaultFolderBinding.wrappedValue.isEmpty {
+                        // Never chosen (the first folder is used), or a folder that isn't
+                        // reachable right now (a drive not connected).
+                        Text(service.defaultFolderSetting == nil ? "First folder (not chosen yet)" : "A folder that isn't available").tag("")
+                    }
+                    ForEach(service.folders) { f in
+                        Text(f.name).tag(f.uuid)
+                    }
+                }
+                Text(service.defaultFolderSetting?.lowercased() == "none"
+                     ? "Claude, the command line and the MCP must name a folder; nothing is kept in a folder by guess. Agents' homes still use their own folder."
+                     : "Where Claude, the command line and the MCP keep memories when no folder is named. Looking at a folder in the menu or the dashboard doesn't change it.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
             Section("Display") {
                 Stepper(
                     "Recent memories shown: \(service.settings.recentMemoriesCount)",
@@ -386,6 +472,30 @@ struct GeniuzSettingsView: View {
                     .foregroundColor(.secondary)
             }
 
+            Section("Updates") {
+                Toggle("Check for updates automatically", isOn: autoupdateBinding)
+                if service.settings.autoupdateEnabled {
+                    Picker("How often", selection: frequencyBinding) {
+                        Text("Daily").tag("daily")
+                        Text("Weekly").tag("weekly")
+                        Text("Only when I ask").tag("manual")
+                    }
+                }
+                HStack {
+                    Button("Check Now") { service.checkForUpdate(userAsked: true) }
+                        .disabled(service.checkingForUpdate)
+                    if let update = service.availableUpdate {
+                        Button("Download \(update.version)") { service.openUpdate() }
+                    }
+                }
+                if let msg = service.updateCheckMessage {
+                    Text(msg).font(.caption2).foregroundColor(.secondary)
+                }
+                Text("A check asks GitHub for the latest Geniuz release. GitHub sees this Mac's internet address and the Geniuz version; none of your memories or folders are sent.")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+
             Section("About") {
                 LabeledContent("Version") {
                     Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")
@@ -404,6 +514,31 @@ struct GeniuzSettingsView: View {
         Binding(
             get: { service.settings.launchAtLogin },
             set: { v in service.updateSettings { $0.launchAtLogin = v } }
+        )
+    }
+
+    private var defaultFolderBinding: Binding<String> {
+        Binding(
+            get: {
+                guard let v = service.defaultFolderSetting else { return "" }
+                if v.lowercased() == "none" { return "none" }
+                return service.folders.first(where: { $0.uuid.caseInsensitiveCompare(v) == .orderedSame })?.uuid ?? ""
+            },
+            set: { v in if !v.isEmpty { service.setDefaultFolder(v) } }
+        )
+    }
+
+    private var autoupdateBinding: Binding<Bool> {
+        Binding(
+            get: { service.settings.autoupdateEnabled },
+            set: { v in service.updateSettings { $0.autoupdateEnabled = v } }
+        )
+    }
+
+    private var frequencyBinding: Binding<String> {
+        Binding(
+            get: { service.settings.updateCheckFrequency },
+            set: { v in service.updateSettings { $0.updateCheckFrequency = v } }
         )
     }
 

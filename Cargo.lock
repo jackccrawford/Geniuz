@@ -1137,7 +1137,7 @@ dependencies = [
 
 [[package]]
 name = "geniuz"
-version = "5.0.2"
+version = "5.0.5"
 dependencies = [
  "anyhow",
  "chrono",

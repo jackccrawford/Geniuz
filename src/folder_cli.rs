@@ -26,8 +26,12 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
             reg.remove(&path)?;
             Ok(format!("Geniuz no longer looks in {}. Its files weren't touched.", path.display()))
         }
-        FolderCommand::Use { name } => {
-            let f = reg.use_folder(&name)?;
+        FolderCommand::Use { name, none } => {
+            if none {
+                reg.clear_default()?;
+                return Ok("No default folder now: a command that names no folder will ask for one.".to_string());
+            }
+            let f = reg.use_folder(name.as_deref().unwrap_or_default())?;
             Ok(format!("Now using {}.", f.name))
         }
         FolderCommand::Rename { name, new_name } => {
@@ -93,7 +97,7 @@ fn list(reg: &Registry, json: bool) -> Result<String, String> {
         let mark = if is_in_use(f, &using) { "*" } else { " " };
         let (count, last) = f.stats().unwrap_or((0, None));
         let last = last.map(|t| crate::shorten_ts(&t)).unwrap_or_else(|| "never".to_string());
-        let pin = if pinned.contains(&f.uuid) { " · pinned" } else { "" };
+        let pin = if pinned.iter().any(|p| p.eq_ignore_ascii_case(&f.uuid)) { " · pinned" } else { "" };
         let mut line = format!("{} {} | {} | {} · {}{}", mark, f.short_id(), f.name, memories(count), last, pin);
         let summary = clip(&f.description);
         if !summary.is_empty() {
@@ -139,7 +143,7 @@ fn list_json(reg: &Registry, scan: &Scan, using: &Option<PathBuf>) -> Result<Str
         .iter()
         .map(|f| {
             let mut row = folder_json(f, is_in_use(f, using));
-            row["pinned"] = serde_json::json!(pinned.contains(&f.uuid));
+            row["pinned"] = serde_json::json!(pinned.iter().any(|p| p.eq_ignore_ascii_case(&f.uuid)));
             row
         })
         .collect();
@@ -180,7 +184,11 @@ fn show(reg: &Registry, name: Option<&str>, json: bool) -> Result<String, String
             .folders
             .into_iter()
             .find(|f| is_in_use(f, &using))
-            .ok_or_else(|| "The database in use isn't one of your folders. GENIUZ_DB may be set.".to_string())?,
+            .ok_or_else(|| if reg.no_default() && using.is_none() {
+                "No default folder is set. Name one: geniuz folder show <folder>.".to_string()
+            } else {
+                "The database in use isn't one of your folders. GENIUZ_DB may be set.".to_string()
+            })?,
     };
     if json {
         return serde_json::to_string_pretty(&folder_json(&folder, is_in_use(&folder, &using)))

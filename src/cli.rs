@@ -8,11 +8,15 @@ use std::path::PathBuf;
     about = "Your AI remembers now",
     long_about = "GENIUZ: Your AI remembers now.\n\nPersistent memory for AI agents. Keep what matters, recall it later.\nWorks with any agent framework — Claude Code, Cursor, Windsurf, Aider,\nor anything that can run a shell command.",
     before_help = "Start here: 'geniuz recall' to see what's in your folder.",
-    after_help = "Examples:\n  geniuz tui                                 Browse memories in a terminal UI\n  geniuz keep -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recall                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nFolders: 'geniuz folder list' shows them, and --in <name> uses one for a command.\n  Multiple agents can share a folder for shared memory.\n\nData: Kept in .geniuz in your home directory\n  Override with GENIUZ_HOME to change where Geniuz keeps its data\n  Override with GENIUZ_DB for a specific memory.db file\n\nUse \"geniuz [command] --help\" for more information."
+    after_help = "Examples:\n  geniuz tui                                 Browse memories in a terminal UI\n  geniuz keep -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recall                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nFolders: 'geniuz folder list' shows them, and --in <name> (or -f) uses one for a command.\n  Multiple agents can share a folder for shared memory.\n\nData: Kept in .geniuz in your home directory\n  Override with GENIUZ_HOME to change where Geniuz keeps its data\n  Override with GENIUZ_DB for a specific memory.db file\n\nUse \"geniuz [command] --help\" for more information."
 )]
 pub struct Cli {
+    // -f and --folder as well: a short flag that names the folder, as relay's -s names a
+    // station (Jack, 7 Nov 2026: "relay -s ... needs a corresponding flag in geniuz", then
+    // "could we use -f instead of -s"; "we can change flags. this is the first agent
+    // implementation"). --full keeps its long form only.
     /// Use this folder for the command: a name or its 8-character ID
-    #[arg(long = "in", global = true, value_name = "FOLDER")]
+    #[arg(short = 'f', long = "in", alias = "folder", global = true, value_name = "FOLDER")]
     pub in_folder: Option<String>,
 
     #[command(subcommand)]
@@ -57,6 +61,10 @@ pub enum Command {
         #[arg(short, long)]
         parent: Option<String>,
 
+        /// When it happened, if not now: 2026-03-21, "2026-03-21 14:00" (local), RFC 3339
+        #[arg(long, value_name = "WHEN")]
+        at: Option<String>,
+
         /// Output as JSON
         #[arg(long)]
         json: bool,
@@ -93,8 +101,8 @@ pub enum Command {
         #[arg(short, long)]
         keyword: bool,
 
-        /// Include full content
-        #[arg(short, long)]
+        /// Include full content (no short form: -f names the folder)
+        #[arg(long)]
         full: bool,
 
         /// Only memories from this time on: 24h, 7d, 2w, a date (2026-09-23),
@@ -134,8 +142,8 @@ pub enum Command {
         #[arg(long, value_name = "WHEN")]
         until: Option<String>,
 
-        /// Include full content
-        #[arg(short, long)]
+        /// Include full content (no short form: -f names the folder)
+        #[arg(long)]
         full: bool,
 
         /// Output as JSON
@@ -150,15 +158,11 @@ pub enum Command {
     /// Capture files or directories into a folder
     #[command(
         arg_required_else_help = true,
-        after_help = "Examples:\n  geniuz capture notes.md                              Single file\n  geniuz capture ./docs/                               All .md files in directory\n  geniuz capture *.md                                  Shell glob\n  geniuz capture --split notes.md                      Split by ## headers\n  geniuz capture --gist-prefix \"docs:\" a.md            Prefix all gists\n  geniuz capture --openclaw ~/.openclaw/workspace      Import OpenClaw memory\n  geniuz capture --dry-run ./notes/                    Preview without importing\n\nEach file becomes a memory. With --split, each ## section becomes\na threaded memory under the file's root."
+        after_help = "Examples:\n  geniuz capture notes.md                              Single file\n  geniuz capture ./docs/                               All .md files in directory\n  geniuz capture *.md                                  Shell glob\n  geniuz capture --split notes.md                      Split by ## headers\n  geniuz capture --gist-prefix \"docs:\" a.md            Prefix all gists\n  geniuz capture --dry-run ./notes/                    Preview without importing\n\nEach file becomes a memory. With --split, each ## section becomes\na threaded memory under the file's root."
     )]
     Capture {
-        /// Files or directories to capture (not used with --openclaw)
+        /// Files or directories to capture
         paths: Vec<String>,
-
-        /// Import an OpenClaw workspace
-        #[arg(long, conflicts_with = "paths")]
-        openclaw: Option<Option<String>>,
 
         /// Split files by ## headers into threaded memories
         #[arg(long)]
@@ -181,14 +185,14 @@ pub enum Command {
 
     /// Watch for new memories in real time
     #[command(
-        after_help = "Examples:\n  geniuz watch                              Poll every 5 minutes\n  geniuz watch --interval 60                Poll every 60 seconds\n  geniuz watch --since 9D778206             Only memories after this UUID\n  geniuz watch --exec \"echo {uuid} {gist}\"  Run command on each new memory\n  geniuz watch --once                       Check once and exit\n\nPlaceholders for --exec:\n  {uuid}       UUID (short)\n  {gist}       Gist\n  {content}    Full content\n  {created_at} Timestamp\n  {parent}     Parent UUID (empty if none)\n  {json}       Full memory as JSON"
+        after_help = "Examples:\n  geniuz watch                              Poll every 5 minutes\n  geniuz watch --interval 60                Poll every 60 seconds\n  geniuz watch --since 13625F6B:9D778206    Only memories after this one\n  geniuz watch --exec \"echo {uuid} {gist}\"  Run command on each new memory\n  geniuz watch --once --since 9D778206      Check once and exit\n\nPlaceholders for --exec:\n  {uuid}       UUID (short)\n  {gist}       Gist\n  {content}    Full content\n  {created_at} Timestamp\n  {parent}     Parent UUID (empty if none)\n  {json}       Full memory as JSON"
     )]
     Watch {
         /// Poll interval in seconds (default: 300 = 5 minutes)
         #[arg(short, long, default_value = "300")]
         interval: u64,
 
-        /// Only show memories after this UUID
+        /// Only show memories after this one (a UUID or an address FOLDER:MEMORY)
         #[arg(short, long)]
         since: Option<String>,
 
@@ -196,7 +200,7 @@ pub enum Command {
         #[arg(short, long)]
         exec: Option<String>,
 
-        /// Check once and exit (exit code 0 = new memories, 1 = none)
+        /// Check once and exit (exit code 0 = new memories, 1 = none); needs --since
         #[arg(long)]
         once: bool,
 
@@ -289,10 +293,14 @@ pub enum FolderCommand {
         path: PathBuf,
     },
 
-    /// Use this folder whenever none is named
+    /// Make a folder the default, used whenever none is named (or --none: ask instead)
     Use {
         /// Name or 8-character ID
-        name: String,
+        #[arg(required_unless_present = "none")]
+        name: Option<String>,
+        /// No default: a command that names no folder asks for one instead of guessing
+        #[arg(long, conflicts_with = "name")]
+        none: bool,
     },
 
     /// Rename a folder. Its ID and addresses don't change

@@ -1,7 +1,7 @@
 // main.js — entry point. Bootstraps the app, mounts sidebar, routes surfaces.
 
 import * as api from './api.js';
-import { sidebar, wireCollapse } from './components/sidebar.js';
+import { sidebar, wireCollapse, keepSidebarPlace } from './components/sidebar.js';
 import * as recent from './surfaces/recent.js';
 import * as remember from './surfaces/remember.js';
 import * as find from './surfaces/find.js';
@@ -70,6 +70,7 @@ async function bootstrap() {
     },
   });
   appShell.appendChild(aside);
+  requestAnimationFrame(() => keepSidebarPlace(aside));
 
   // Main mount target
   const mainHost = document.createElement('div');
@@ -156,6 +157,16 @@ async function wireMenuEvents() {
       case 'menu_sidebar':
         toggleSidebar();
         break;
+      case 'menu_all_folders': {
+        // The menu shows a shortlist; the sidebar's filter reaches the rest.
+        // A collapsed sidebar hides the filter, so open it first.
+        if (document.querySelector('.is-collapsed')) toggleSidebar();
+        requestAnimationFrame(() => {
+          const filter = document.querySelector('.sidebar-folders__filter');
+          if (filter) { filter.focus(); filter.select(); }
+        });
+        break;
+      }
       case 'menu_refresh':
         // Force a re-render of the current surface via state-key bump.
         setState({ _refresh: Date.now() });
@@ -164,7 +175,7 @@ async function wireMenuEvents() {
       // on_menu_event) and never reach the frontend.
       default:
         if (id.startsWith('menu_folder:')) {
-          api.useFolder(id.slice('menu_folder:'.length))
+          api.viewFolder(id.slice('menu_folder:'.length))
             .then(() => location.reload())
             .catch((e) => console.error('[geniuz] switching folder failed:', e));
           break;
@@ -177,20 +188,62 @@ async function wireMenuEvents() {
   await listen('tray-nav', (event) => handleNav(event.payload));
 }
 
-// The folder in use can change from the menu bar or the command line. Coming back
-// to this window shows it, rather than one folder's memories under another's name.
+// Memories arrive from agents and the command line while the window is open, so
+// the sidebar's counts follow the folders instead of staying as they were at load.
+async function refreshFolderCounts(list) {
+  const fresh = list || await api.listFolders();
+  // A folder made, renamed, archived or moved elsewhere (the command line, an
+  // agent) changes the list itself, and the menu lists folders too: reload for
+  // that, unless a draft is open. Counts alone are updated in place.
+  // A folder can show twice (Recent repeats it in its own group), so compare the
+  // set of folders, not the rows.
+  const rows = [...document.querySelectorAll('.sidebar-folder[data-folder]')];
+  const shown = [...new Set(rows.map((r) => `${r.dataset.folder}:${r.getAttribute('aria-label')}`))].sort().join('|');
+  const now = (fresh.folders || []).map((f) => `${f.uuid}:${f.name}:${f.tree || ''}`).sort().join('|');
+  const was = (getState().folders?.folders || []).map((f) => `${f.uuid}:${f.name}:${f.tree || ''}`).sort().join('|');
+  const listChanged = shown !== (fresh.folders || []).map((f) => `${f.uuid}:${f.name}`).sort().join('|') || (was && was !== now)
+    // The folder in use moved (menu bar, command line): its mark moves with it.
+    || (fresh.folders || []).find((f) => f.in_use)?.uuid !== (getState().folders?.folders || []).find((f) => f.in_use)?.uuid;
+  // A folder that was empty at load and now holds memories belongs out of
+  // "Show N empty" (and maybe in Recent): that's a change of place, not count.
+  const woke = (fresh.folders || []).some((f) => f.memories > 0
+    && document.querySelector(`.sidebar-folder.is-empty-folder[data-folder="${f.uuid}"]`));
+  // Never reload away work in progress: a draft, or an open dialog (New/Edit folder).
+  const busy = getState().currentSurface === 'remember' || document.querySelector('dialog[open]');
+  if (rows.length && (listChanged || woke) && !busy) {
+    location.reload();
+    return fresh;
+  }
+  for (const f of fresh.folders || []) {
+    for (const el of document.querySelectorAll(`.sidebar-item[data-folder="${f.uuid}"] .sidebar-item__count`)) {
+      if (el.textContent !== String(f.memories)) el.textContent = f.memories;
+    }
+  }
+  return fresh;
+}
+
+// The window keeps showing the folder chosen here (looking is not choosing where
+// memories go, Jack 7 Nov); when the folder in use changes elsewhere, the counts
+// refresh above moves its mark. A reload here only follows a folder that vanished.
 window.addEventListener('focus', async () => {
   if (!api.isTauri()) return;
-  // Don't reload away a draft. It's bound to the folder it names, so it stays right.
-  if (getState().currentSurface === 'remember') return;
   try {
+    const fresh = await refreshFolderCounts();
+    // Don't reload away a draft. It's bound to the folder it names, so it stays right.
+    if (getState().currentSurface === 'remember') return;
     const shown = (getState().folders?.folders || []).find((f) => f.current)?.uuid;
-    const now = (await api.listFolders()).folders.find((f) => f.current)?.uuid;
+    const now = fresh.folders.find((f) => f.current)?.uuid;
     if (shown && now && shown !== now) location.reload();
   } catch (e) {
     console.error('[geniuz] checking the folder failed:', e);
   }
 });
+
+// And while the window stays open and visible, every 15 seconds.
+setInterval(() => {
+  if (!api.isTauri() || document.hidden) return;
+  refreshFolderCounts().catch((e) => console.error('[geniuz] refreshing counts failed:', e));
+}, 15_000);
 
 // An address in any memory's text opens that memory, whichever folder it's in.
 document.addEventListener('click', async (ev) => {
@@ -205,11 +258,29 @@ document.addEventListener('click', async (ev) => {
     } else {
       chip.classList.add('is-missing');
       chip.title = 'No memory at this address in your folders';
+      // Say so where they clicked: a faded pill alone read as a dead click (Jack, 7 Nov).
+      noteUnderChip(chip, `Not in your folders: ${chip.textContent.trim()}`);
     }
   } catch (e) {
     console.error('[geniuz] opening an address failed:', e);
   }
 }, true);
+
+/** A short note just under a pill, gone after a few seconds or on the next click. */
+function noteUnderChip(chip, text) {
+  document.querySelector('.sptr-note')?.remove();
+  const note = document.createElement('div');
+  note.className = 'sptr-note';
+  note.setAttribute('role', 'status');
+  note.textContent = text;
+  const r = chip.getBoundingClientRect();
+  note.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 320))}px`;
+  note.style.top = `${r.bottom + 6}px`;
+  document.body.appendChild(note);
+  const gone = () => { note.remove(); document.removeEventListener('scroll', gone, true); };
+  setTimeout(gone, 3500);
+  document.addEventListener('scroll', gone, true);
+}
 
 bootstrap();
 wireMenuEvents();

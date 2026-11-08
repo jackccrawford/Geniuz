@@ -1661,7 +1661,7 @@ dependencies = [
 
 [[package]]
 name = "geniuz"
-version = "5.0.2"
+version = "5.0.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1683,8 +1683,9 @@ dependencies = [
 
 [[package]]
 name = "geniuz-dashboard"
-version = "5.0.2"
+version = "5.0.5"
 dependencies = [
+ "chrono",
  "geniuz",
  "serde",
  "serde_json",

@@ -145,10 +145,11 @@ function foldersSection(list, buttons) {
   label.appendChild(add);
   sec.appendChild(label);
 
+  const all = list?.folders || [];
   const rows = document.createElement('div');
   rows.className = 'sidebar-folders';
   // A long list needs finding things in, not just scrolling.
-  if ((list?.folders || []).length > FILTER_FROM) {
+  if (all.length > FILTER_FROM) {
     const filter = document.createElement('input');
     filter.type = 'search';
     filter.className = 'sidebar-folders__filter';
@@ -156,13 +157,128 @@ function foldersSection(list, buttons) {
     filter.setAttribute('aria-label', 'Filter folders');
     filter.addEventListener('input', () => {
       const q = filter.value.trim().toLowerCase();
-      for (const row of rows.children) {
+      // While filtering, every group is open and empty folders count too; the
+      // Recent group steps aside so a match shows once.
+      rows.classList.toggle('is-filtering', !!q);
+      for (const row of rows.querySelectorAll('.sidebar-folder')) {
         row.hidden = !!q && !row.dataset.tip?.toLowerCase().includes(q);
+      }
+      // Headings count what matches while filtering, and their totals after.
+      for (const group of rows.querySelectorAll('.sidebar-group')) {
+        const count = group.querySelector('.sidebar-group__count');
+        if (!count) continue;
+        count.textContent = q
+          ? group.querySelectorAll('.sidebar-folder:not([hidden])').length
+          : count.dataset.total;
       }
     });
     sec.appendChild(filter);
   }
-  for (const f of list?.folders || []) {
+
+  // One flat list, as before, until there are agents' homes to set apart. Then:
+  // Recent (written in the last week), Agents, Folders. Empty folders wait
+  // behind a "Show N empty" line in their group.
+  const trees = new Set(all.map((f) => f.tree || 'folders'));
+  if (!trees.has('agents')) {
+    for (const f of all) rows.appendChild(folderButton(f, buttons));
+  } else {
+    const weekAgo = Date.now() - 7 * 86400_000;
+    const recent = all
+      .filter((f) => f.last_written && Date.parse(f.last_written.slice(0, 19).replace(' ', 'T') + 'Z') > weekAgo)
+      .sort((a, b) => (b.last_written || '').localeCompare(a.last_written || ''))
+      .slice(0, 12);
+    if (recent.length) rows.appendChild(folderGroup('recent', 'Recent', recent, buttons, { recent: true }));
+    rows.appendChild(folderGroup('agents', 'Agents', all.filter((f) => f.tree === 'agents'), buttons));
+    rows.appendChild(folderGroup('folders', 'Shared', all.filter((f) => f.tree !== 'agents'), buttons));
+    rows.classList.add('has-groups');
+  }
+  sec.appendChild(rows);
+  return finishFoldersSection(sec, list, buttons);
+}
+
+/**
+ * Choosing a folder reloads the app (so no screen shows one folder's memories
+ * under another's name). Keep the sidebar's place across that reload: each
+ * section's scroll is saved as the page goes and restored after, and the
+ * folder now showing is brought into view (Jack, 7 Nov). Call once the
+ * sidebar is in the document.
+ */
+const SCROLL_KEY = 'geniuz.sidebar.scroll';
+export function keepSidebarPlace(aside) {
+  const boxes = () => [...aside.querySelectorAll('.sidebar-folders, .sidebar-group__body')];
+  const keyOf = (el) => (el.classList.contains('sidebar-folders') ? 'list' : el.closest('.sidebar-group')?.dataset.key || '');
+  try {
+    const saved = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || '{}');
+    for (const b of boxes()) if (saved[keyOf(b)]) b.scrollTop = saved[keyOf(b)];
+  } catch { /* a convenience */ }
+  // The one in its own section, not its Recent copy.
+  const current = aside.querySelector('.sidebar-folder.is-current:not(.is-mirror)');
+  if (current && current.offsetParent) current.scrollIntoView({ block: 'nearest' });
+  const save = () => {
+    try {
+      const out = {};
+      for (const b of boxes()) out[keyOf(b)] = b.scrollTop;
+      sessionStorage.setItem(SCROLL_KEY, JSON.stringify(out));
+    } catch { /* a convenience */ }
+  };
+  window.addEventListener('beforeunload', save);
+  window.addEventListener('pagehide', save);
+}
+
+/** Group open/closed state, remembered per viewer (a convenience, so storage may fail). */
+function groupOpen(key) {
+  try { return localStorage.getItem(`geniuz.group.${key}`) !== 'closed'; } catch { return true; }
+}
+function setGroupOpen(key, open) {
+  try { localStorage.setItem(`geniuz.group.${key}`, open ? 'open' : 'closed'); } catch { /* fine */ }
+}
+
+/** A titled, collapsible run of folders. Empty ones wait behind "Show N empty". */
+function folderGroup(key, title, folders, buttons, { recent = false } = {}) {
+  const group = document.createElement('div');
+  group.className = `sidebar-group${recent ? ' sidebar-group--recent' : ''}`;
+  group.dataset.key = key;
+  group.classList.toggle('is-closed', !groupOpen(key));
+  const head = document.createElement('button');
+  head.type = 'button';
+  head.className = 'sidebar-group__head';
+  head.setAttribute('aria-expanded', String(groupOpen(key)));
+  head.innerHTML = `<span class="sidebar-group__caret" aria-hidden="true"></span><span class="sidebar-group__title"></span><span class="sidebar-group__count"></span>`;
+  head.querySelector('.sidebar-group__title').textContent = title;
+  head.querySelector('.sidebar-group__count').textContent = folders.length;
+  head.querySelector('.sidebar-group__count').dataset.total = String(folders.length);
+  head.addEventListener('click', () => {
+    const open = group.classList.toggle('is-closed') === false;
+    head.setAttribute('aria-expanded', String(open));
+    setGroupOpen(key, open);
+  });
+  group.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'sidebar-group__body';
+  const empty = recent ? [] : folders.filter((f) => !f.memories && !f.current && !f.pinned);
+  for (const f of folders) {
+    const btn = folderButton(f, buttons, { mirror: recent });
+    if (empty.includes(f)) btn.classList.add('is-empty-folder');
+    body.appendChild(btn);
+  }
+  if (empty.length) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'sidebar-group__empties';
+    const label = (shown) => (shown ? `Hide ${empty.length} empty` : `Show ${empty.length} empty`);
+    more.textContent = label(false);
+    more.addEventListener('click', () => {
+      const shown = body.classList.toggle('shows-empty');
+      more.textContent = label(shown);
+    });
+    body.appendChild(more);
+  }
+  group.appendChild(body);
+  return group;
+}
+
+function folderButton(f, buttons, { mirror = false } = {}) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `sidebar-item sidebar-folder${f.current ? ' is-current' : ''}`;
@@ -175,6 +291,16 @@ function foldersSection(list, buttons) {
     name.textContent = f.name;
     btn.innerHTML = `<span class="sidebar-item__icon">${ICONS.book}</span>`;
     btn.appendChild(name);
+    // Where new memories go when no folder is named: marked, because looking at a
+    // folder here no longer changes it.
+    if (f.in_use) {
+      btn.classList.add('is-in-use');
+      const mark = document.createElement('span');
+      mark.className = 'sidebar-folder__in-use';
+      mark.title = 'New memories go here: Claude, the command line and the MCP use this folder when none is named';
+      mark.setAttribute('aria-label', 'In use for new memories');
+      btn.appendChild(mark);
+    }
     // The pin: shown on hover, and always once it's pinned. A span, because a
     // button can't hold another button.
     const pin = document.createElement('span');
@@ -197,6 +323,10 @@ function foldersSection(list, buttons) {
     count.className = 'sidebar-item__count';
     count.textContent = f.memories;
     btn.appendChild(count);
+    // So refreshFolderCounts can find this row when memories arrive.
+    btn.dataset.folder = f.uuid;
+    // A Recent row repeats a folder listed in its own group below.
+    if (mirror) btn.classList.add('is-mirror');
     if (f.current) {
       btn.dataset.surface = 'recent';
       btn.addEventListener('click', () => navigate('recent'));
@@ -204,17 +334,17 @@ function foldersSection(list, buttons) {
     } else {
       btn.addEventListener('click', async () => {
         try {
-          await api.useFolder(f.uuid);
+          await api.viewFolder(f.uuid);
           location.reload();
         } catch (e) {
           console.error('[geniuz] switching folder failed:', e);
         }
       });
     }
-    rows.appendChild(btn);
-  }
-  sec.appendChild(rows);
+    return btn;
+}
 
+function finishFoldersSection(sec, list, buttons) {
   const archived = list?.archived || [];
   if (archived.length) {
     const row = document.createElement('button');
@@ -297,7 +427,9 @@ export function sidebar({ version, stats, folders }) {
   const footer = document.createElement('div');
   footer.className = 'sidebar-footer';
   const [storageNum, storageUnit] = fmt.bytes(stats?.storageBytes);
-  footer.textContent = storageUnit ? `${storageNum} ${storageUnit} on disk` : '';
+  // The size is the folder on screen; with several folders, say so.
+  const where = (folders?.folders || []).length > 1 ? ' · this folder' : ' on disk';
+  footer.textContent = storageUnit ? `${storageNum} ${storageUnit}${where}` : '';
   aside.appendChild(footer);
 
   const applyActive = (currentSurface) => {
