@@ -1383,8 +1383,14 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
    long one; the area takes its full height only while something is open. */
 .sidebar-folders.has-groups:has(.sidebar-group:not(.is-closed)),
 .sidebar-folders.has-groups.is-filtering { height: 62vh; }
-.sidebar-group { display: flex; flex-direction: column; flex: 1 1 0; min-height: 28px; max-height: max-content; }
+/* No `max-height: max-content` here: the app's WebKit sizes a flex: 1 1 0 group
+   down to its heading with it, so every open group showed no folders (5.0.3,
+   7 Nov; Chromium draws it fine, which is how it got through). Recent, at most
+   12 folders, takes its own height up to about five rows instead. */
+.sidebar-group { display: flex; flex-direction: column; flex: 1 1 0; min-height: 28px; }
 .sidebar-group.is-closed { flex: none; }
+.sidebar-group--recent:not(.is-closed) { flex: 0 0 auto; }
+.sidebar-group--recent .sidebar-group__body { max-height: 168px; }
 .sidebar-group__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
 .sidebar-group__head {
   flex: none; height: 28px; box-sizing: border-box;
@@ -1411,7 +1417,8 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .sidebar-group__empties:hover { color: rgba(250, 244, 232, 0.85); }
 /* While filtering: every group open, empties included, Recent set aside so a match shows once. */
 .sidebar-folders.is-filtering .sidebar-group--recent { display: none; }
-.sidebar-folders.is-filtering .sidebar-group.is-closed { flex: 1 1 0; }
+/* Matches are usually few, so each group takes only what it holds. */
+.sidebar-folders.is-filtering .sidebar-group { flex: 0 1 auto; }
 .sidebar-folders.is-filtering .sidebar-group.is-closed .sidebar-group__body { display: flex; }
 .sidebar-folders.is-filtering .sidebar-folder.is-empty-folder:not([hidden]) { display: flex; }
 .sidebar-folders.is-filtering .sidebar-group__empties { display: none; }
