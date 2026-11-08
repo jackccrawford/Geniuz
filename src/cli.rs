@@ -326,7 +326,7 @@ pub enum FolderCommand {
         to: PathBuf,
     },
 
-    /// Retire a folder: hide it and keep it. Nothing is deleted
+    /// Archive a folder: hide it and keep it. Nothing is deleted; `folder restore` brings it back
     Archive {
         /// Name or 8-character ID
         name: String,
