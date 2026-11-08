@@ -323,7 +323,7 @@ impl Registry {
         }
         if self.no_default() {
             return Err("No default folder is set, so name a folder: the folder argument, or -f <folder> \
-                        on the command line. A default can be chosen in Settings, or with `geniuz folder use`."
+                        on the command line. A default can be chosen in Settings, or with `geniuz folder use <folder>`."
                 .to_string());
         }
         if let Some(q) = self.current() {
@@ -334,7 +334,7 @@ impl Registry {
                     if e.contains("Move one of them") {
                         e
                     } else {
-                        format!("The current folder ({}) isn't available. Choose one with `geniuz folder use`.", q)
+                        format!("The current folder ({}) isn't available. Choose one with `geniuz folder use <folder>`.", q)
                     }
                 });
         }
