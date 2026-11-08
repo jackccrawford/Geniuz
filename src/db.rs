@@ -1128,11 +1128,16 @@ impl DatabaseManager {
     pub fn get_uncached_signals(&self) -> Result<Vec<(String, String)>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT s.memory_uuid, json_extract(s.payload, '$.content')
+            // What to embed: the content, else the gist, else the stored record itself.
+            // Older writers kept structured events with neither, and those must not be
+            // counted as unembedded forever while backfill passes them by.
+            "SELECT s.memory_uuid,
+                    COALESCE(NULLIF(json_extract(s.payload, '$.content'), ''),
+                             NULLIF(json_extract(s.payload, '$.gist'), ''),
+                             s.payload)
              FROM memories s
              LEFT JOIN memory_embeddings e ON e.memory_uuid = s.memory_uuid
-             WHERE json_extract(s.payload, '$.content') IS NOT NULL
-               AND e.memory_uuid IS NULL"
+             WHERE e.memory_uuid IS NULL"
         ).map_err(|e| format!("Query failed: {}", e))?;
 
         let rows = stmt.query_map([], |row| {
@@ -1589,6 +1594,19 @@ mod tests {
         let addr = format!("ABCDEF12:{}", &first.uuid[..8]);
         assert_eq!(db.position_of(&addr).unwrap(), Some(start));
         assert!(db.after(&db.last_position().unwrap().unwrap(), 10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_memory_with_no_content_is_still_offered_for_embedding() {
+        let (db, _dir) = fresh_db();
+        db.conn().unwrap().execute(
+            "INSERT INTO memories (memory_uuid, payload) VALUES ('AAAAAAAA-0000-4000-A000-000000000001', '{\"event\":\"breadcrumbs\",\"session_summary\":\"moved the docs\"}')",
+            [],
+        ).unwrap();
+        let uncached = db.get_uncached_signals().unwrap();
+        assert_eq!(uncached.len(), 1);
+        assert!(uncached[0].1.contains("moved the docs"), "{:?}", uncached);
+        assert_eq!(db.unembedded_count().unwrap(), uncached.len(), "what is counted is what backfill embeds");
     }
 
     #[test]
