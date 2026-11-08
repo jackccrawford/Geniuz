@@ -70,7 +70,9 @@ impl Status {
                 (f.uuid, f.name, current)
             })
             .collect();
-        let (memory_count, recent_gists) = if no_default {
+        // No default, or one that can't be found: show nothing rather than the first
+        // folder's memories as if they were the default's.
+        let (memory_count, recent_gists) = if no_default || resolved.is_err() {
             (0, Vec::new())
         } else if db_path.exists() {
             match geniuz::db::DatabaseManager::open_existing(&db_path.to_string_lossy()) {

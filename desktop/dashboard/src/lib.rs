@@ -529,6 +529,9 @@ fn get_settings() -> Settings {
 
 #[tauri::command]
 fn update_settings(patch: SettingsPatch) -> Result<Settings, String> {
+    // A settings.json that exists but can't be read is not saved over, as the command
+    // line, the tray and the menu bar also refuse: the page showed defaults, not it.
+    Settings::load_strict()?;
     patch.settings.save()?;
     Ok(Settings::load())
 }

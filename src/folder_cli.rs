@@ -114,6 +114,13 @@ fn list(reg: &Registry, json: bool) -> Result<String, String> {
     if let Some(why) = &scan.first_folder_problem {
         lines.push(format!("? {}", why));
     }
+    for db in &scan.old_format {
+        lines.push(format!(
+            "? {} is from a Geniuz before 4.0 and isn't opened: back it up and run {} on it.",
+            db.display(),
+            geniuz::db::MIGRATION_SCRIPT
+        ));
+    }
     // The data directory comes first in `unavailable` when the first folder failed;
     // its reason is already said above.
     let skip = usize::from(scan.first_folder_problem.is_some());
@@ -163,6 +170,7 @@ fn list_json(reg: &Registry, scan: &Scan, using: &Option<PathBuf>) -> Result<Str
         "blocked": blocked,
         "unavailable": scan.unavailable,
         "first_folder_problem": scan.first_folder_problem,
+        "old_format": scan.old_format,
     }))
     .map_err(|e| e.to_string())
 }

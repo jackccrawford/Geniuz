@@ -17,6 +17,13 @@
 --   6. Open it with Geniuz, which adds the current views and triggers:
 --        GENIUZ_DB=/path/to/memory.db geniuz status
 --      then `geniuz recall -l 3` to see the newest memories are there.
+-- If step 3 prints 0, the file may be a later variant that already has a `memories`
+-- table but still a `signal_uuid` column. Check with:
+--        sqlite3 old.db "SELECT count(*) FROM pragma_table_info('memories') WHERE name='signal_uuid';"
+--   If that prints 1, don't run this script. Run only these, then go on to step 5:
+--        sqlite3 old.db "DROP VIEW IF EXISTS memory_chains; ALTER TABLE memories RENAME COLUMN signal_uuid TO memory_uuid;"
+--        sqlite3 old.db "ALTER TABLE memory_embeddings RENAME COLUMN signal_uuid TO memory_uuid;"
+--   (the second only if memory_embeddings has a signal_uuid column; check it the same way).
 -- If any step fails, stop and restore the backup: nothing else is changed.
 
 -- Stop at the first error, so nothing is half done: the transaction rolls back.

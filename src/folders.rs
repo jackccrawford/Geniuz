@@ -33,6 +33,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 const DB_FILE: &str = "memory.db";
+/// The file name before Geniuz 4.0: found only to say what to do with it.
+const OLD_DB_FILE: &str = "station.db";
 const ADDED_FILE: &str = "added-folders";
 const CURRENT_FILE: &str = "current";
 /// What `current` holds when the person chose no default folder.
@@ -105,6 +107,9 @@ pub struct Scan {
     /// Why the first folder couldn't be opened, when it couldn't (a file from before
     /// Geniuz 4.0, say), so lists can say so rather than just "unavailable".
     pub first_folder_problem: Option<String>,
+    /// Folders still in a pre-4.0 `station.db`: not opened, but named, so they
+    /// don't vanish from lists without a word.
+    pub old_format: Vec<PathBuf>,
     /// Interrupted moves whose original can't be reached, so can't be settled yet.
     pub pending_moves: Vec<PathBuf>,
 }
@@ -150,7 +155,7 @@ impl Registry {
         // A first folder from before Geniuz 4.0 was station.db. Making a new, empty
         // memory.db beside it would hide its memories without a word, so it's refused
         // with the way forward instead.
-        let old = self.home.join("station.db");
+        let old = self.home.join(OLD_DB_FILE);
         if !db.exists() && old.exists() {
             return Err(format!(
                 "Your first folder is {}, from a Geniuz before 4.0. Back it up and run {} on it, \
@@ -193,6 +198,23 @@ impl Registry {
                 roots.push(dir);
             } else {
                 out.unavailable.push(dir);
+            }
+        }
+
+        // A station.db with no memory.db beside it is a folder from before 4.0. The
+        // first folder's is reported above; any other is listed here.
+        for root in &roots {
+            let mut dirs = vec![root.clone()];
+            if let Ok(entries) = std::fs::read_dir(root) {
+                dirs.extend(entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()));
+            }
+            for dir in dirs {
+                if canonical(&dir) == canonical(&self.home) {
+                    continue;
+                }
+                if dir.join(OLD_DB_FILE).is_file() && !dir.join(DB_FILE).exists() {
+                    out.old_format.push(dir.join(OLD_DB_FILE));
+                }
             }
         }
 
@@ -511,6 +533,15 @@ impl Registry {
             }
         }
         if found == 0 {
+            let old = dir.join(OLD_DB_FILE).is_file()
+                || std::fs::read_dir(&dir).map(|es| es.flatten().any(|e| e.path().join(OLD_DB_FILE).is_file())).unwrap_or(false);
+            if old {
+                return Err(format!(
+                    "No Geniuz folders from 4.0 or later in {}. Its station.db files are from an older Geniuz: back them up and run {} on each.",
+                    dir.display(),
+                    crate::db::MIGRATION_SCRIPT
+                ));
+            }
             return Err(format!("No Geniuz folders in {}.", dir.display()));
         }
 
@@ -1468,6 +1499,22 @@ mod tests {
         reg.ensure_default().unwrap();
         assert_eq!(read_identity(&db).unwrap().uuid, first.uuid);
         assert_eq!(db.file_name().unwrap(), DB_FILE);
+    }
+
+    #[test]
+    fn an_old_station_db_elsewhere_is_named_not_hidden() {
+        let (tmp, reg) = setup();
+        reg.ensure_default().unwrap();
+        let added = tmp.path().join("added");
+        std::fs::create_dir_all(added.join("Old")).unwrap();
+        Connection::open(added.join("Old").join(OLD_DB_FILE)).unwrap()
+            .execute_batch("CREATE TABLE signals (signal_uuid TEXT);").unwrap();
+        let err = reg.add(&added).unwrap_err();
+        assert!(err.contains("station.db") && err.contains(crate::db::MIGRATION_SCRIPT), "{err}");
+        reg.remember_added(&added).unwrap();
+        let scan = reg.scan();
+        let found: Vec<_> = scan.old_format.iter().map(|p| canonical(p)).collect();
+        assert_eq!(found, [canonical(&added.join("Old").join(OLD_DB_FILE))]);
     }
 
     #[test]
