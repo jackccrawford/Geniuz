@@ -705,6 +705,7 @@ button.find-next__chip:hover { border-color: var(--accent); }
 }
 .status-row__dot.is-warn { background: var(--status-warn); }
 .status-row__dot.is-bad  { background: var(--status-bad); }
+.status-row__dot.is-none { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; opacity: 0.45; }
 
 /* ============================================================================
    Settings surface
@@ -1312,10 +1313,11 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 .find-scope__chip {
   display: inline-flex; align-items: center; gap: 4px; font-size: 13px; padding: 3px 4px 3px 10px; border-radius: 999px;
   color: var(--ink-1); background: color-mix(in srgb, var(--accent, AccentColor) 14%, transparent);
-  max-width: 220px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+  max-width: 220px; min-width: 0;
 }
+.find-scope__chip-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 .find-scope__remove {
-  appearance: none; border: 0; background: none; color: var(--ink-2); font: inherit; font-size: 14px; line-height: 1;
+  flex: none; appearance: none; border: 0; background: none; color: var(--ink-2); font: inherit; font-size: 14px; line-height: 1;
   width: 18px; height: 18px; border-radius: 50%; cursor: pointer;
 }
 .find-scope__remove:hover { color: var(--ink-1); background: color-mix(in srgb, var(--ink-1) 10%, transparent); }

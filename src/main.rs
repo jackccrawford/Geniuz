@@ -14,7 +14,7 @@ use std::path::PathBuf;
 /// variables, never as part of the command it parses, so an apostrophe cannot
 /// break the command and shell syntax in a memory cannot run. Every byte
 /// arrives intact.
-fn watch_exec_command(template: &str, e: &geniuz::db::SignalEntry) -> (String, Vec<(&'static str, String)>) {
+fn watch_exec_command(template: &str, e: &geniuz::db::MemoryEntry) -> (String, Vec<(&'static str, String)>) {
     let uuid_short = &e.memory_uuid[..8.min(e.memory_uuid.len())];
     let parent_short = e.parent_uuid.as_deref().map(|p| &p[..8.min(p.len())]).unwrap_or("");
     let content = e.content.as_deref().unwrap_or("");
@@ -55,11 +55,7 @@ fn main() {
     }
 }
 
-use geniuz::data_dir;
 
-fn default_db_path() -> PathBuf {
-    data_dir().join("memory.db")
-}
 
 
 /// Locate and launch the Geniuz Dashboard binary.
@@ -147,9 +143,9 @@ fn explicit_db_env() -> Option<String> {
 
 pub fn resolve_db_path() -> Result<PathBuf, String> {
     let flag = IN_FOLDER.get().and_then(|f| f.as_deref());
-    let env_station = explicit_db_env();
+    let env_db = explicit_db_env();
     let cwd = std::env::current_dir().ok();
-    geniuz::folders::Registry::from_env().resolve(flag, env_station.as_deref(), cwd.as_deref())
+    geniuz::folders::Registry::from_env().resolve(flag, env_db.as_deref(), cwd.as_deref())
 }
 
 pub fn get_db() -> Result<db::DatabaseManager, String> {
@@ -406,6 +402,10 @@ fn run(cli: Cli) -> Result<String, String> {
 
             let mut files: Vec<PathBuf> = Vec::new();
             let mut rejected: Vec<PathBuf> = Vec::new();
+            // A directory is read one level deep: memories can't be removed, so a whole
+            // tree is never taken in by accident. Subfolders are named, not passed over,
+            // except hidden ones (.git, .obsidian), which are tool state, not documents.
+            let mut subdirs: Vec<PathBuf> = Vec::new();
             for p in &paths {
                 let path = PathBuf::from(p);
                 if path.is_dir() {
@@ -413,7 +413,11 @@ fn run(cli: Cli) -> Result<String, String> {
                         Ok(entries) => {
                             for entry in entries.flatten() {
                                 let ep = entry.path();
-                                if ep.is_file() {
+                                if ep.is_dir() {
+                                    if !entry.file_name().to_string_lossy().starts_with('.') {
+                                        subdirs.push(ep);
+                                    }
+                                } else if ep.is_file() {
                                     if force || is_prose_ext(&ep) {
                                         files.push(ep);
                                     } else {
@@ -435,6 +439,14 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
             }
             files.sort();
+            subdirs.sort();
+
+            if !subdirs.is_empty() {
+                eprintln!("[capture] {} subfolder(s) not read (capture reads one level; name a subfolder to include it):", subdirs.len());
+                for d in &subdirs {
+                    eprintln!("  not read: {}/", d.display());
+                }
+            }
 
             if !rejected.is_empty() {
                 eprintln!("[capture] {} file(s) refused (non-prose extensions; embeddings would be noisy):", rejected.len());
@@ -484,7 +496,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 if split {
                     let sections = adapter::split_sections(content);
                     let root_gist = format!("{}capture: {}", prefix, filename);
-                    let root_uuid = match db.signal_with_backend(content, Some(&root_gist), None, None, Some(backend.as_ref())) {
+                    let root_uuid = match db.keep_with_backend(content, Some(&root_gist), None, None, Some(backend.as_ref())) {
                         Ok(result) => {
                             created += 1;
                             result.uuid
@@ -497,10 +509,10 @@ fn run(cli: Cli) -> Result<String, String> {
                     };
                     for (i, section) in sections.iter().enumerate() {
                         let gist = match &section.header {
-                            Some(h) => format!("{}capture: {} — {}", prefix, filename, h),
+                            Some(h) => format!("{}capture: {}: {}", prefix, filename, h),
                             None => format!("{}capture: {} (section {})", prefix, filename, i + 1),
                         };
-                        match db.signal_with_backend(&section.content, Some(&gist), Some(&root_uuid), None, Some(backend.as_ref())) {
+                        match db.keep_with_backend(&section.content, Some(&gist), Some(&root_uuid), None, Some(backend.as_ref())) {
                             Ok(_) => { created += 1; }
                             Err(e) => {
                                 eprintln!("[capture] Failed: {}", e);
@@ -510,7 +522,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     }
                 } else {
                     let gist = format!("{}capture: {}", prefix, filename);
-                    match db.signal_with_backend(content, Some(&gist), None, None, Some(backend.as_ref())) {
+                    match db.keep_with_backend(content, Some(&gist), None, None, Some(backend.as_ref())) {
                         Ok(_) => { created += 1; }
                         Err(e) => {
                             eprintln!("[capture] Failed: {}", e);
@@ -560,19 +572,24 @@ fn run(cli: Cli) -> Result<String, String> {
             };
 
             let db = get_db()?;
-            let result = db.signal(&resolved, gist.as_deref(), parent.as_deref(), at.as_deref())?;
+            let result = db.keep(&resolved, gist.as_deref(), parent.as_deref(), at.as_deref())?;
 
             let address = db.address(&result.uuid);
             if json {
-                Ok(serde_json::to_string_pretty(&serde_json::json!({
+                let mut out = serde_json::json!({
                     "ok": true, "action": "remember", "uuid": result.uuid, "address": address,
-                    "embedded": result.embedded
-                })).unwrap())
+                    "embedded": result.embedded,
+                });
+                // Said in the JSON too, so a script knows the fix; absent when there's none.
+                if !result.embedded {
+                    out["note"] = "Found by keywords only for now: run 'geniuz backfill' later to make it searchable by meaning.".into();
+                }
+                Ok(serde_json::to_string_pretty(&out).unwrap())
             } else if result.embedded {
                 Ok(format!("✅ Kept {}", address))
             } else {
                 Ok(format!(
-                    "✅ Kept {} (keyword search only — embedding unavailable, run 'geniuz backfill' later)",
+                    "✅ Kept {} (found by keywords only for now: run 'geniuz backfill' later)",
                     address
                 ))
             }
@@ -666,7 +683,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     match db.get_by_uuid_prefix(q)? {
                         Some(entry) => vec![entry],
                         None => {
-                            eprintln!("[geniuz] No memory found matching UUID {} — falling back to semantic search.", q);
+                            eprintln!("[geniuz] No memory found matching UUID {}, so searching by meaning instead.", q);
                             mode = format!("semantic \"{q}\" (no memory has that id)");
                             db.semantic_search_in(q, &window, limit)?
                         }
@@ -741,7 +758,7 @@ fn run(cli: Cli) -> Result<String, String> {
             if let Ok(n) = db.unembedded_count() {
                 if n > 0 {
                     lines.push(format!(
-                        "\n({} {} not embedded — ranked results are partial. Run 'geniuz backfill'.)",
+                        "\n({} {} not embedded, so these results may be incomplete. Run 'geniuz backfill'.)",
                         n, if n == 1 { "memory" } else { "memories" }
                     ));
                 }
@@ -928,7 +945,7 @@ fn run(cli: Cli) -> Result<String, String> {
             let db = get_db()?;
             db.set_embedding_model(geniuz::embedding::model_id())?;
 
-            let uncached = db.get_uncached_signals()?;
+            let uncached = db.unembedded_memories()?;
             if uncached.is_empty() {
                 return Ok("All memories cached.".to_string());
             }
@@ -956,19 +973,19 @@ fn run(cli: Cli) -> Result<String, String> {
 
         Command::Status => {
             let db = get_db()?;
-            let signals = db.count()?;
+            let memories = db.count()?;
             let embeddings = db.embedding_count()?;
             let path = resolve_db_path()?.to_string_lossy().to_string();
 
             let mut lines = vec![
                 format!("Folder: {}", path),
-                format!("Memories: {}", signals),
-                format!("Embeddings: {}/{} cached", embeddings, signals),
+                format!("Memories: {}", memories),
+                format!("Searchable by meaning: {} of {}", embeddings, memories),
             ];
-            if embeddings < signals {
-                lines.push("Run 'geniuz backfill' to cache remaining.".to_string());
-            } else if signals > 0 {
-                lines.push("Semantic search: ready".to_string());
+            if embeddings < memories {
+                lines.push("Run 'geniuz backfill' to make the rest searchable by meaning.".to_string());
+            } else if memories > 0 {
+                lines.push("Search by meaning: ready".to_string());
             }
             Ok(lines.join("\n"))
         }
@@ -994,7 +1011,7 @@ fn run(cli: Cli) -> Result<String, String> {
             use geniuz::settings::Settings;
             match settings_cmd {
                 SettingsCommand::List { json } => {
-                    let s = Settings::load();
+                    let s = Settings::load_strict()?;
                     if json {
                         serde_json::to_string_pretty(&s).map_err(|e| format!("serialize: {}", e))
                     } else {
@@ -1002,10 +1019,10 @@ fn run(cli: Cli) -> Result<String, String> {
                     }
                 }
                 SettingsCommand::Get { key } => {
-                    Settings::load().get(&key)
+                    Settings::load_strict()?.get(&key)
                 }
                 SettingsCommand::Set { key, value } => {
-                    let mut s = Settings::load();
+                    let mut s = Settings::load_strict()?;
                     let stored = s.set(&key, &value)?;
                     s.save()?;
                     Ok(format!("{} = {}", key, stored))
@@ -1023,7 +1040,7 @@ mod watch_exec_tests {
     use super::watch_exec_command;
 
     fn run(template: &str, gist: &str, content: &str) -> (String, bool) {
-        let e = geniuz::db::SignalEntry {
+        let e = geniuz::db::MemoryEntry {
             memory_uuid: "ABCDEF12-0000-0000-0000-000000000000".into(),
             gist: gist.into(),
             created_at: "2026-11-02 00:00:00".into(),

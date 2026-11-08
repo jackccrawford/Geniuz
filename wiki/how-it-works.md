@@ -30,10 +30,22 @@ A folder's UUID is permanent, and so is the UUID of every memory in it, and addr
 
 `folder archive` moves a folder into `archive/` beside itself, one level below where Geniuz reads. Nothing is deleted, and `folder restore` puts it back.
 
+## An agent's own folder
+
+An AI agent that works with you across many sessions gets a folder of its own: its home. It is where the agent keeps what only it needs to carry forward: what it decided and why, what it was in the middle of, a letter to the next session that picks up its work. A new session reads it first and starts where the last one stopped, not from zero.
+
+An agent's home is an ordinary folder. What makes it the agent's is where it lives and how the agent finds it:
+
+- **It is listed under Agents.** A folder that sits in a directory named `agents` shows in the dashboard's sidebar under **Agents**, and the rest under **Shared**, so each agent's home is easy to tell from the folders agents share. Find can search either group, or both.
+- **The agent finds it without being told.** A `.geniuz-folder` file in the agent's working directory names its folder, so everything the agent keeps from there goes home unless it names another folder. An agent in an app without a working directory names its folder on every call instead.
+- **It isn't the only folder the agent uses.** Work shared with people or with other agents goes in a shared folder: a project, a team's room, a knowledge base. The agent keeps there what others need, and keeps in its home what only it needs.
+
+Agents point at each other's memories by address, such as `13625F6B:3487B9B0`, so a note in a shared folder can lead straight to the reasoning in someone's home, and the other way round.
+
 ## When you keep
 
 1. The command reads your text, which can be inline, from a file (`-c @notes.md`) or piped in (`-c -`).
-2. [`signal_with_backend`](../src/db.rs) refuses empty content and creates an ID. If you named a parent, it looks it up. An unknown parent does not stop the write: the memory is saved as the start of a new thread.
+2. [`keep_with_backend`](../src/db.rs) refuses empty content and creates an ID. If you named a parent, it looks it up in the same folder. A parent it can't find, or one in another folder, is refused with the reason: a reply never quietly becomes a new thread.
 3. The text is turned into an embedding, a list of numbers that represents its meaning. Geniuz asks the small background helper first, then falls back to loading the model itself.
 4. If embedding fails, the memory is still saved and can be found by keyword until it is embedded later.
 5. The memory and its embedding are written in one transaction.
@@ -58,9 +70,9 @@ Other kinds of recall skip meaning entirely:
 | Flag | What it does |
 |---|---|
 | `--grep Cubic --grep PR` | Memories holding every term, showing each line with any of them |
-| `--thread 98672A90` | A whole thread, starting at its root |
 | `--keyword "exact words"` | Keyword search |
 | `--random` | Something you may have forgotten |
+| `--thread 98672A90` | A whole thread, starting at its root |
 
 Two more forms reach across folders. `recall --all "topic"` searches every folder and shows each result with its address. `recall 13625F6B:3487B9B0` opens that memory in full, whichever folder it is in. In the dashboard, Find can search any selection of folders, and an address in a memory's text can be clicked.
 

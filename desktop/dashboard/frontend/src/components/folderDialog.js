@@ -1,5 +1,5 @@
 // folderDialog.js — making and editing a folder. The prompt comes from how
-// people really described their stations: what's here, what must not go here,
+// people really described their folders: what's here, what must not go here,
 // how to read it, when it ends.
 
 import * as api from '../api.js';

@@ -499,10 +499,14 @@ function scopePicker({ allFolders, getChosen, setChosen, onScreen }) {
       return;
     }
     const picked = [...getChosen()].map((id) => byId.get(id)).filter(Boolean);
-    for (const f of picked.slice(0, 3)) {
+    picked.slice(0, 3).forEach((f, i) => {
       const chip = document.createElement('span');
       chip.className = 'find-scope__chip';
-      chip.textContent = f.name;
+      const chipName = document.createElement('span');
+      chipName.className = 'find-scope__chip-name';
+      chipName.textContent = f.name;
+      chip.title = f.name;
+      chip.appendChild(chipName);
       if (picked.length > 1) {
         const x = document.createElement('button');
         x.type = 'button';
@@ -514,11 +518,15 @@ function scopePicker({ allFolders, getChosen, setChosen, onScreen }) {
           next.delete(f.uuid);
           if (next.size) setChosen(next);
           paint();
+          // The chip is gone: focus the remove button that took its place, else the
+          // one before it, else the folder picker.
+          const left = summary.querySelectorAll('.find-scope__remove');
+          (left[i] || left[left.length - 1] || trigger).focus();
         });
         chip.appendChild(x);
       }
       summary.appendChild(chip);
-    }
+    });
     if (picked.length > 3) {
       const more = document.createElement('button');
       more.type = 'button';
@@ -583,7 +591,8 @@ function scopePicker({ allFolders, getChosen, setChosen, onScreen }) {
 
   filter.addEventListener('input', () => {
     const q = filter.value.trim().toLowerCase();
-    for (const { r, id } of rows) r.hidden = !!q && (!id || !r.dataset.name.includes(q));
+    // "All folders" (no id) stays: choosing everything shouldn't need the filter cleared.
+    for (const { r, id } of rows) r.hidden = !!q && !!id && !r.dataset.name.includes(q);
     for (const { h, fs } of heads) h.hidden = !!q && !fs.some((f) => f.name.toLowerCase().includes(q));
   });
 

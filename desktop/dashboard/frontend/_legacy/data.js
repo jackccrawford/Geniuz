@@ -312,7 +312,7 @@ window.GENIUZ_READY = (async function () {
   try {
     const { invoke } = window.__TAURI__.core;
     const [stats, recent, activity] = await Promise.all([
-      invoke('get_station_stats'),
+      invoke('get_folder_stats'),
       invoke('get_recent_memories', { limit: 24 }),
       invoke('get_activity', { days: 14 }),
     ]);

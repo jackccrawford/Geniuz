@@ -212,11 +212,19 @@ impl EmbeddingBackend for OllamaBackend {
 // Backend selection + search
 // =============================================================================
 
+/// `scheme://host:port` of an address, without any user, password, path or query.
+fn host_of(url: &str) -> String {
+    let (scheme, rest) = url.split_once("://").unwrap_or(("", url));
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    if scheme.is_empty() { host.to_string() } else { format!("{}://{}", scheme, host) }
+}
+
 pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
     match BuiltinBackend::new() {
         Ok(b) => Ok(Box::new(b)),
         Err(e) => {
-            eprintln!("[geniuz] ONNX failed ({}), falling back to ollama", e);
+            eprintln!("[geniuz] The built-in search model couldn't load ({}); trying Ollama.", e);
             let backend = OllamaBackend::new();
             // Verify ollama is reachable before claiming ready
             let agent = ureq::Agent::config_builder()
@@ -231,9 +239,20 @@ pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
                 .replace("/api/tagsdings", "/api/tags"); // fix over-replace on legacy URL
             match agent.get(&tags_url).call() {
                 Ok(_) => Ok(Box::new(backend)),
-                Err(_) => Err("Neither built-in ONNX nor Ollama available for embeddings".to_string()),
+                // Only the host is named: the configured address may carry a password
+                // or token, and this message can end up in logs.
+                Err(_) => Err(format!("Search by meaning is unavailable: Ollama didn't answer at {}", host_of(&tags_url))),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod host_tests {
+    #[test]
+    fn an_address_is_named_by_its_host_only() {
+        assert_eq!(super::host_of("http://user:secret@gpu.lan:11434/api/tags?token=x"), "http://gpu.lan:11434");
+        assert_eq!(super::host_of("http://localhost:11434/api/tags"), "http://localhost:11434");
     }
 }
 
@@ -256,7 +275,7 @@ pub struct CachedEmbedding {
     pub embedding: Vec<f32>,
 }
 
-pub struct ScoredSignal {
+pub struct ScoredMemory {
     pub memory_uuid: String,
     pub gist: String,
     pub created_at: String,
@@ -265,7 +284,7 @@ pub struct ScoredSignal {
 
 pub fn semantic_search_cached(
     query: &str, cached: Vec<CachedEmbedding>, limit: usize,
-) -> Result<Vec<ScoredSignal>, String> {
+) -> Result<Vec<ScoredMemory>, String> {
     let backend = create_backend()?;
     let query_embedding = backend.embed(query)?;
     Ok(rank_cached(&query_embedding, cached, limit))
@@ -274,10 +293,10 @@ pub fn semantic_search_cached(
 /// Rank cached embeddings against an already-embedded query, best first.
 pub fn rank_cached(
     query_embedding: &[f32], cached: Vec<CachedEmbedding>, limit: usize,
-) -> Vec<ScoredSignal> {
-    let mut scored: Vec<ScoredSignal> = cached.into_iter().map(|c| {
+) -> Vec<ScoredMemory> {
+    let mut scored: Vec<ScoredMemory> = cached.into_iter().map(|c| {
         let score = cosine_similarity(query_embedding, &c.embedding);
-        ScoredSignal { memory_uuid: c.memory_uuid, gist: c.gist, created_at: c.created_at, score }
+        ScoredMemory { memory_uuid: c.memory_uuid, gist: c.gist, created_at: c.created_at, score }
     }).collect();
     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(limit);

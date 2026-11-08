@@ -1,4 +1,5 @@
-//! Database layer — signals, embedding cache, search
+//! The store: memories, their embeddings, and every kind of search. One SQLite
+//! file per folder; see schema/schema.sql.
 
 use rusqlite::{Connection, OptionalExtension};
 use std::path::Path;
@@ -16,26 +17,48 @@ fn escape_like(term: &str) -> String {
     term.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
 }
 
-/// How many unembedded keyword hits to seat on a page of semantic results:
-/// every free slot, or half the page when none are free, capped by how many
-/// actually matched.
+/// How many memories found by keyword, but not yet embedded, get a place on a
+/// page of results by meaning: every free slot, or half the page when fewer than
+/// half are free, never more than matched.
 ///
-/// Pulled out as a pure function on purpose. `semantic_search` builds a real
-/// ONNX/Ollama backend internally, so it cannot be unit-tested, and the first
-/// version of this fix was wrong in exactly the arithmetic — it only looked
-/// for unembedded memories when semantic left slots free, which on a
-/// populated station is never. A test on the helper it calls passed anyway,
-/// because the helper was never the part that was broken. Keeping the
-/// decision testable is the point.
+/// A pure function so the arithmetic can be tested: `semantic_search` loads a
+/// real embedding model, so it can't be. Asking for unembedded memories only
+/// when slots are free would never ask in a full folder, so half the page is
+/// held for them.
 fn unembedded_share(limit: usize, semantic_hits: usize, unembedded_hits: usize) -> usize {
     let free = limit.saturating_sub(semantic_hits);
     free.max(limit / 2).min(unembedded_hits)
 }
 
-/// Products whose stores Geniuz wrote, under its names over time.
+/// The names Geniuz has written into a store's `product` field over time.
 pub const OWN_PRODUCTS: [&str; 3] = ["geniuz", "clawmark", "relay-for-claw"];
 
-/// Opening a store migrates it, so a store written by another product must be
+/// Where a file from before Geniuz 4.0 can be brought forward.
+pub const MIGRATION_SCRIPT: &str = "schema/migrate-before-4.0.sql";
+
+/// A file from before Geniuz 4.0 (a `signals` table, or a `signal_uuid` column) is
+/// refused with the way forward, not converted in place.
+fn check_format(conn: &Connection, db_path: &str) -> Result<(), String> {
+    // A read that fails is a refusal too: an old store must never open as an empty one.
+    let has = |sql: &str| -> Result<bool, String> {
+        conn.query_row(sql, [], |_| Ok(()))
+            .optional()
+            .map(|found| found.is_some())
+            .map_err(|e| format!("Couldn't read {}: {}", db_path, e))
+    };
+    let old = has("SELECT 1 FROM sqlite_master WHERE type='table' AND name='signals'")?
+        || has("SELECT 1 FROM pragma_table_info('memories') WHERE name='signal_uuid'")?;
+    if old {
+        return Err(format!(
+            "{} is from a Geniuz before 4.0, which this version doesn't open. To bring it forward, \
+             back it up and run {} on it (it has the steps), from the Geniuz repository.",
+            db_path, MIGRATION_SCRIPT
+        ));
+    }
+    Ok(())
+}
+
+/// Opening a store updates its schema, so a store another product wrote is
 /// refused before anything touches it. A file with no `_meta` is new or empty.
 fn check_product(conn: &Connection, db_path: &str) -> Result<(), String> {
     let product: Option<String> = conn
@@ -75,10 +98,14 @@ impl DatabaseManager {
 
     fn prepare(conn: Connection, db_path: &str) -> Result<Self, String> {
         check_product(&conn, db_path)?;
-        conn.execute_batch("PRAGMA journal_mode=WAL;")
-            .map_err(|e| format!("Failed to enable WAL: {}", e))?;
+        // Files from before Geniuz 4.0 keep memories in a `signals` table. Geniuz
+        // doesn't convert them on open: a script does that, run on purpose, with a
+        // backup first. Refused here before anything writes to the file.
         conn.busy_timeout(std::time::Duration::from_secs(30))
             .map_err(|e| format!("Failed to set timeout: {}", e))?;
+        check_format(&conn, db_path)?;
+        conn.execute_batch("PRAGMA journal_mode=WAL;")
+            .map_err(|e| format!("Failed to enable WAL: {}", e))?;
 
         // Check for existing schema
         let has_memories: bool = conn.query_row(
@@ -86,29 +113,8 @@ impl DatabaseManager {
             [], |_| Ok(true),
         ).unwrap_or(false);
 
-        let has_legacy: bool = conn.query_row(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='signals'",
-            [], |_| Ok(true),
-        ).unwrap_or(false);
-
-        if has_legacy && !has_memories {
-            // Migrate old schema: signals → memories, signal_uuid → memory_uuid
-            conn.execute_batch("
-                ALTER TABLE signals RENAME TO memories;
-                ALTER TABLE memories RENAME COLUMN signal_uuid TO memory_uuid;
-                ALTER TABLE signal_embeddings RENAME TO memory_embeddings;
-                ALTER TABLE memory_embeddings RENAME COLUMN signal_uuid TO memory_uuid;
-                DROP VIEW IF EXISTS signal_chains;
-                DROP TRIGGER IF EXISTS prevent_signal_delete;
-                DROP TRIGGER IF EXISTS prevent_signal_update;
-            ").map_err(|e| format!("Failed to migrate schema: {}", e))?;
-            // Recreate views and triggers with new names
-            let schema = include_str!("../schema/schema.sql");
-            conn.execute_batch(schema)
-                .map_err(|e| format!("Failed to apply schema after migration: {}", e))?;
-            eprintln!("[geniuz] Migrated legacy schema (signals → memories)");
-        } else if !has_memories {
-            // Fresh database — create from scratch
+        if !has_memories {
+            // Fresh database: create from scratch
             let schema = include_str!("../schema/schema.sql");
             conn.execute_batch(schema)
                 .map_err(|e| format!("Failed to init schema: {}", e))?;
@@ -146,24 +152,24 @@ impl DatabaseManager {
     }
 
     // =========================================================================
-    // SIGNAL (write)
+    // KEEP (write)
     // =========================================================================
 
-    /// Insert a signal with optional gist and parent. Returns short UUID.
+    /// Keep a memory, with an optional gist and parent. Returns its short UUID.
     /// Embeds content inline if no backend is provided (creates one per call).
-    pub fn signal(
+    pub fn keep(
         &self, content: &str, gist: Option<&str>, parent: Option<&str>,
         created_at: Option<&str>,
-    ) -> Result<SignalResult, String> {
-        self.signal_with_backend(content, gist, parent, created_at, None)
+    ) -> Result<KeepResult, String> {
+        self.keep_with_backend(content, gist, parent, created_at, None)
     }
 
-    /// Insert a signal, optionally reusing a pre-created embedding backend.
-    pub fn signal_with_backend(
+    /// Keep a memory, optionally reusing an embedding backend already loaded.
+    pub fn keep_with_backend(
         &self, content: &str, gist: Option<&str>, parent: Option<&str>,
         created_at: Option<&str>,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,
-    ) -> Result<SignalResult, String> {
+    ) -> Result<KeepResult, String> {
         if content.trim().is_empty() {
             return Err("Content cannot be empty".to_string());
         }
@@ -199,11 +205,10 @@ impl DatabaseManager {
         let payload_str = serde_json::to_string(&payload)
             .map_err(|e| format!("Failed to serialize: {}", e))?;
 
-        // A reply goes under a memory in this same folder, or not at all. This
-        // used to fall back to starting a new thread, which quietly dropped the
-        // link an agent asked for (6 Nov: a keep threaded to a memory in another
-        // folder saved without error and stood alone). A full address is
-        // accepted, and one naming another folder is refused with the reason.
+        // A reply goes under a memory in this same folder, or not at all: falling
+        // back to a new thread would quietly drop the link that was asked for. A
+        // full address is accepted, and one naming another folder is refused with
+        // the reason.
         let parent_uuid = if let Some(p) = parent {
             let p = p.trim();
             let (folder_part, memory_part) = match p.split_once(':') {
@@ -251,8 +256,9 @@ impl DatabaseManager {
         // because ONNX and Ollama are both down.
         //
         // Chain: ONNX → Ollama → keyword-only (soft fail).
-        // When both embedding backends are unavailable, we log to stderr and
-        // proceed with memory-without-embedding. The memory lands in the
+        // When both embedding backends are unavailable, the memory is kept
+        // without an embedding (KeepResult.embedded is false, and the caller says
+        // so). The memory lands in the
         // memories table; no embedding row is created for it. Keyword search
         // (geniuz recall --keyword) still finds it. Semantic search does not
         // until someone runs `geniuz backfill` with a working backend.
@@ -262,12 +268,8 @@ impl DatabaseManager {
             crate::embedding::embed_content(content).ok()
         };
 
-        if embedding.is_none() {
-            eprintln!(
-                "[geniuz] Embedding unavailable — memory {} saved with keyword search only. Run 'geniuz backfill' later to add semantic search.",
-                &uuid[..8]
-            );
-        }
+        // No notice here: the CLI's "Kept" line and the MCP's reply both say a memory
+        // was kept without an embedding, and how to fix it.
 
         // Insert memory + (optional) embedding atomically in one transaction
         let conn = self.conn()?;
@@ -293,21 +295,21 @@ impl DatabaseManager {
         }
         tx.commit().map_err(|e| format!("Failed to commit: {}", e))?;
 
-        Ok(SignalResult { uuid: uuid[..8].to_string(), embedded: embedding.is_some() })
+        Ok(KeepResult { uuid: uuid[..8].to_string(), embedded: embedding.is_some() })
     }
 
     // =========================================================================
     // TUNE (read)
     // =========================================================================
 
-    pub fn recent(&self, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    pub fn recent(&self, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         self.recent_in(&Window::all(), limit)
     }
 
     /// One page of the whole folder, newest first or oldest first, `offset` memories in.
     /// The dashboard reads a folder this way so a large one (thousands of memories) is all
     /// reachable, and "oldest first" starts at the oldest, not at the newest page reversed.
-    pub fn page(&self, oldest_first: bool, offset: usize, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    pub fn page(&self, oldest_first: bool, offset: usize, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         let dir = if oldest_first { "ASC" } else { "DESC" };
         let conn = self.conn()?;
         let mut stmt = conn.prepare(&format!(
@@ -320,7 +322,7 @@ impl DatabaseManager {
             let uuid: String = row.get(0)?;
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
-            Ok(SignalEntry {
+            Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
             })
@@ -329,7 +331,7 @@ impl DatabaseManager {
     }
 
     /// The newest memories inside `window`, newest first.
-    pub fn recent_in(&self, window: &Window, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    pub fn recent_in(&self, window: &Window, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         let (cond, wparams) = window.sql("created_at", 2);
         let conn = self.conn()?;
         let mut stmt = conn.prepare(&format!(
@@ -345,7 +347,7 @@ impl DatabaseManager {
             let uuid: String = row.get(0)?;
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
-            Ok(SignalEntry {
+            Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
             })
@@ -354,8 +356,8 @@ impl DatabaseManager {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
-    /// Get signals created after a given timestamp, ordered oldest first.
-    pub fn since(&self, timestamp: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    /// Memories created after a given time, oldest first.
+    pub fn since(&self, timestamp: &str, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT memory_uuid,
@@ -368,7 +370,7 @@ impl DatabaseManager {
             let uuid: String = row.get(0)?;
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
-            Ok(SignalEntry {
+            Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: row.get(4)?, score: None,
             })
@@ -424,7 +426,7 @@ impl DatabaseManager {
 
     /// Memories written after a position, in the order they were written, each with
     /// its own position.
-    pub fn after(&self, pos: &(String, i64), limit: usize) -> Result<Vec<((String, i64), SignalEntry)>, String> {
+    pub fn after(&self, pos: &(String, i64), limit: usize) -> Result<Vec<((String, i64), MemoryEntry)>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT memory_uuid,
@@ -439,7 +441,7 @@ impl DatabaseManager {
             let parent: Option<String> = row.get(3)?;
             let created_at: String = row.get(2)?;
             let rowid: i64 = row.get(5)?;
-            Ok(((created_at.clone(), rowid), SignalEntry {
+            Ok(((created_at.clone(), rowid), MemoryEntry {
                 memory_uuid: uuid.clone(), gist: row.get(1)?, created_at,
                 parent_uuid: parent.filter(|p| p != &uuid), content: row.get(4)?, score: None,
             }))
@@ -448,12 +450,12 @@ impl DatabaseManager {
     }
 
     /// Direct retrieval by UUID prefix (e.g. 8-char display form) or full 36-char UUID.
-    /// Returns the matching SignalEntry, or None if no memory matches. Case-insensitive
+    /// Returns the matching MemoryEntry, or None if no memory matches. Case-insensitive
     /// on the input; memories store UUIDs uppercase. Used by `recall` to short-circuit
     /// UUID-shaped queries before falling through to semantic search — a UUID-shaped
     /// query has no useful semantic content to embed, so treating it as a lookup key
     /// is the honest thing to do.
-    pub fn get_by_uuid_prefix(&self, prefix: &str) -> Result<Option<SignalEntry>, String> {
+    pub fn get_by_uuid_prefix(&self, prefix: &str) -> Result<Option<MemoryEntry>, String> {
         let conn = self.conn()?;
         let pattern = format!("{}%", prefix.to_uppercase());
         let mut stmt = conn.prepare(
@@ -469,7 +471,7 @@ impl DatabaseManager {
             let uuid: String = row.get(0).map_err(|e| e.to_string())?;
             let parent: Option<String> = row.get(3).map_err(|e| e.to_string())?;
             let display_parent = parent.filter(|p| p != &uuid);
-            Ok(Some(SignalEntry {
+            Ok(Some(MemoryEntry {
                 memory_uuid: uuid,
                 gist: row.get(1).map_err(|e| e.to_string())?,
                 created_at: row.get(2).map_err(|e| e.to_string())?,
@@ -482,8 +484,8 @@ impl DatabaseManager {
         }
     }
 
-    /// Get the created_at timestamp of a signal by UUID prefix.
-    pub fn get_signal_timestamp(&self, uuid_prefix: &str) -> Result<Option<String>, String> {
+    /// When a memory was kept, by UUID prefix.
+    pub fn memory_timestamp(&self, uuid_prefix: &str) -> Result<Option<String>, String> {
         let conn = self.conn()?;
         conn.query_row(
             "SELECT created_at FROM memories WHERE memory_uuid LIKE ?1 LIMIT 1",
@@ -492,12 +494,12 @@ impl DatabaseManager {
         ).optional().map_err(|e| format!("Query failed: {}", e))
     }
 
-    pub fn keyword_search(&self, query: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    pub fn keyword_search(&self, query: &str, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         self.keyword_search_in(query, &Window::all(), limit)
     }
 
     /// Keyword search inside `window`, newest first.
-    pub fn keyword_search_in(&self, query: &str, window: &Window, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    pub fn keyword_search_in(&self, query: &str, window: &Window, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         let terms: Vec<&str> = query.split_whitespace().collect();
         if terms.is_empty() { return self.recent_in(window, limit); }
 
@@ -533,7 +535,7 @@ impl DatabaseManager {
             let uuid: String = row.get(0)?;
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
-            Ok(SignalEntry {
+            Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
             })
@@ -542,14 +544,14 @@ impl DatabaseManager {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
-    pub fn semantic_search(&self, query: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    pub fn semantic_search(&self, query: &str, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         self.semantic_search_in(query, &Window::all(), limit)
     }
 
     /// Semantic search inside `window`. The cache is narrowed to the window
     /// BEFORE ranking: ranking all of time and filtering after would hand back
     /// the top `limit` of all time, of which a recent window usually holds none.
-    pub fn semantic_search_in(&self, query: &str, window: &Window, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    pub fn semantic_search_in(&self, query: &str, window: &Window, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         self.semantic_search_with(query, window, limit, None)
     }
 
@@ -559,7 +561,7 @@ impl DatabaseManager {
     pub fn semantic_search_with(
         &self, query: &str, window: &Window, limit: usize,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,
-    ) -> Result<Vec<SignalEntry>, String> {
+    ) -> Result<Vec<MemoryEntry>, String> {
         let cached = self.get_cached_embeddings()?;
         if cached.is_empty() {
             eprintln!("[geniuz] No embedding cache. Run: geniuz backfill");
@@ -583,8 +585,8 @@ impl DatabaseManager {
         let scores: std::collections::HashMap<String, f32> =
             ranked.iter().map(|r| (r.memory_uuid.clone(), r.score)).collect();
         ranked.truncate(limit);
-        let mut results: Vec<SignalEntry> = ranked
-            .into_iter().map(|r| SignalEntry {
+        let mut results: Vec<MemoryEntry> = ranked
+            .into_iter().map(|r| MemoryEntry {
                 memory_uuid: r.memory_uuid, gist: r.gist, created_at: r.created_at,
                 parent_uuid: None, content: None, score: Some(r.score),
             }).collect();
@@ -613,9 +615,9 @@ impl DatabaseManager {
         //
         // Look every time, not only when semantic left slots free. Ranking is
         // unthresholded, so semantic returns exactly min(cached_count, limit) —
-        // meaning on any station holding more embedded memories than `limit`,
+        // meaning in any folder holding more embedded memories than `limit`,
         // a "fill the leftovers" gate never fires at all. That populated
-        // station is precisely the case this exists to protect.
+        // folder is precisely the case this exists to protect.
         //
         // Unembedded memories are invisible to the ranker rather than ranked
         // low, so there is no honest way to score them against cosine hits.
@@ -647,7 +649,7 @@ impl DatabaseManager {
                     .then(b.score.unwrap_or(-1.0).partial_cmp(&a.score.unwrap_or(-1.0)).unwrap_or(std::cmp::Ordering::Equal))
                     .then(b.created_at.cmp(&a.created_at))
             });
-            let mut merged: Vec<SignalEntry> = named.into_iter().map(|(e, _)| e).take(limit).collect();
+            let mut merged: Vec<MemoryEntry> = named.into_iter().map(|(e, _)| e).take(limit).collect();
             for e in results {
                 if merged.len() >= limit { break; }
                 if !merged.iter().any(|m| m.memory_uuid == e.memory_uuid) {
@@ -663,7 +665,7 @@ impl DatabaseManager {
     /// Memories inside `window` holding any of `names` verbatim (case kept),
     /// with how many they hold. SQL narrows on ASCII names (case-blind, so it
     /// over-includes); the verbatim check is made here.
-    fn name_hits(&self, names: &[String], window: &Window, limit: usize) -> Result<Vec<(SignalEntry, usize)>, String> {
+    fn name_hits(&self, names: &[String], window: &Window, limit: usize) -> Result<Vec<(MemoryEntry, usize)>, String> {
         let text = "(COALESCE(json_extract(payload, '$.gist'), '') || char(10) ||
                      COALESCE(json_extract(payload, '$.content'), ''))";
         let (wcond, wparams) = window.sql("created_at", 1);
@@ -697,7 +699,7 @@ impl DatabaseManager {
             let uuid: String = row.get(0).map_err(|e| e.to_string())?;
             let parent: Option<String> = row.get(3).map_err(|e| e.to_string())?;
             let display_parent = parent.filter(|p| p != &uuid);
-            out.push((SignalEntry {
+            out.push((MemoryEntry {
                 memory_uuid: uuid,
                 gist: row.get(1).map_err(|e| e.to_string())?,
                 created_at: row.get(2).map_err(|e| e.to_string())?,
@@ -714,7 +716,7 @@ impl DatabaseManager {
     /// Keyword search restricted to memories with no cached embedding — used
     /// by `semantic_search` to surface memories a backend outage left
     /// unembedded, so they degrade to keyword-findable rather than vanishing.
-    fn keyword_search_unembedded(&self, query: &str, window: &Window, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    fn keyword_search_unembedded(&self, query: &str, window: &Window, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         let terms: Vec<&str> = query.split_whitespace().collect();
         if terms.is_empty() { return Ok(Vec::new()); }
 
@@ -749,7 +751,7 @@ impl DatabaseManager {
             let uuid: String = row.get(0)?;
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
-            Ok(SignalEntry {
+            Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
             })
@@ -758,12 +760,12 @@ impl DatabaseManager {
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }
 
-    pub fn random(&self) -> Result<Option<SignalEntry>, String> {
+    pub fn random(&self) -> Result<Option<MemoryEntry>, String> {
         self.random_in(&Window::all())
     }
 
     /// One memory at random from inside `window`.
-    pub fn random_in(&self, window: &Window) -> Result<Option<SignalEntry>, String> {
+    pub fn random_in(&self, window: &Window) -> Result<Option<MemoryEntry>, String> {
         let (cond, wparams) = window.sql("created_at", 1);
         let conn = self.conn()?;
         let result = conn.query_row(
@@ -775,7 +777,7 @@ impl DatabaseManager {
                 let uuid: String = row.get(0)?;
                 let parent: Option<String> = row.get(3)?;
                 let display_parent = parent.filter(|p| p != &uuid);
-                Ok(SignalEntry {
+                Ok(MemoryEntry {
                     memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                     parent_uuid: display_parent, content: None, score: None,
                 })
@@ -794,7 +796,7 @@ impl DatabaseManager {
 
     /// What these results point onward to (search feature 4), read from the
     /// returned memories' gist and full content only.
-    pub fn harvest(&self, entries: &[SignalEntry], query: &str) -> crate::dig::Harvest {
+    pub fn harvest(&self, entries: &[MemoryEntry], query: &str) -> crate::dig::Harvest {
         let texts: Vec<String> = entries.iter().map(|e| {
             let body = e.content.clone()
                 .or_else(|| self.get_full_content(&e.memory_uuid).ok().flatten())
@@ -884,7 +886,7 @@ impl DatabaseManager {
     /// All memories in the same thread as `uuid`, ordered oldest-first.
     /// A thread is the recursive ancestor chain plus all descendants —
     /// every memory sharing the same root via parent_uuid.
-    pub fn thread_for(&self, uuid: &str, limit: usize) -> Result<Vec<SignalEntry>, String> {
+    pub fn thread_for(&self, uuid: &str, limit: usize) -> Result<Vec<MemoryEntry>, String> {
         let resolved = self.resolve_uuid(uuid)?
             .ok_or_else(|| format!("Memory not found: {}", uuid))?;
         let conn = self.conn()?;
@@ -904,7 +906,7 @@ impl DatabaseManager {
              LIMIT ?2",
         ).map_err(|e| format!("Query failed: {}", e))?;
         let rows = stmt.query_map(rusqlite::params![resolved, limit], |row| {
-            Ok(SignalEntry {
+            Ok(MemoryEntry {
                 memory_uuid: row.get(0)?,
                 gist: row.get(1)?,
                 created_at: row.get(2)?,
@@ -958,7 +960,7 @@ impl DatabaseManager {
             let uuid: String = row.get(0)?;
             let parent: Option<String> = row.get(3)?;
             let display_parent = parent.filter(|p| p != &uuid);
-            Ok(SignalEntry {
+            Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
             })
@@ -1073,7 +1075,7 @@ impl DatabaseManager {
                 ).map_err(|e| format!("UUID resolve failed: {}", e))?;
                 let shown: Vec<String> = matches.iter().map(|u| u[..8].to_string()).collect();
                 Err(format!(
-                    "Ambiguous UUID prefix '{}' matches {} memories ({}{}) — use more characters",
+                    "Ambiguous UUID prefix '{}' matches {} memories ({}{}). Use more characters",
                     partial, total, shown.join(", "),
                     if total as usize > shown.len() { ", ..." } else { "" }
                 ))
@@ -1099,7 +1101,8 @@ impl DatabaseManager {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
             "SELECT e.memory_uuid,
-                    COALESCE(json_extract(s.payload, '$.gist'), substr(json_extract(s.payload, '$.content'), 1, 120)),
+                    COALESCE(json_extract(s.payload, '$.gist'), substr(json_extract(s.payload, '$.content'), 1, 120),
+                             substr(s.payload, 1, 120), ''),
                     s.created_at, e.embedding
              FROM memory_embeddings e
              JOIN memories s ON s.memory_uuid = e.memory_uuid"
@@ -1125,14 +1128,19 @@ impl DatabaseManager {
             .map_err(|e| e.to_string())
     }
 
-    pub fn get_uncached_signals(&self) -> Result<Vec<(String, String)>, String> {
+    pub fn unembedded_memories(&self) -> Result<Vec<(String, String)>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT s.memory_uuid, json_extract(s.payload, '$.content')
+            // What to embed: the content, else the gist, else the stored record itself.
+            // Older writers kept structured events with neither, and those must not be
+            // counted as unembedded forever while backfill passes them by.
+            "SELECT s.memory_uuid,
+                    COALESCE(NULLIF(json_extract(s.payload, '$.content'), ''),
+                             NULLIF(json_extract(s.payload, '$.gist'), ''),
+                             s.payload)
              FROM memories s
              LEFT JOIN memory_embeddings e ON e.memory_uuid = s.memory_uuid
-             WHERE json_extract(s.payload, '$.content') IS NOT NULL
-               AND e.memory_uuid IS NULL"
+             WHERE e.memory_uuid IS NULL"
         ).map_err(|e| format!("Query failed: {}", e))?;
 
         let rows = stmt.query_map([], |row| {
@@ -1178,11 +1186,11 @@ pub struct Thread {
     /// Memories in the thread inside the window — may exceed `entries.len()`.
     pub total: usize,
     /// Oldest first, at most the limit asked for.
-    pub entries: Vec<SignalEntry>,
+    pub entries: Vec<MemoryEntry>,
 }
 
 #[derive(Debug)]
-pub struct SignalResult {
+pub struct KeepResult {
     pub uuid: String,
     pub embedded: bool,
 }
@@ -1202,7 +1210,7 @@ impl DatabaseManager {
     }
 }
 
-pub struct SignalEntry {
+pub struct MemoryEntry {
     pub memory_uuid: String,
     pub gist: String,
     pub created_at: String,
@@ -1280,12 +1288,12 @@ mod tests {
     #[test]
     fn a_reply_to_a_memory_not_in_this_folder_is_refused_not_dropped() {
         let (db, _dir) = fresh_db();
-        let root = db.signal_with_backend("root", Some("root"), None, None, Some(&MockBackend)).unwrap().uuid;
+        let root = db.keep_with_backend("root", Some("root"), None, None, Some(&MockBackend)).unwrap().uuid;
         let conn = db.conn().unwrap();
         conn.execute_batch("CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT); \
             INSERT OR REPLACE INTO _meta VALUES ('folder_uuid', 'AFEA772B-E060-5D19-BEB9-925128692FAE');").unwrap();
         drop(conn);
-        let reply = |parent: &str| db.signal_with_backend("reply", Some("reply"), Some(parent), None, Some(&MockBackend));
+        let reply = |parent: &str| db.keep_with_backend("reply", Some("reply"), Some(parent), None, Some(&MockBackend));
 
         // Missing here, by prefix and by full ID.
         assert!(reply("6B3F7B38").unwrap_err().contains("No memory 6B3F7B38 in this folder"));
@@ -1304,10 +1312,10 @@ mod tests {
         }
     }
 
-    /// Shortcut: insert a signal with the mock backend and return its short UUID.
+    /// Shortcut: keep a memory with the mock backend and return its short UUID.
     fn insert(db: &DatabaseManager, content: &str, gist: Option<&str>, parent: Option<&str>) -> String {
-        db.signal_with_backend(content, gist, parent, None, Some(&MockBackend))
-            .expect("signal_with_backend")
+        db.keep_with_backend(content, gist, parent, None, Some(&MockBackend))
+            .expect("keep_with_backend")
             .uuid
     }
 
@@ -1344,7 +1352,7 @@ mod tests {
     }
 
     #[test]
-    fn signal_returns_eight_char_uppercase_uuid() {
+    fn keep_returns_eight_char_uppercase_uuid() {
         let (db, _dir) = fresh_db();
         let short = insert(&db, "first memory", Some("test gist"), None);
         assert_eq!(short.len(), 8, "short uuid is 8 chars");
@@ -1352,25 +1360,25 @@ mod tests {
     }
 
     #[test]
-    fn signal_rejects_empty_content() {
+    fn keep_rejects_empty_content() {
         let (db, _dir) = fresh_db();
         let err = db
-            .signal_with_backend("", Some("gist"), None, None, Some(&MockBackend))
+            .keep_with_backend("", Some("gist"), None, None, Some(&MockBackend))
             .expect_err("empty content should error");
         assert!(err.contains("empty"), "error mentions emptiness: {}", err);
     }
 
     #[test]
-    fn signal_rejects_whitespace_only_content() {
+    fn keep_rejects_whitespace_only_content() {
         let (db, _dir) = fresh_db();
         let err = db
-            .signal_with_backend("   \n\t  ", None, None, None, Some(&MockBackend))
+            .keep_with_backend("   \n\t  ", None, None, None, Some(&MockBackend))
             .expect_err("whitespace-only content should error");
         assert!(err.contains("empty"), "error mentions emptiness: {}", err);
     }
 
     #[test]
-    fn signal_auto_derives_gist_from_short_content() {
+    fn keep_auto_derives_gist_from_short_content() {
         let (db, _dir) = fresh_db();
         let short = insert(&db, "remembered something small", None, None);
         let entries = db.recent(10).unwrap();
@@ -1379,7 +1387,7 @@ mod tests {
     }
 
     #[test]
-    fn signal_truncates_auto_gist_for_long_content() {
+    fn keep_truncates_auto_gist_for_long_content() {
         let (db, _dir) = fresh_db();
         // 300-char content — auto-gist truncates at 197 + "..."
         let long = "x".repeat(300);
@@ -1391,7 +1399,7 @@ mod tests {
     }
 
     #[test]
-    fn signal_truncates_multibyte_content_without_panicking() {
+    fn keep_truncates_multibyte_content_without_panicking() {
         let (db, _dir) = fresh_db();
         // 250 multibyte chars (750 bytes) — byte-slicing at index 197 would land
         // mid-codepoint and panic. Char-based truncation must not.
@@ -1404,13 +1412,13 @@ mod tests {
     }
 
     #[test]
-    fn signal_reports_embedded_status_from_backend_outcome() {
+    fn keep_reports_embedded_status_from_backend_outcome() {
         let (db, _dir) = fresh_db();
-        let ok = db.signal_with_backend("embeds fine", None, None, None, Some(&MockBackend))
+        let ok = db.keep_with_backend("embeds fine", None, None, None, Some(&MockBackend))
             .unwrap();
         assert!(ok.embedded, "successful embed reports embedded = true");
 
-        let failed = db.signal_with_backend("embedding unavailable", None, None, None, Some(&FailingBackend))
+        let failed = db.keep_with_backend("embedding unavailable", None, None, None, Some(&FailingBackend))
             .unwrap();
         assert!(!failed.embedded, "failed embed still saves the memory but reports embedded = false");
         // The memory itself is still written, just without a cached embedding.
@@ -1421,9 +1429,9 @@ mod tests {
     #[test]
     fn keyword_search_unembedded_only_returns_memories_without_cached_embedding() {
         let (db, _dir) = fresh_db();
-        db.signal_with_backend("authentication flow embedded", None, None, None, Some(&MockBackend))
+        db.keep_with_backend("authentication flow embedded", None, None, None, Some(&MockBackend))
             .unwrap();
-        db.signal_with_backend("authentication flow unembedded", None, None, None, Some(&FailingBackend))
+        db.keep_with_backend("authentication flow unembedded", None, None, None, Some(&FailingBackend))
             .unwrap();
         let hits = db.keyword_search_unembedded("authentication", &Window::all(), 10).unwrap();
         assert_eq!(hits.len(), 1, "only the unembedded memory should surface here");
@@ -1432,7 +1440,7 @@ mod tests {
 
     #[test]
     fn unembedded_share_seats_hits_on_a_full_page_of_semantic_results() {
-        // The regression this guards: a populated station where semantic
+        // The regression this guards: a populated folder where semantic
         // ranking fills every slot. A "only if slots are free" rule yields 0
         // here, which leaves the unembedded memories exactly as invisible as
         // they were before the fix.
@@ -1443,7 +1451,7 @@ mod tests {
 
     #[test]
     fn unembedded_share_uses_free_slots_before_reserving() {
-        // Small or sparse station: semantic came back short, so unembedded
+        // Small or sparse folder: semantic came back short, so unembedded
         // hits take the leftovers rather than displacing anything.
         assert_eq!(unembedded_share(10, 4, 3), 3, "free slots absorb all matches");
         assert_eq!(unembedded_share(10, 0, 10), 10, "an empty page can fill entirely");
@@ -1453,10 +1461,10 @@ mod tests {
     #[test]
     fn unembedded_count_tracks_memories_the_backend_could_not_embed() {
         let (db, _dir) = fresh_db();
-        assert_eq!(db.unembedded_count().unwrap(), 0, "fresh station has nothing pending");
-        db.signal_with_backend("embeds fine", None, None, None, Some(&MockBackend)).unwrap();
+        assert_eq!(db.unembedded_count().unwrap(), 0, "a fresh folder has nothing pending");
+        db.keep_with_backend("embeds fine", None, None, None, Some(&MockBackend)).unwrap();
         assert_eq!(db.unembedded_count().unwrap(), 0, "a successful embed leaves nothing pending");
-        db.signal_with_backend("backend was down", None, None, None, Some(&FailingBackend)).unwrap();
+        db.keep_with_backend("backend was down", None, None, None, Some(&FailingBackend)).unwrap();
         assert_eq!(db.unembedded_count().unwrap(), 1, "a failed embed is reportable, not silent");
     }
 
@@ -1498,7 +1506,7 @@ mod tests {
 
         // Threading a new memory onto the ambiguous prefix must error, not
         // silently pick one candidate and corrupt the lineage.
-        let err = db.signal_with_backend("child", None, Some("AAAAAAAA"), None, Some(&MockBackend))
+        let err = db.keep_with_backend("child", None, Some("AAAAAAAA"), None, Some(&MockBackend))
             .expect_err("ambiguous prefix should error, not silently resolve");
         assert!(err.contains("Ambiguous"), "error mentions ambiguity: {}", err);
     }
@@ -1526,11 +1534,11 @@ mod tests {
     fn recent_returns_newest_first() {
         let (db, _dir) = fresh_db();
         // Use explicit timestamps so ordering is deterministic without sleeping.
-        db.signal_with_backend("oldest", Some("oldest"), None, Some("2026-01-01 00:00:00"), Some(&MockBackend))
+        db.keep_with_backend("oldest", Some("oldest"), None, Some("2026-01-01 00:00:00"), Some(&MockBackend))
             .unwrap();
-        db.signal_with_backend("middle", Some("middle"), None, Some("2026-02-01 00:00:00"), Some(&MockBackend))
+        db.keep_with_backend("middle", Some("middle"), None, Some("2026-02-01 00:00:00"), Some(&MockBackend))
             .unwrap();
-        db.signal_with_backend("newest", Some("newest"), None, Some("2026-03-01 00:00:00"), Some(&MockBackend))
+        db.keep_with_backend("newest", Some("newest"), None, Some("2026-03-01 00:00:00"), Some(&MockBackend))
             .unwrap();
         let entries = db.recent(10).unwrap();
         assert_eq!(entries.len(), 3);
@@ -1544,10 +1552,10 @@ mod tests {
         let (db, _dir) = fresh_db();
         for m in 1..=5 {
             let at = format!("2026-0{}-01 00:00:00", m);
-            db.signal_with_backend(&format!("m{m}"), Some(&format!("m{m}")), None, Some(&at), Some(&MockBackend))
+            db.keep_with_backend(&format!("m{m}"), Some(&format!("m{m}")), None, Some(&at), Some(&MockBackend))
                 .unwrap();
         }
-        let gists = |v: Vec<SignalEntry>| v.into_iter().map(|e| e.gist).collect::<Vec<_>>();
+        let gists = |v: Vec<MemoryEntry>| v.into_iter().map(|e| e.gist).collect::<Vec<_>>();
         // Oldest first starts at the oldest, not at the newest page reversed.
         assert_eq!(gists(db.page(true, 0, 2).unwrap()), ["m1", "m2"]);
         assert_eq!(gists(db.page(true, 2, 2).unwrap()), ["m3", "m4"]);
@@ -1561,23 +1569,23 @@ mod tests {
     fn a_time_in_any_other_shape_is_refused() {
         let (db, _dir) = fresh_db();
         for bad in ["2026-03-21T02:00:00", "2026-03-21T02:00:00Z", "2026-03-21", "2026-03-21 02:00", "21/03/2026 02:00:00"] {
-            let err = db.signal_with_backend("x", Some("x"), None, Some(bad), Some(&MockBackend)).unwrap_err();
+            let err = db.keep_with_backend("x", Some("x"), None, Some(bad), Some(&MockBackend)).unwrap_err();
             assert!(err.contains("YYYY-MM-DD HH:MM:SS"), "{bad}: {err}");
         }
-        assert!(db.signal_with_backend("x", Some("x"), None, Some("2026-03-21 02:00:00"), Some(&MockBackend)).is_ok());
+        assert!(db.keep_with_backend("x", Some("x"), None, Some("2026-03-21 02:00:00"), Some(&MockBackend)).is_ok());
     }
 
     #[test]
     fn watch_position_sees_every_memory_in_the_same_second() {
         let (db, _dir) = fresh_db();
         let at = Some("2026-03-21 12:00:00");
-        let first = db.signal_with_backend("a", Some("a"), None, at, Some(&MockBackend)).unwrap();
+        let first = db.keep_with_backend("a", Some("a"), None, at, Some(&MockBackend)).unwrap();
         for g in ["b", "c", "d"] {
-            db.signal_with_backend(g, Some(g), None, at, Some(&MockBackend)).unwrap();
+            db.keep_with_backend(g, Some(g), None, at, Some(&MockBackend)).unwrap();
         }
-        db.signal_with_backend("e", Some("e"), None, Some("2026-03-21 12:00:01"), Some(&MockBackend)).unwrap();
+        db.keep_with_backend("e", Some("e"), None, Some("2026-03-21 12:00:01"), Some(&MockBackend)).unwrap();
         let start = db.position_of(&first.uuid).unwrap().unwrap();
-        let gists = |v: Vec<((String, i64), SignalEntry)>| v.into_iter().map(|(_, e)| e.gist).collect::<Vec<_>>();
+        let gists = |v: Vec<((String, i64), MemoryEntry)>| v.into_iter().map(|(_, e)| e.gist).collect::<Vec<_>>();
         // After "a": the three in the same second, then the next second.
         assert_eq!(gists(db.after(&start, 10).unwrap()), ["b", "c", "d", "e"]);
         // A page boundary inside the second loses nothing.
@@ -1592,12 +1600,34 @@ mod tests {
     }
 
     #[test]
+    fn a_memory_with_no_content_is_still_offered_for_embedding() {
+        let (db, _dir) = fresh_db();
+        db.conn().unwrap().execute(
+            "INSERT INTO memories (memory_uuid, payload) VALUES ('AAAAAAAA-0000-4000-A000-000000000001', '{\"event\":\"breadcrumbs\",\"session_summary\":\"moved the docs\"}')",
+            [],
+        ).unwrap();
+        let uncached = db.unembedded_memories().unwrap();
+        assert_eq!(uncached.len(), 1);
+        assert!(uncached[0].1.contains("moved the docs"), "{:?}", uncached);
+        assert_eq!(db.unembedded_count().unwrap(), uncached.len(), "what is counted is what backfill embeds");
+
+        // Once embedded, search by meaning still works in the folder: a memory with no
+        // gist and no content must not break reading the cache.
+        let emb = crate::embedding::EmbeddingBackend::embed(&MockBackend, &uncached[0].1).unwrap();
+        db.cache_embedding(&uncached[0].0, &emb).unwrap();
+        let cached = db.get_cached_embeddings().unwrap();
+        assert_eq!(cached.len(), 1);
+        assert!(cached[0].gist.contains("breadcrumbs"), "{}", cached[0].gist);
+        assert!(db.semantic_search_with("docs", &Window::all(), 5, Some(&MockBackend)).is_ok());
+    }
+
+    #[test]
     fn watch_sees_a_memory_dated_before_the_cursor() {
         let (db, _dir) = fresh_db();
-        let first = db.signal_with_backend("now", Some("now"), None, Some("2026-11-08 09:00:00"), Some(&MockBackend)).unwrap();
+        let first = db.keep_with_backend("now", Some("now"), None, Some("2026-11-08 09:00:00"), Some(&MockBackend)).unwrap();
         let start = db.position_of(&first.uuid).unwrap().unwrap();
         // Kept afterwards, dated months earlier (keep --at, or copied in with its date).
-        db.signal_with_backend("old", Some("old"), None, Some("2026-03-21 00:00:00"), Some(&MockBackend)).unwrap();
+        db.keep_with_backend("old", Some("old"), None, Some("2026-03-21 00:00:00"), Some(&MockBackend)).unwrap();
         let after: Vec<String> = db.after(&start, 10).unwrap().into_iter().map(|(_, e)| e.gist).collect();
         assert_eq!(after, ["old"]);
         assert!(db.after(&db.last_position().unwrap().unwrap(), 10).unwrap().is_empty(), "the newest written is the end");
@@ -1641,7 +1671,7 @@ mod tests {
     }
 
     #[test]
-    fn signal_threads_to_parent_via_short_uuid() {
+    fn keep_threads_to_parent_via_short_uuid() {
         let (db, _dir) = fresh_db();
         let parent_short = insert(&db, "parent memory", Some("parent"), None);
         let _child_short = insert(&db, "child memory", Some("child"), Some(&parent_short));
@@ -1683,9 +1713,9 @@ mod tests {
     #[test]
     fn last_write_timestamp_reflects_most_recent_insert() {
         let (db, _dir) = fresh_db();
-        db.signal_with_backend("first", None, None, Some("2026-01-01 12:00:00"), Some(&MockBackend))
+        db.keep_with_backend("first", None, None, Some("2026-01-01 12:00:00"), Some(&MockBackend))
             .unwrap();
-        db.signal_with_backend("last", None, None, Some("2026-06-15 09:30:00"), Some(&MockBackend))
+        db.keep_with_backend("last", None, None, Some("2026-06-15 09:30:00"), Some(&MockBackend))
             .unwrap();
         let ts = db.last_write_timestamp().unwrap().expect("has timestamp");
         assert!(ts.starts_with("2026-06-15"), "got: {}", ts);
@@ -1710,11 +1740,11 @@ mod tests {
         let (db, dir) = fresh_db();
         for i in 0..30 {
             let ts = format!("2026-{:02}-{:02} 12:00:00", 2 + i / 6, 1 + (i % 6) * 4);
-            db.signal_with_backend(&format!("code review notes, round {i}"), Some(&format!("review round {i}")),
+            db.keep_with_backend(&format!("code review notes, round {i}"), Some(&format!("review round {i}")),
                 None, Some(&ts), Some(&ReviewAxis)).unwrap();
         }
         let recent = (chrono::Utc::now() - chrono::Duration::days(3)).format("%Y-%m-%d %H:%M:%S").to_string();
-        let r = db.signal_with_backend("Cubic reviewed the PR; third-party reviewer", Some("Cubic reviewed the PR"),
+        let r = db.keep_with_backend("Cubic reviewed the PR; third-party reviewer", Some("Cubic reviewed the PR"),
             None, Some(&recent), Some(&ReviewAxis)).unwrap();
         (db, dir, r.uuid)
     }
@@ -1750,7 +1780,7 @@ mod tests {
     fn branching_thread(db: &DatabaseManager) -> [String; 5] {
         let at = |m: u32| format!("2026-09-{:02} 12:00:00", m);
         let w = |c: &str, p: Option<&str>, t: &str| {
-            db.signal_with_backend(c, Some(c), p, Some(t), Some(&MockBackend)).unwrap().uuid
+            db.keep_with_backend(c, Some(c), p, Some(t), Some(&MockBackend)).unwrap().uuid
         };
         let root = w("root", None, &at(1));
         let a = w("branch a", Some(&root), &at(2));
@@ -1802,7 +1832,7 @@ mod tests {
                      'FFFFFFFF-0000-4000-8000-000000000000')",
             [orphan],
         ).unwrap();
-        let child = db.signal_with_backend("child", Some("child"), Some("0RPHAN00"),
+        let child = db.keep_with_backend("child", Some("child"), Some("0RPHAN00"),
             Some("2026-09-02 00:00:00"), Some(&MockBackend)).unwrap().uuid;
         let t = db.thread_in(&child, &Window::all(), 50).unwrap();
         assert_eq!(t.root, orphan);
@@ -1819,7 +1849,7 @@ mod tests {
     #[test]
     fn grep_finds_a_name_deep_in_a_body_inside_the_window() {
         let (db, _dir, cubic) = review_folder();
-        db.signal_with_backend("Weekly notes\nlots of other text\n\nIn the end Cubic signed off.",
+        db.keep_with_backend("Weekly notes\nlots of other text\n\nIn the end Cubic signed off.",
             Some("weekly notes"), None, Some("2026-03-01 00:00:00"), Some(&ReviewAxis)).unwrap();
         let terms = crate::dig::Terms::parse(&["cubic"]).unwrap();
         let all = db.grep_in(&terms, &Window::all(), None, 50).unwrap();
@@ -1851,12 +1881,12 @@ mod tests {
     fn a_proper_name_in_the_query_puts_its_memories_first() {
         let (db, _dir) = fresh_db();
         for i in 0..30 {
-            db.signal_with_backend(&format!("code review notes, round {i}"), Some(&format!("review {i}")),
+            db.keep_with_backend(&format!("code review notes, round {i}"), Some(&format!("review {i}")),
                 None, Some(&format!("2026-09-{:02} 12:00:00", 1 + i % 28)), Some(&LunchAxis)).unwrap();
         }
-        let cubic = db.signal_with_backend("Cubic and I had lunch", Some("lunch"), None,
+        let cubic = db.keep_with_backend("Cubic and I had lunch", Some("lunch"), None,
             Some("2026-06-01 12:00:00"), Some(&LunchAxis)).unwrap().uuid;
-        db.signal_with_backend("a cubic box for lunch", Some("box"), None,
+        db.keep_with_backend("a cubic box for lunch", Some("box"), None,
             Some("2026-06-02 12:00:00"), Some(&LunchAxis)).unwrap();
 
         let named = db.semantic_search_with("reviewers like Cubic", &Window::all(), 5, Some(&LunchAxis)).unwrap();
@@ -1879,12 +1909,12 @@ mod tests {
     fn count_since_days_filters_by_time_window() {
         let (db, _dir) = fresh_db();
         // Insert one very old, one recent.
-        db.signal_with_backend("old", None, None, Some("2020-01-01 00:00:00"), Some(&MockBackend))
+        db.keep_with_backend("old", None, None, Some("2020-01-01 00:00:00"), Some(&MockBackend))
             .unwrap();
         let recent_ts = chrono::Utc::now()
             .format("%Y-%m-%d %H:%M:%S")
             .to_string();
-        db.signal_with_backend("recent", None, None, Some(&recent_ts), Some(&MockBackend))
+        db.keep_with_backend("recent", None, None, Some(&recent_ts), Some(&MockBackend))
             .unwrap();
         // 30-day window catches only the recent.
         let n = db.count_since_days(30).unwrap();
@@ -1895,9 +1925,9 @@ mod tests {
     fn daily_activity_buckets_by_day() {
         let (db, _dir) = fresh_db();
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-        db.signal_with_backend("a", None, None, Some(&format!("{} 09:00:00", today)), Some(&MockBackend))
+        db.keep_with_backend("a", None, None, Some(&format!("{} 09:00:00", today)), Some(&MockBackend))
             .unwrap();
-        db.signal_with_backend("b", None, None, Some(&format!("{} 14:00:00", today)), Some(&MockBackend))
+        db.keep_with_backend("b", None, None, Some(&format!("{} 14:00:00", today)), Some(&MockBackend))
             .unwrap();
         let buckets = db.daily_activity(7).unwrap();
         let today_bucket = buckets.iter().find(|(d, _)| d == &today);
@@ -1967,11 +1997,11 @@ mod tests {
     }
 
     #[test]
-    fn since_returns_signals_after_timestamp() {
+    fn since_returns_memories_after_timestamp() {
         let (db, _dir) = fresh_db();
-        db.signal_with_backend("before", Some("before"), None, Some("2026-01-01 00:00:00"), Some(&MockBackend))
+        db.keep_with_backend("before", Some("before"), None, Some("2026-01-01 00:00:00"), Some(&MockBackend))
             .unwrap();
-        db.signal_with_backend("after", Some("after"), None, Some("2026-03-01 00:00:00"), Some(&MockBackend))
+        db.keep_with_backend("after", Some("after"), None, Some("2026-03-01 00:00:00"), Some(&MockBackend))
             .unwrap();
         let results = db.since("2026-02-01 00:00:00", 10).unwrap();
         assert_eq!(results.len(), 1);
@@ -1985,7 +2015,7 @@ mod tests {
     }
 
     #[test]
-    fn random_returns_some_when_signals_exist() {
+    fn random_returns_some_when_memories_exist() {
         let (db, _dir) = fresh_db();
         insert(&db, "only memory", None, None);
         let entry = db.random().unwrap().expect("entry");
@@ -2001,12 +2031,12 @@ mod tests {
     }
 
     #[test]
-    fn get_uncached_signals_returns_empty_when_all_cached() {
+    fn unembedded_memories_is_empty_when_all_cached() {
         let (db, _dir) = fresh_db();
         // Inserts with MockBackend cache embeddings, so no uncached.
         insert(&db, "memory one", None, None);
         insert(&db, "memory two", None, None);
-        let uncached = db.get_uncached_signals().unwrap();
+        let uncached = db.unembedded_memories().unwrap();
         assert_eq!(uncached.len(), 0);
     }
 }

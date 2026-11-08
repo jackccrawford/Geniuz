@@ -101,7 +101,7 @@ fn list(reg: &Registry, json: bool) -> Result<String, String> {
         let mut line = format!("{} {} | {} | {} · {}{}", mark, f.short_id(), f.name, memories(count), last, pin);
         let summary = clip(&f.description);
         if !summary.is_empty() {
-            line.push_str(&format!(" — {}", summary));
+            line.push_str(&format!(" · {}", summary));
         }
         lines.push(line);
     }
@@ -111,7 +111,20 @@ fn list(reg: &Registry, json: bool) -> Result<String, String> {
     for dir in &scan.pending_moves {
         lines.push(format!("? An unfinished move at {} is waiting for its original to be reachable.", dir.display()));
     }
-    for dir in &scan.unavailable {
+    if let Some(why) = &scan.first_folder_problem {
+        lines.push(format!("? {}", why));
+    }
+    for db in &scan.old_format {
+        lines.push(format!(
+            "? {} is from a Geniuz before 4.0 and isn't opened: back it up and run {} on it.",
+            db.display(),
+            geniuz::db::MIGRATION_SCRIPT
+        ));
+    }
+    // The data directory comes first in `unavailable` when the first folder failed;
+    // its reason is already said above.
+    let skip = usize::from(scan.first_folder_problem.is_some());
+    for dir in scan.unavailable.iter().skip(skip) {
         lines.push(format!("? Can't reach {} right now.", dir.display()));
     }
     Ok(lines.join("\n"))
@@ -130,7 +143,7 @@ fn list_archived(reg: &Registry, json: bool) -> Result<String, String> {
         .iter()
         .map(|f| {
             let (count, _) = f.stats().unwrap_or((0, None));
-            format!("{} | {} | {} — {}", f.short_id(), f.name, memories(count), clip(&f.description))
+            format!("{} | {} | {} · {}", f.short_id(), f.name, memories(count), clip(&f.description))
         })
         .collect();
     Ok(lines.join("\n"))
@@ -156,6 +169,8 @@ fn list_json(reg: &Registry, scan: &Scan, using: &Option<PathBuf>) -> Result<Str
         "folders": folders,
         "blocked": blocked,
         "unavailable": scan.unavailable,
+        "first_folder_problem": scan.first_folder_problem,
+        "old_format": scan.old_format,
     }))
     .map_err(|e| e.to_string())
 }
@@ -176,19 +191,23 @@ fn folder_json(f: &Folder, using: bool) -> serde_json::Value {
 }
 
 fn show(reg: &Registry, name: Option<&str>, json: bool) -> Result<String, String> {
-    let using = in_use();
+    // Resolved once: the path in use, or the reason there isn't one.
+    let resolved = crate::resolve_db_path().map(|p| std::fs::canonicalize(&p).unwrap_or(p));
+    let using = resolved.as_ref().ok().cloned();
     let folder = match name {
         Some(q) => reg.find(q)?,
-        None => reg
-            .scan()
-            .folders
-            .into_iter()
-            .find(|f| is_in_use(f, &using))
-            .ok_or_else(|| if reg.no_default() && using.is_none() {
-                "No default folder is set. Name one: geniuz folder show <folder>.".to_string()
-            } else {
-                "The database in use isn't one of your folders. GENIUZ_DB may be set.".to_string()
-            })?,
+        None => {
+            // Say why there's no folder in use, as the command that resolves it would.
+            if let Err(e) = &resolved {
+                return Err(e.clone());
+            }
+            reg.scan()
+                .folders
+                .into_iter()
+                .find(|f| is_in_use(f, &using))
+                .ok_or_else(|| "The database in use isn't one of your folders: an explicit database file \
+                                (GENIUZ_DB or GENIUZ_STATION) names a file outside them.".to_string())?
+        }
     };
     if json {
         return serde_json::to_string_pretty(&folder_json(&folder, is_in_use(&folder, &using)))

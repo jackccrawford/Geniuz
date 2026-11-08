@@ -34,12 +34,15 @@ use winit::window::WindowId;
 #[derive(Clone, Default)]
 struct Status {
     memory_count: usize,
-    station_exists: bool,
     recent_gists: Vec<String>,
     claude_configured: bool,
     restart_required: bool,
-    /// UUID, name, and whether it's the one in use.
+    /// UUID, name, and whether it's the default folder.
     folders: Vec<(String, String, bool)>,
+    /// The default was set to none: every memory must name its folder.
+    no_default: bool,
+    /// A newer release, from the last update check.
+    update: Option<geniuz::update::Available>,
 }
 
 impl Status {
@@ -49,21 +52,30 @@ impl Status {
 
     fn fetch(restart_required: bool) -> Self {
         let reg = geniuz::folders::Registry::from_env();
-        let station_path = reg
-            .resolve(None, None, None)
-            .unwrap_or_else(|_| geniuz::data_dir().join("memory.db"));
-        let in_use = std::fs::canonicalize(&station_path).unwrap_or_else(|_| station_path.clone());
+        let no_default = reg.no_default();
+        let resolved = reg.resolve(None, None, None);
+        let db_path = resolved.clone().unwrap_or_else(|_| geniuz::data_dir().join("memory.db"));
+        let in_use = std::fs::canonicalize(&db_path).unwrap_or_else(|_| db_path.clone());
         let folders: Vec<(String, String, bool)> = reg
             .scan()
             .folders
             .into_iter()
             .map(|f| {
-                let current = std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()) == in_use;
+                // Under "none" no folder is the default, whatever the fallback path is.
+                // Marked only when the default really resolves: a saved default that's
+                // unavailable must not show the fallback as if it were chosen.
+                let current = !no_default
+                    && resolved.is_ok()
+                    && std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()) == in_use;
                 (f.uuid, f.name, current)
             })
             .collect();
-        let (memory_count, recent_gists, station_exists) = if station_path.exists() {
-            match geniuz::db::DatabaseManager::open_existing(&station_path.to_string_lossy()) {
+        // No default, or one that can't be found: show nothing rather than the first
+        // folder's memories as if they were the default's.
+        let (memory_count, recent_gists) = if no_default || resolved.is_err() {
+            (0, Vec::new())
+        } else if db_path.exists() {
+            match geniuz::db::DatabaseManager::open_existing(&db_path.to_string_lossy()) {
                 Ok(db) => {
                     let count = db.count().unwrap_or(0);
                     let gists = db
@@ -72,18 +84,19 @@ impl Status {
                         .into_iter()
                         .map(|e| e.gist)
                         .collect();
-                    (count, gists, true)
+                    (count, gists)
                 }
-                Err(_) => (0, Vec::new(), false),
+                Err(_) => (0, Vec::new()),
             }
         } else {
-            (0, Vec::new(), false)
+            (0, Vec::new())
         };
 
         Status {
             folders,
+            no_default,
+            update: geniuz::update::available(),
             memory_count,
-            station_exists,
             recent_gists,
             claude_configured: check_claude_configured(),
             restart_required,
@@ -96,6 +109,9 @@ impl Status {
         } else {
             format!("{} memories", self.memory_count)
         };
+        if self.no_default {
+            return "Geniuz · No default folder: each memory names its folder".to_string();
+        }
         // Two-line tooltip: identity + count on top, most-recent gist on bottom.
         // Connection status moved to the menu (popup) where it belongs — tooltip
         // is for the pulse the user actually wants on every glance.
@@ -187,7 +203,12 @@ struct MenuBuild {
     /// Folder rows, each with the UUID it switches to. Other submenu items are
     /// disabled (no click action), so we don't track their IDs.
     folder_ids: Vec<(MenuId, String)>,
+    /// The Download row, with the link it opens, when an update is available.
+    update_id: Option<(MenuId, String)>,
 }
+
+/// The "None: ask which folder" row, told apart from folder UUIDs by this name.
+const NO_DEFAULT_CHOICE: &str = "none";
 
 fn build_menu(status: &Status) -> MenuBuild {
     let menu = Menu::new();
@@ -199,19 +220,33 @@ fn build_menu(status: &Status) -> MenuBuild {
         None,
     );
     menu.append(&header).ok();
+    // A newer release, when the last check found one: the one thing worth a click here.
+    let update_id = status.update.as_ref().map(|u| {
+        let item = MenuItem::new(format!("Geniuz {} is available: Download", u.version), true, None);
+        menu.append(&item).ok();
+        (item.id().clone(), u.url.clone())
+    });
     menu.append(&PredefinedMenuItem::separator()).ok();
 
-    // Folders — one needs no choosing, so this only appears with two or more.
+    // The default folder: where Claude, the command line and the MCP keep a memory
+    // that names no folder. Choosing here is the setting itself, as Settings → Default
+    // folder is on a Mac; the tray shows recent memories from this folder. One folder
+    // needs no choosing, so this appears with two or more, or when set to none.
     let mut folder_ids = Vec::new();
-    if status.folders.len() > 1 {
-        let name = status.current_folder().unwrap_or("Folders");
-        let submenu = Submenu::new(truncate_for_menu(name, 40), true);
+    if status.folders.len() > 1 || status.no_default {
+        let name = if status.no_default { "None" } else { status.current_folder().unwrap_or("not available") };
+        let submenu = Submenu::new(truncate_for_menu(&format!("Default folder: {}", name), 50), true);
         for (uuid, folder, current) in &status.folders {
             let label = if *current { format!("✓  {}", folder) } else { format!("    {}", folder) };
             let item = MenuItem::new(truncate_for_menu(&label, 60), true, None);
             folder_ids.push((item.id().clone(), uuid.clone()));
             submenu.append(&item).ok();
         }
+        submenu.append(&PredefinedMenuItem::separator()).ok();
+        let none_label = if status.no_default { "✓  None: ask which folder" } else { "    None: ask which folder" };
+        let none = MenuItem::new(none_label, true, None);
+        folder_ids.push((none.id().clone(), NO_DEFAULT_CHOICE.to_string()));
+        submenu.append(&none).ok();
         menu.append(&submenu).ok();
         menu.append(&PredefinedMenuItem::separator()).ok();
     }
@@ -257,6 +292,7 @@ fn build_menu(status: &Status) -> MenuBuild {
         configure_id,
         quit_id,
         folder_ids,
+        update_id,
     }
 }
 
@@ -279,6 +315,10 @@ struct TrayApp {
     current_configure_id: Arc<Mutex<Option<MenuId>>>,
     current_quit_id: Arc<Mutex<MenuId>>,
     folder_ids: Vec<(MenuId, String)>,
+    update_id: Option<(MenuId, String)>,
+    /// An update check is running on its own thread.
+    checking_update: Arc<std::sync::atomic::AtomicBool>,
+    last_update_attempt: Option<std::time::Instant>,
     last_tooltip_refresh: std::time::Instant,
 }
 
@@ -297,6 +337,7 @@ impl TrayApp {
         *self.current_configure_id.lock().unwrap() = build.configure_id;
         *self.current_quit_id.lock().unwrap() = build.quit_id;
         self.folder_ids = build.folder_ids;
+        self.update_id = build.update_id;
     }
 
     fn refresh_tooltip_only(&mut self) {
@@ -325,10 +366,20 @@ impl ApplicationHandler for TrayApp {
                 event_loop.exit();
                 return;
             }
+            if let Some((id, url)) = &self.update_id {
+                if event.id == *id {
+                    if let Err(e) = geniuz::update::open(url) {
+                        eprintln!("[geniuz-tray] opening the download failed: {}", e);
+                    }
+                    return;
+                }
+            }
             let chosen = self.folder_ids.iter().find(|(id, _)| *id == event.id).map(|(_, uuid)| uuid.clone());
             if let Some(uuid) = chosen {
-                if let Err(e) = geniuz::folders::Registry::from_env().use_folder(&uuid) {
-                    eprintln!("[geniuz-tray] switching folder failed: {}", e);
+                let reg = geniuz::folders::Registry::from_env();
+                let set = if uuid == NO_DEFAULT_CHOICE { reg.clear_default() } else { reg.use_folder(&uuid).map(|_| ()) };
+                if let Err(e) = set {
+                    eprintln!("[geniuz-tray] setting the default folder failed: {}", e);
                 }
                 self.rebuild_menu();
                 return;
@@ -356,6 +407,25 @@ impl ApplicationHandler for TrayApp {
         // isn't visible; it rebuilds on right-click via Windows tray mechanics
         // when set_menu is next called.
         if self.last_tooltip_refresh.elapsed() >= Duration::from_secs(5) {
+            // An update check when one is due, on its own thread: it can take seconds.
+            use std::sync::atomic::Ordering;
+            // Settings that can't be read mean no check: an opt-out must not be lost to a
+            // damaged file. And at most one attempt an hour, even if update.json can't be
+            // saved to record it.
+            let allowed = geniuz::settings::Settings::load_strict()
+                .map(|s| geniuz::update::due(&s, chrono::Utc::now()))
+                .unwrap_or(false)
+                && self.last_update_attempt.map_or(true, |t| t.elapsed() >= Duration::from_secs(3600));
+            if allowed && !self.checking_update.swap(true, Ordering::SeqCst) {
+                self.last_update_attempt = Some(std::time::Instant::now());
+                let flag = self.checking_update.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = geniuz::update::check() {
+                        eprintln!("[geniuz-tray] update check: {}", e);
+                    }
+                    flag.store(false, Ordering::SeqCst);
+                });
+            }
             self.refresh_tooltip_only();
             // Also rebuild the menu so the next right-click is fresh.
             self.rebuild_menu();
@@ -401,6 +471,7 @@ fn main() {
     let current_configure_id = Arc::new(Mutex::new(build.configure_id));
     let current_quit_id = Arc::new(Mutex::new(build.quit_id));
     let folder_ids = build.folder_ids;
+    let update_id = build.update_id;
 
     let mut app = TrayApp {
         tray,
@@ -409,6 +480,9 @@ fn main() {
         current_configure_id,
         current_quit_id,
         folder_ids,
+        update_id,
+        checking_update: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        last_update_attempt: None,
         last_tooltip_refresh: std::time::Instant::now(),
     };
 

@@ -8,7 +8,9 @@ The cost is that a mistake stays on the record. In return, the history is hard t
 
 ## No server
 
-Geniuz has no HTTP server. There is nothing to host, keep running or secure, and tools reach Geniuz by running it or through MCP.
+Geniuz doesn't run a web server or open a network port. Your AI tool starts Geniuz itself when it needs it and talks to it over MCP through standard input and output (stdio): that's how Claude Desktop connects. Scripts and agents run the `geniuz` command. So there is nothing to host, keep running or secure, and nothing on your network can reach your memories through Geniuz.
+
+The cost is that an AI must run on the same computer as your memories to reach them.
 
 ## One table
 

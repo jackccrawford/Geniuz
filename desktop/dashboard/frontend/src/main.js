@@ -49,7 +49,7 @@ async function bootstrap() {
         api.getAppVersion(),
         api.getDataDir(),
       ]);
-      stats = await api.getStationStats();
+      stats = await api.getFolderStats();
     } catch (e) {
       console.error('[geniuz] bootstrap failed:', e);
     }
@@ -159,7 +159,7 @@ async function wireMenuEvents() {
       case 'menu_all_folders': {
         // The menu shows a shortlist; the sidebar's filter reaches the rest.
         // A collapsed sidebar hides the filter, so open it first.
-        if (document.querySelector('.is-collapsed')) toggleSidebar();
+        if (document.querySelector('.is-collapsed')) (toggleSidebar.reveal || toggleSidebar)();
         requestAnimationFrame(() => {
           const filter = document.querySelector('.sidebar-folders__filter');
           if (filter) { filter.focus(); filter.select(); }
@@ -276,9 +276,15 @@ function noteUnderChip(chip, text) {
   note.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - 320))}px`;
   note.style.top = `${r.bottom + 6}px`;
   document.body.appendChild(note);
-  const gone = () => { note.remove(); document.removeEventListener('scroll', gone, true); };
+  const gone = () => {
+    note.remove();
+    document.removeEventListener('scroll', gone, true);
+    document.removeEventListener('mousedown', gone, true);
+  };
   setTimeout(gone, 3500);
   document.addEventListener('scroll', gone, true);
+  // The next click anywhere dismisses it; added after this click has finished.
+  setTimeout(() => document.addEventListener('mousedown', gone, true), 0);
 }
 
 bootstrap();

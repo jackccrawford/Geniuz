@@ -5,7 +5,7 @@
 // directly or maintain its own data layer. One source of truth for schema
 // and query logic, used by the CLI, the MCP server, and this dashboard alike.
 
-use geniuz::db::{DatabaseManager, SignalEntry};
+use geniuz::db::{DatabaseManager, MemoryEntry};
 use geniuz::folders::{Folder, Registry};
 use geniuz::settings::Settings;
 use serde::{Deserialize, Serialize};
@@ -71,7 +71,7 @@ fn open_db() -> Result<DatabaseManager, String> {
 // -------------------------------------------------------------------------
 
 #[derive(Serialize, Default)]
-struct StationStats {
+struct FolderStats {
     total_memories: usize,
     this_week: usize,
     storage_bytes: u64,
@@ -242,9 +242,9 @@ fn remember_memory(
         Some(uuid) => DatabaseManager::open_existing(&Registry::from_env().find(&uuid)?.db_path.to_string_lossy())?,
         None => open_db()?,
     };
-    // A reply goes under a memory in this same folder. db.signal starts a new
-    // thread when the parent doesn't resolve; here that would quietly lose the
-    // reply the person asked for, so say so instead.
+    // A reply goes under a memory in this same folder. db.keep refuses a parent
+    // it can't find; looking it up here first gives the dashboard's own, plainer
+    // message for that.
     let parent = match parent.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
         Some(p) => Some(
             db.get_by_uuid_prefix(p)?
@@ -254,12 +254,12 @@ fn remember_memory(
         None => None,
     };
     let gist_trimmed = gist.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty());
-    db.signal(content.trim(), gist_trimmed, parent.as_deref(), None)
+    db.keep(content.trim(), gist_trimmed, parent.as_deref(), None)
         .map(|r| r.uuid)
 }
 
 #[tauri::command]
-fn get_station_stats() -> Result<StationStats, String> {
+fn get_folder_stats() -> Result<FolderStats, String> {
     let db = open_db()?;
     let total_memories = db.count()?;
     let this_week = db.count_since_days(7)?;
@@ -268,7 +268,7 @@ fn get_station_stats() -> Result<StationStats, String> {
     let last_write_iso = db.last_write_timestamp()?;
     let storage_bytes = std::fs::metadata(db_path()?).map(|m| m.len()).unwrap_or(0);
 
-    Ok(StationStats {
+    Ok(FolderStats {
         total_memories,
         this_week,
         storage_bytes,
@@ -364,7 +364,7 @@ fn find(
             }
         }
     };
-    let mut memories: Vec<(SignalEntry, &Folder)> = Vec::new();
+    let mut memories: Vec<(MemoryEntry, &Folder)> = Vec::new();
     let mut lines: Vec<FindLine> = Vec::new();
     let mode_text;
 
@@ -529,6 +529,9 @@ fn get_settings() -> Settings {
 
 #[tauri::command]
 fn update_settings(patch: SettingsPatch) -> Result<Settings, String> {
+    // A settings.json that exists but can't be read is not saved over, as the command
+    // line, the tray and the menu bar also refuse: the page showed defaults, not it.
+    Settings::load_strict()?;
     patch.settings.save()?;
     Ok(Settings::load())
 }
@@ -859,7 +862,7 @@ fn get_data_dir() -> String {
 // No category is read out of a gist. Meaning is the writer's, in the words,
 // and the app shows the gist whole.
 
-fn map_recent(e: SignalEntry) -> RecentMemory {
+fn map_recent(e: MemoryEntry) -> RecentMemory {
     RecentMemory {
         uuid: e.memory_uuid,
         gist: e.gist,
@@ -871,7 +874,7 @@ fn map_recent(e: SignalEntry) -> RecentMemory {
     }
 }
 
-fn map_detail(e: SignalEntry) -> MemoryDetail {
+fn map_detail(e: MemoryEntry) -> MemoryDetail {
     MemoryDetail {
         uuid: e.memory_uuid,
         gist: e.gist,
@@ -1056,7 +1059,7 @@ pub fn run() {
             get_update,
             view_folder,
             remember_memory,
-            get_station_stats,
+            get_folder_stats,
             get_recent_memories,
             get_activity,
             semantic_search,
@@ -1269,8 +1272,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("GENIUZ_HOME", &dir);
         let db = open_db().unwrap();
-        db.signal("Roundup\nCubic reviewed the PR; see 13625F6B:D824ADA7.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
-        db.signal("Asked Devin to retest.", Some("follow-up"), None, None).unwrap();
+        db.keep("Roundup\nCubic reviewed the PR; see 13625F6B:D824ADA7.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
+        db.keep("Asked Devin to retest.", Some("follow-up"), None, None).unwrap();
 
         let r = find("Devin".into(), "exact".into(), Some("24h".into()), None, None).unwrap();
         let lines: Vec<&str> = r.lines.iter().map(|l| l.line.as_str()).collect();

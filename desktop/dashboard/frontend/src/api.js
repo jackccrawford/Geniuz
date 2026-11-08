@@ -85,8 +85,8 @@ export function refreshMenu(shortcuts = true) {
   return invoke('refresh_menu', { shortcuts });
 }
 
-export function getStationStats() {
-  return invoke('get_station_stats');
+export function getFolderStats() {
+  return invoke('get_folder_stats');
 }
 
 /** One page of the folder: `oldestFirst` reads from the oldest, `offset` memories in. */

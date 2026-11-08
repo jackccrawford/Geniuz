@@ -6,9 +6,9 @@ use std::path::PathBuf;
     name = "geniuz",
     version,
     about = "Your AI remembers now",
-    long_about = "GENIUZ: Your AI remembers now.\n\nPersistent memory for AI agents. Keep what matters, recall it later.\nWorks with any agent framework — Claude Code, Cursor, Windsurf, Aider,\nor anything that can run a shell command.",
-    before_help = "Start here: 'geniuz recall' to see what's in your folder.",
-    after_help = "Examples:\n  geniuz tui                                 Browse memories in a terminal UI\n  geniuz keep -c \"Fixed the auth bug\" -g \"fix: token refresh\"\n  geniuz recall \"auth\"                       Semantic search\n  geniuz recall                              Latest memories\n  geniuz capture ./notes/                    Bulk-load markdown files\n  geniuz backfill                            Build embedding cache\n\nFolders: 'geniuz folder list' shows them, and --in <name> (or -f) uses one for a command.\n  Multiple agents can share a folder for shared memory.\n\nData: Kept in .geniuz in your home directory\n  Override with GENIUZ_HOME to change where Geniuz keeps its data\n  Override with GENIUZ_DB for a specific memory.db file\n\nUse \"geniuz [command] --help\" for more information."
+    long_about = "GENIUZ: Your AI remembers now.\n\nYour AI starts every conversation from zero. Geniuz keeps what matters,\nthe calls you made and the reasons behind them, on your own computer,\nwhere any AI you use can find it: Claude Desktop through MCP, or any\nagent that can run a command. A memory is never edited, so the record holds.",
+    before_help = "Start here: 'geniuz recall' shows what's in your folder.",
+    after_help = "Examples:\n  geniuz keep -c \"Chose the smaller vendor: faster support\" -g \"decision: vendor\"\n  geniuz recall \"vendor\"                 Search by meaning\n  geniuz recall --grep Acme              Literal text: every line that has it\n  geniuz recall 13625F6B:3487B9B0        Open one memory by its address\n  geniuz recall --all \"pricing\"          Every folder at once\n  geniuz capture ./policies/             Keep a folder of documents\n\nFolders: 'geniuz folder list' shows them; -f <name> uses one for a command.\n  A project, a team, an agent: each can have its own, or share one.\n\nData: everything stays in .geniuz in your home directory.\n  GENIUZ_HOME moves it; GENIUZ_DB names one memory file.\n\nUse \"geniuz <command> --help\" for more."
 )]
 pub struct Cli {
     // -f and --folder as well: agents name a folder on most calls, so it gets a short
@@ -40,7 +40,7 @@ impl Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Keep a memory — what you learned, decided, or discovered
+    /// Keep a memory: what you learned, decided, or discovered
     #[command(
         alias = "remember",
         arg_required_else_help = true,
@@ -51,7 +51,7 @@ pub enum Command {
         #[arg(short, long)]
         content: String,
 
-        /// Compressed insight — how future agents find this
+        /// The short line it's found by: write it for whoever reads it next
         #[arg(short, long)]
         gist: Option<String>,
 
@@ -68,7 +68,7 @@ pub enum Command {
         json: bool,
     },
 
-    /// Search your memories — semantic by default
+    /// Search your memories, by meaning unless you ask for exact words
     #[command(
         after_help = "Examples:\n  geniuz recall \"auth token\"                  Semantic search\n  geniuz recall --keyword \"auth\"               Keyword fallback\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n  geniuz recall --grep Cubic --since 7d        Lines naming Cubic, past week\n\nTip: Run 'geniuz backfill' first to enable semantic search."
     )]
@@ -150,7 +150,7 @@ pub enum Command {
     },
 
     /// See and manage your folders
-    #[command(subcommand)]
+    #[command(subcommand, alias = "folders")]
     Folder(FolderCommand),
 
     /// Capture files or directories into a folder
@@ -207,7 +207,7 @@ pub enum Command {
         json: bool,
     },
 
-    /// Build embedding cache for semantic search
+    /// Make memories without an embedding searchable by meaning
     #[command(
         after_help = "Embeds all content using ONNX (paraphrase-multilingual-MiniLM-L12-v2).\nFirst run downloads the model (~118MB). Subsequent runs only process new memories."
     )]
@@ -228,15 +228,15 @@ pub enum Command {
     /// Launch the graphical dashboard app
     #[command(
         alias = "gui",
-        after_help = "Launches the Geniuz Dashboard window. The dashboard is the\ngraphical companion to the CLI — same memories, same data layer,\nbut rendered as a native window with sidebar nav and surfaces for\nMemories, Remember, Find, Status, Data & Export, and Settings.\n\nResolves the dashboard binary from known install locations per\nplatform. Errors with a helpful message if the dashboard isn't\ninstalled (e.g. CLI-only install via curl install.sh)."
+        after_help = "Launches the Geniuz Dashboard window. The dashboard is the\ngraphical companion to the CLI: the same memories, in a window with\nyour folders in a sidebar, and pages for Memories, Keep, Find,\nStatus, Data & Export, and Settings.\n\nResolves the dashboard binary from known install locations per\nplatform. Errors with a helpful message if the dashboard isn't\ninstalled (e.g. CLI-only install via curl install.sh)."
     )]
     Dashboard,
 
-    /// MCP server — run, install, or check status
+    /// Connect your AI through MCP: run the server, install it, or check it
     #[command(subcommand)]
     Mcp(McpCommand),
 
-    /// User settings — read or change preferences
+    /// Your settings: read or change them
     #[command(subcommand)]
     Settings(SettingsCommand),
 }
@@ -326,7 +326,7 @@ pub enum FolderCommand {
         to: PathBuf,
     },
 
-    /// Retire a folder: hide it and keep it. Nothing is deleted
+    /// Archive a folder: hide it and keep it. Nothing is deleted; `folder restore` brings it back
     Archive {
         /// Name or 8-character ID
         name: String,
@@ -381,16 +381,16 @@ pub enum SettingsCommand {
 
 #[derive(Subcommand)]
 pub enum McpCommand {
-    /// Run as MCP server (stdio transport — used by Claude Desktop internally)
+    /// Run as an MCP server over stdio (how Claude Desktop starts Geniuz)
     Serve,
 
     /// Install Geniuz into Claude Desktop config
     #[command(
-        after_help = "Adds Geniuz as an MCP server in Claude Desktop's config file.\nAfter running this, restart Claude Desktop to activate.\n\nYour Claude will have three new tools: keep, recall, folders.\n\nUse --env KEY=VALUE to embed environment variables in the MCP entry —\nthe Windows installer uses this to pass GENIUZ_HOME so the sandboxed\nClaude knows where the user's data directory lives."
+        after_help = "Adds Geniuz as an MCP server in Claude Desktop's config file.\nAfter running this, restart Claude Desktop to activate.\n\nYour Claude will have three new tools: keep, recall, folders.\n\nUse --env KEY=VALUE to embed environment variables in the MCP entry:\nthe Windows installer uses this to pass GENIUZ_HOME so the sandboxed\nClaude knows where the user's data directory lives."
     )]
     Install {
         /// Embed an environment variable in the MCP server entry. Repeatable.
-        /// Example: --env GENIUZ_HOME=C:\Users\jackc\.geniuz
+        /// Example: --env GENIUZ_HOME=C:\Users\you\.geniuz
         #[arg(long, value_name = "KEY=VALUE")]
         env: Vec<String>,
     },

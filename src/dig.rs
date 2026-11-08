@@ -206,9 +206,9 @@ impl Dig {
 pub struct Harvest {
     /// `(name, times seen)`, most seen first.
     pub names: Vec<(String, usize)>,
-    /// `XXXXXXXX:YYYYYYYY` signal pointers and bare 8-hex memory ids.
+    /// `XXXXXXXX:YYYYYYYY` addresses and bare 8-hex memory ids.
     pub pointers: Vec<String>,
-    /// Addresses in the text that lead nowhere here. They may name a station elsewhere,
+    /// Addresses in the text that lead nowhere here. They may name a folder elsewhere,
     /// so they're labeled and not hidden.
     pub not_found: Vec<String>,
 }

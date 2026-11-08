@@ -25,7 +25,7 @@
 //! Reads use a read-only connection and never `DatabaseManager::new`, which
 //! applies the schema on open: listing must not change a file it doesn't own.
 
-use crate::db::SignalEntry;
+use crate::db::MemoryEntry;
 use crate::embedding::EmbeddingBackend;
 use crate::window::Window;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
@@ -33,7 +33,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 const DB_FILE: &str = "memory.db";
-const LEGACY_DB_FILE: &str = "station.db";
+/// The file name before Geniuz 4.0: found only to say what to do with it.
+const OLD_DB_FILE: &str = "station.db";
 const ADDED_FILE: &str = "added-folders";
 const CURRENT_FILE: &str = "current";
 /// What `current` holds when the person chose no default folder.
@@ -103,6 +104,12 @@ pub struct Scan {
     pub blocked: Vec<Blocked>,
     /// Added directories that can't be reached right now, such as an unplugged drive.
     pub unavailable: Vec<PathBuf>,
+    /// Why the first folder couldn't be opened, when it couldn't (a file from before
+    /// Geniuz 4.0, say), so lists can say so rather than just "unavailable".
+    pub first_folder_problem: Option<String>,
+    /// Folders still in a pre-4.0 `station.db`: not opened, but named, so they
+    /// don't vanish from lists without a word.
+    pub old_format: Vec<PathBuf>,
     /// Interrupted moves whose original can't be reached, so can't be settled yet.
     pub pending_moves: Vec<PathBuf>,
 }
@@ -136,18 +143,27 @@ impl Registry {
         self.home.join(CURRENT_FILE)
     }
 
-    /// The database of the first folder: `memory.db`, or an older `station.db`
-    /// if that is all there is.
+    /// The database of the first folder.
     fn default_db(&self) -> PathBuf {
-        let db = self.home.join(DB_FILE);
-        let legacy = self.home.join(LEGACY_DB_FILE);
-        if !db.exists() && legacy.exists() { legacy } else { db }
+        self.home.join(DB_FILE)
     }
 
     /// Create the first folder if needed and give it an identity in place. The
     /// file never moves, and older versions can still open it.
     pub fn ensure_default(&self) -> Result<PathBuf, String> {
         let db = self.default_db();
+        // A first folder from before Geniuz 4.0 was station.db. Making a new, empty
+        // memory.db beside it would hide its memories without a word, so it's refused
+        // with the way forward instead.
+        let old = self.home.join(OLD_DB_FILE);
+        if !db.exists() && old.exists() {
+            return Err(format!(
+                "Your first folder is {}, from a Geniuz before 4.0. Back it up and run {} on it, \
+                 then rename it memory.db.",
+                old.display(),
+                crate::db::MIGRATION_SCRIPT
+            ));
+        }
         if !db.exists() {
             crate::db::DatabaseManager::new(&db.to_string_lossy())?;
         }
@@ -171,8 +187,9 @@ impl Registry {
     /// Everything visible right now, resolving duplicates by list order.
     pub fn scan(&self) -> Scan {
         let mut out = Scan::default();
-        if self.ensure_default().is_err() {
+        if let Err(e) = self.ensure_default() {
             out.unavailable.push(self.home.clone());
+            out.first_folder_problem = Some(e);
         }
 
         let mut roots = vec![self.home.clone()];
@@ -181,6 +198,23 @@ impl Registry {
                 roots.push(dir);
             } else {
                 out.unavailable.push(dir);
+            }
+        }
+
+        // A station.db with no memory.db beside it is a folder from before 4.0. The
+        // first folder's is reported above; any other is listed here.
+        for root in &roots {
+            let mut dirs = vec![root.clone()];
+            if let Ok(entries) = std::fs::read_dir(root) {
+                dirs.extend(entries.flatten().map(|e| e.path()).filter(|p| p.is_dir()));
+            }
+            for dir in dirs {
+                if canonical(&dir) == canonical(&self.home) {
+                    continue;
+                }
+                if dir.join(OLD_DB_FILE).is_file() && !dir.join(DB_FILE).exists() {
+                    out.old_format.push(dir.join(OLD_DB_FILE));
+                }
             }
         }
 
@@ -304,13 +338,13 @@ impl Registry {
     pub fn resolve(
         &self,
         flag: Option<&str>,
-        env_station: Option<&str>,
+        env_db: Option<&str>,
         cwd: Option<&Path>,
     ) -> Result<PathBuf, String> {
         if let Some(q) = flag {
             return Ok(self.find(q)?.db_path);
         }
-        if let Some(path) = env_station.filter(|s| !s.is_empty()) {
+        if let Some(path) = env_db.filter(|s| !s.is_empty()) {
             return Ok(PathBuf::from(path));
         }
         if let Some(dir) = cwd {
@@ -322,9 +356,7 @@ impl Registry {
             }
         }
         if self.no_default() {
-            return Err("No default folder is set, so name a folder: the folder argument, or -f <folder> \
-                        on the command line. A default can be chosen in Settings, or with `geniuz folder use <folder>`."
-                .to_string());
+            return Err(NO_DEFAULT_MESSAGE.to_string());
         }
         if let Some(q) = self.current() {
             return self
@@ -501,6 +533,15 @@ impl Registry {
             }
         }
         if found == 0 {
+            let old = dir.join(OLD_DB_FILE).is_file()
+                || std::fs::read_dir(&dir).map(|es| es.flatten().any(|e| e.path().join(OLD_DB_FILE).is_file())).unwrap_or(false);
+            if old {
+                return Err(format!(
+                    "No Geniuz folders from 4.0 or later in {}. Its station.db files are from an older Geniuz: back them up and run {} on each.",
+                    dir.display(),
+                    crate::db::MIGRATION_SCRIPT
+                ));
+            }
             return Err(format!("No Geniuz folders in {}.", dir.display()));
         }
 
@@ -567,6 +608,14 @@ impl Registry {
             return Err("Your first folder can't be archived, because other folders live beside it.".into());
         }
         refuse_symlink(&dir)?;
+        // The default folder is a setting someone chose; archiving it would quietly
+        // send memories somewhere else. Ask for the setting to change first.
+        if self.current().map(|c| c.eq_ignore_ascii_case(&folder.uuid)).unwrap_or(false) {
+            return Err(format!(
+                "\"{}\" is the default folder. Choose another default first (Settings, or `geniuz folder use <folder>`), then archive it.",
+                folder.name
+            ));
+        }
         if self.added().iter().any(|d| canonical(d) == canonical(&dir)) {
             return Err(format!(
                 "{} was added directly. Take it off the list with `geniuz folder remove`.",
@@ -585,10 +634,6 @@ impl Registry {
         }
         std::fs::rename(&dir, &target)
             .map_err(|e| format!("Couldn't move {}: {}", dir.display(), e))?;
-
-        if self.current().map(|c| c.eq_ignore_ascii_case(&folder.uuid)).unwrap_or(false) {
-            let _ = std::fs::rename(self.current_path(), self.home.join("current.archived"));
-        }
         Ok(target)
     }
 
@@ -824,7 +869,7 @@ pub enum Search<'a> {
 /// One result, with the folder it came from.
 pub struct Hit {
     pub folder: Folder,
-    pub entry: SignalEntry,
+    pub entry: MemoryEntry,
 }
 
 impl Hit {
@@ -908,12 +953,9 @@ pub fn validate_name(name: &str) -> Result<String, String> {
 /// The databases directly in `root` and one level below it.
 fn candidates(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for file in [DB_FILE, LEGACY_DB_FILE] {
-        let db = root.join(file);
-        if db.is_file() {
-            out.push(db);
-            break;
-        }
+    let db = root.join(DB_FILE);
+    if db.is_file() {
+        out.push(db);
     }
     let Ok(entries) = std::fs::read_dir(root) else { return out };
     let mut dirs: Vec<_> = entries
@@ -968,11 +1010,20 @@ fn replace_meta(db: &Path, key: &str, value: &str) -> Result<(), String> {
     let mut conn = open_read_write(db)?;
     let tx = conn.transaction().map_err(|e| format!("Couldn't save {}: {}", key, e))?;
     if let Some(old) = get_meta(&tx, key) {
-        tx.execute(
-            "INSERT OR IGNORE INTO _meta (key, value) VALUES (?1, ?2)",
-            [format!("{}@{}", key, now()), old],
-        )
-        .map_err(|e| format!("Couldn't save {}: {}", key, e))?;
+        // The earlier wording is kept under key@time. Two changes in the same second
+        // would share that key, so a later one is numbered (#2, #3) rather than lost.
+        let stamp = format!("{}@{}", key, now());
+        let mut n = 1;
+        loop {
+            let name = if n == 1 { stamp.clone() } else { format!("{}#{}", stamp, n) };
+            let added = tx
+                .execute("INSERT OR IGNORE INTO _meta (key, value) VALUES (?1, ?2)", [name, old.clone()])
+                .map_err(|e| format!("Couldn't save {}: {}", key, e))?;
+            if added == 1 {
+                break;
+            }
+            n += 1;
+        }
     }
     set_meta(&tx, key, value)?;
     tx.commit().map_err(|e| format!("Couldn't save {}: {}", key, e))
@@ -1014,6 +1065,16 @@ fn same_file(_: &Path, _: &Path) -> bool {
     false
 }
 
+/// What a command that names no folder is told when the default is none. Shared, so
+/// callers can tell this refusal from other reasons a folder doesn't resolve.
+pub const NO_DEFAULT_MESSAGE: &str = "No default folder is set, so name a folder: the folder argument, or -f <folder> \
+     on the command line. A default can be chosen in Settings, or with `geniuz folder use <folder>`.";
+
+/// The folder whose database is at `db`, read without changing anything on disk.
+pub fn identity_at(db: &Path) -> Option<Folder> {
+    read_identity(db)
+}
+
 /// Read a file's identity. `None` means it isn't a folder, or can't be read.
 fn read_identity(db: &Path) -> Option<Folder> {
     identity_from(&open_read_only(db).ok()?, db)
@@ -1039,15 +1100,13 @@ fn is_geniuz_store(db: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// The table holding a store's memories and its UUID column: the current names,
-/// or the ones from before the rename, which are migrated when the store is opened.
+/// The table holding a store's memories and its UUID column. Files from before
+/// Geniuz 4.0 used other names; they are brought forward by a script, not read here.
 fn memory_table(conn: &Connection) -> Result<(&'static str, &'static str), String> {
-    for (table, column) in [("memories", "memory_uuid"), ("memories", "signal_uuid"), ("signals", "signal_uuid")] {
-        if conn.prepare(&format!("SELECT {} FROM {} LIMIT 1", column, table)).is_ok() {
-            return Ok((table, column));
-        }
+    if conn.prepare("SELECT memory_uuid FROM memories LIMIT 1").is_ok() {
+        return Ok(("memories", "memory_uuid"));
     }
-    Err("It has no memory table.".to_string())
+    Err("It has no memory table from Geniuz 4.0 or later.".to_string())
 }
 
 /// Every memory ID in a store, normalised for comparing.
@@ -1443,11 +1502,49 @@ mod tests {
     }
 
     #[test]
-    fn older_station_db_is_still_found() {
+    fn an_old_station_db_elsewhere_is_named_not_hidden() {
+        let (tmp, reg) = setup();
+        reg.ensure_default().unwrap();
+        let added = tmp.path().join("added");
+        std::fs::create_dir_all(added.join("Old")).unwrap();
+        Connection::open(added.join("Old").join(OLD_DB_FILE)).unwrap()
+            .execute_batch("CREATE TABLE signals (signal_uuid TEXT);").unwrap();
+        let err = reg.add(&added).unwrap_err();
+        assert!(err.contains("station.db") && err.contains(crate::db::MIGRATION_SCRIPT), "{err}");
+        reg.remember_added(&added).unwrap();
+        let scan = reg.scan();
+        let found: Vec<_> = scan.old_format.iter().map(|p| canonical(p)).collect();
+        assert_eq!(found, [canonical(&added.join("Old").join(OLD_DB_FILE))]);
+    }
+
+    #[test]
+    fn an_old_station_db_first_folder_is_refused_not_hidden() {
         let (_tmp, reg) = setup();
-        crate::db::DatabaseManager::new(&reg.home.join(LEGACY_DB_FILE).to_string_lossy()).unwrap();
-        assert_eq!(reg.ensure_default().unwrap().file_name().unwrap(), LEGACY_DB_FILE);
-        assert!(!reg.home.join(DB_FILE).exists());
+        std::fs::create_dir_all(&reg.home).unwrap();
+        Connection::open(reg.home.join("station.db")).unwrap()
+            .execute_batch("CREATE TABLE signals (signal_uuid TEXT);").unwrap();
+        let err = reg.ensure_default().unwrap_err();
+        assert!(err.contains("before 4.0") && err.contains(crate::db::MIGRATION_SCRIPT), "{err}");
+        assert!(!reg.home.join(DB_FILE).exists(), "no empty memory.db made beside it");
+        let scan = reg.scan();
+        assert!(scan.first_folder_problem.unwrap().contains("before 4.0"));
+    }
+
+    #[test]
+    fn a_file_from_before_4_0_is_refused_and_left_unchanged() {
+        let tmp = TempDir::new().unwrap();
+        for schema in [
+            "CREATE TABLE signals (signal_uuid TEXT, payload TEXT, created_at TEXT);",
+            "CREATE TABLE memories (signal_uuid TEXT, payload TEXT, created_at TEXT);",
+        ] {
+            let db = tmp.path().join("old.db");
+            let _ = std::fs::remove_file(&db);
+            Connection::open(&db).unwrap().execute_batch(schema).unwrap();
+            let before = std::fs::read(&db).unwrap();
+            let err = crate::db::DatabaseManager::new(&db.to_string_lossy()).err().unwrap();
+            assert!(err.contains("before 4.0") && err.contains(crate::db::MIGRATION_SCRIPT), "{err}");
+            assert_eq!(std::fs::read(&db).unwrap(), before, "not touched");
+        }
     }
 
     #[test]
@@ -1935,15 +2032,15 @@ mod tests {
     }
 
     #[test]
-    fn review6_identical_legacy_stores_get_one_identity() {
+    fn review6_identical_unstamped_stores_get_one_identity() {
         let tmp = TempDir::new().unwrap();
         let (a, b) = (tmp.path().join("a.db"), tmp.path().join("b.db"));
         for db in [&a, &b] {
             Connection::open(db).unwrap().execute_batch(&format!(
                 "CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT);
                  INSERT INTO _meta VALUES ('product','geniuz');
-                 CREATE TABLE signals (signal_uuid TEXT, payload TEXT, created_at TEXT);
-                 INSERT INTO signals VALUES ('{}','{{}}','2026-01-01 00:00:00');", M1
+                 CREATE TABLE memories (memory_uuid TEXT, payload TEXT, created_at TEXT);
+                 INSERT INTO memories VALUES ('{}','{{}}','2026-01-01 00:00:00');", M1
             )).unwrap();
             stamp(db, "x").unwrap();
         }
@@ -2189,9 +2286,9 @@ mod tests {
         let a = reg.create("Alpha", "", None).unwrap();
         let b = reg.create("Beta", "", None).unwrap();
         let open = |f: &Folder| crate::db::DatabaseManager::new(&f.db_path.to_string_lossy()).unwrap();
-        open(&a).signal("the older note", Some("older"), None, Some("2026-01-01 00:00:00")).unwrap();
-        open(&b).signal("the newer note", Some("newer"), None, Some("2026-02-01 00:00:00")).unwrap();
-        open(&b).signal("unrelated", Some("other"), None, Some("2026-03-01 00:00:00")).unwrap();
+        open(&a).keep("the older note", Some("older"), None, Some("2026-01-01 00:00:00")).unwrap();
+        open(&b).keep("the newer note", Some("newer"), None, Some("2026-02-01 00:00:00")).unwrap();
+        open(&b).keep("unrelated", Some("other"), None, Some("2026-03-01 00:00:00")).unwrap();
 
         let window = Window::parse(None, None).unwrap();
         let found = search_across(&reg, &Search::Keyword("note"), &window, 10);
@@ -2319,13 +2416,27 @@ mod tests {
     fn archive_moves_without_deleting_and_the_folder_stays_hidden() {
         let (_tmp, reg) = setup();
         let f = reg.create("Scratch", "", None).unwrap();
-        reg.use_folder("Scratch").unwrap();
 
         let moved = reg.archive("Scratch").unwrap();
         assert!(moved.join(DB_FILE).is_file());
         assert!(!f.db_path.exists());
         assert!(reg.find("Scratch").is_err());
-        assert_eq!(reg.resolve(None, None, None).unwrap().parent().unwrap(), reg.home);
+    }
+
+    #[test]
+    fn the_default_folder_is_not_archived_until_another_is_chosen() {
+        let (_tmp, reg) = setup();
+        let f = reg.create("Scratch", "", None).unwrap();
+        reg.use_folder("Scratch").unwrap();
+
+        let err = reg.archive("Scratch").unwrap_err();
+        assert!(err.contains("default folder"), "{err}");
+        assert!(f.db_path.exists(), "nothing moved");
+        assert!(reg.current().unwrap().eq_ignore_ascii_case(&f.uuid), "the default is unchanged");
+
+        reg.ensure_default().unwrap();
+        reg.use_folder(DEFAULT_NAME).unwrap();
+        assert!(reg.archive("Scratch").is_ok());
     }
 
     #[test]
@@ -2380,6 +2491,26 @@ mod tests {
         let dir = f.db_path.parent().unwrap().to_path_buf();
         copy_then_retire(&dir, &dest, &f, quiesce(&f.db_path).unwrap()).unwrap();
         assert!(reg.archived().is_empty());
+    }
+
+    #[test]
+    fn every_earlier_description_is_kept_even_within_one_second() {
+        let (_tmp, reg) = setup();
+        let f = reg.create("Work", "one", None).unwrap();
+        reg.describe("Work", "two").unwrap();
+        reg.describe("Work", "three").unwrap();
+        reg.describe("Work", "four").unwrap();
+        let conn = open_read_only(&f.db_path).unwrap();
+        let mut kept: Vec<String> = conn
+            .prepare("SELECT value FROM _meta WHERE key LIKE 'folder_description@%'")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        kept.sort();
+        assert_eq!(kept, ["one", "three", "two"]);
+        assert_eq!(reg.find("Work").unwrap().description, "four");
     }
 
     #[test]
