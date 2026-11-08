@@ -231,7 +231,7 @@ pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
                 .replace("/api/tagsdings", "/api/tags"); // fix over-replace on legacy URL
             match agent.get(&tags_url).call() {
                 Ok(_) => Ok(Box::new(backend)),
-                Err(_) => Err("Search by meaning is unavailable: the built-in model couldn't load, and Ollama isn't running".to_string()),
+                Err(_) => Err(format!("Search by meaning is unavailable: Ollama didn't answer at {}", tags_url)),
             }
         }
     }

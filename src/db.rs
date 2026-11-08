@@ -205,11 +205,10 @@ impl DatabaseManager {
         let payload_str = serde_json::to_string(&payload)
             .map_err(|e| format!("Failed to serialize: {}", e))?;
 
-        // A reply goes under a memory in this same folder, or not at all. This
-        // used to fall back to starting a new thread, which quietly dropped the
-        // link an agent asked for (6 Nov: a keep threaded to a memory in another
-        // folder saved without error and stood alone). A full address is
-        // accepted, and one naming another folder is refused with the reason.
+        // A reply goes under a memory in this same folder, or not at all: falling
+        // back to a new thread would quietly drop the link that was asked for. A
+        // full address is accepted, and one naming another folder is refused with
+        // the reason.
         let parent_uuid = if let Some(p) = parent {
             let p = p.trim();
             let (folder_part, memory_part) = match p.split_once(':') {
@@ -257,8 +256,9 @@ impl DatabaseManager {
         // because ONNX and Ollama are both down.
         //
         // Chain: ONNX → Ollama → keyword-only (soft fail).
-        // When both embedding backends are unavailable, we log to stderr and
-        // proceed with memory-without-embedding. The memory lands in the
+        // When both embedding backends are unavailable, the memory is kept
+        // without an embedding (KeepResult.embedded is false, and the caller says
+        // so). The memory lands in the
         // memories table; no embedding row is created for it. Keyword search
         // (geniuz recall --keyword) still finds it. Semantic search does not
         // until someone runs `geniuz backfill` with a working backend.

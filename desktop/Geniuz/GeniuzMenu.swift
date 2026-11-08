@@ -396,6 +396,11 @@ struct GeniuzSettingsView: View {
         Form {
             Section("General") {
                 Toggle("Launch at login", isOn: launchAtLoginBinding)
+                if let why = service.settingsSaveError {
+                    Text(why)
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                }
             }
 
             if service.claudeCodePresent {

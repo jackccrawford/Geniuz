@@ -160,6 +160,8 @@ class GeniuzService: ObservableObject {
     @Published var availableUpdate: AvailableUpdate?
     /// The result of the last check people asked for, shown under the button.
     @Published var updateCheckMessage: String?
+    /// Why the last settings change wasn't saved, shown in Settings; nil once one saves.
+    @Published var settingsSaveError: String?
     @Published var checkingForUpdate = false
 
     /// Optional callback fired after each state refresh so non-SwiftUI surfaces
@@ -525,8 +527,15 @@ class GeniuzService: ObservableObject {
     }
 
     /// Persist settings.json atomically (write tmp, rename). Updates the
-    /// in-memory @Published copy on success so observers refresh.
-    func saveSettings(_ next: GeniuzSettings) {
+    /// in-memory @Published copy on success so observers refresh. Returns whether
+    /// it saved; when it didn't, Settings says why.
+    @discardableResult
+    func saveSettings(_ next: GeniuzSettings) -> Bool {
+        let refuse = { (why: String) -> Bool in
+            NSLog("[geniuz-app] settings not saved: %@", why)
+            DispatchQueue.main.async { [weak self] in self?.settingsSaveError = why }
+            return false
+        }
         let path = settingsPath
         let dir = (path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -534,8 +543,7 @@ class GeniuzService: ObservableObject {
         let encoder = JSONEncoder()
         guard let known = try? encoder.encode(next),
               var merged = (try? JSONSerialization.jsonObject(with: known)) as? [String: Any] else {
-            NSLog("[geniuz-app] settings encode failed")
-            return
+            return refuse("Geniuz couldn't write your settings.")
         }
         // Keep fields this app doesn't know (written by the command line, another app
         // or a newer Geniuz): only the ones it does know are replaced.
@@ -543,14 +551,12 @@ class GeniuzService: ObservableObject {
         // command line does: saving over it would lose what's in it.
         if let existing = FileManager.default.contents(atPath: path) {
             guard let old = (try? JSONSerialization.jsonObject(with: existing)) as? [String: Any] else {
-                NSLog("[geniuz-app] %@ can't be read as settings; not saving over it", path)
-                return
+                return refuse("Not saved: \(path) can't be read as settings, and saving over it would lose what's in it. Fix it, or move it aside.")
             }
             merged = old.merging(merged) { _, mine in mine }
         }
         guard let data = try? JSONSerialization.data(withJSONObject: merged, options: [.prettyPrinted, .sortedKeys]) else {
-            NSLog("[geniuz-app] settings encode failed")
-            return
+            return refuse("Geniuz couldn't write your settings.")
         }
 
         let tmp = path + ".tmp"
@@ -570,7 +576,9 @@ class GeniuzService: ObservableObject {
 
         DispatchQueue.main.async { [weak self] in
             self?.settings = next
+            self?.settingsSaveError = nil
         }
+        return true
     }
 
     // MARK: - CLI on PATH
@@ -1054,8 +1062,10 @@ class GeniuzService: ObservableObject {
     func updateSettings(_ mutate: (inout GeniuzSettings) -> Void) {
         var next = settings
         mutate(&next)
-        saveSettings(next)
-        if next.launchAtLogin != settings.launchAtLogin || next.launchAtLogin {
+        let was = settings.launchAtLogin
+        // Launch at login follows only a saved change, so it never disagrees with the file.
+        guard saveSettings(next) else { return }
+        if next.launchAtLogin != was || next.launchAtLogin {
             applyLaunchAtLogin(next.launchAtLogin)
         }
     }

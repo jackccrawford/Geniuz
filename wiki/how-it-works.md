@@ -45,7 +45,7 @@ Agents point at each other's memories by address, such as `13625F6B:3487B9B0`, s
 ## When you keep
 
 1. The command reads your text, which can be inline, from a file (`-c @notes.md`) or piped in (`-c -`).
-2. [`keep_with_backend`](../src/db.rs) refuses empty content and creates an ID. If you named a parent, it looks it up. An unknown parent does not stop the write: the memory is saved as the start of a new thread.
+2. [`keep_with_backend`](../src/db.rs) refuses empty content and creates an ID. If you named a parent, it looks it up in the same folder. A parent it can't find, or one in another folder, is refused with the reason: a reply never quietly becomes a new thread.
 3. The text is turned into an embedding, a list of numbers that represents its meaning. Geniuz asks the small background helper first, then falls back to loading the model itself.
 4. If embedding fails, the memory is still saved and can be found by keyword until it is embedded later.
 5. The memory and its embedding are written in one transaction.

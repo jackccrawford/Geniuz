@@ -576,10 +576,15 @@ fn run(cli: Cli) -> Result<String, String> {
 
             let address = db.address(&result.uuid);
             if json {
-                Ok(serde_json::to_string_pretty(&serde_json::json!({
+                let mut out = serde_json::json!({
                     "ok": true, "action": "remember", "uuid": result.uuid, "address": address,
-                    "embedded": result.embedded
-                })).unwrap())
+                    "embedded": result.embedded,
+                });
+                // Said in the JSON too, so a script knows the fix; absent when there's none.
+                if !result.embedded {
+                    out["note"] = "Found by keywords only for now: run 'geniuz backfill' later to make it searchable by meaning.".into();
+                }
+                Ok(serde_json::to_string_pretty(&out).unwrap())
             } else if result.embedded {
                 Ok(format!("✅ Kept {}", address))
             } else {

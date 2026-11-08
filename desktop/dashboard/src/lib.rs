@@ -242,9 +242,9 @@ fn remember_memory(
         Some(uuid) => DatabaseManager::open_existing(&Registry::from_env().find(&uuid)?.db_path.to_string_lossy())?,
         None => open_db()?,
     };
-    // A reply goes under a memory in this same folder. db.keep starts a new
-    // thread when the parent doesn't resolve; here that would quietly lose the
-    // reply the person asked for, so say so instead.
+    // A reply goes under a memory in this same folder. db.keep refuses a parent
+    // it can't find; looking it up here first gives the dashboard's own, plainer
+    // message for that.
     let parent = match parent.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
         Some(p) => Some(
             db.get_by_uuid_prefix(p)?
