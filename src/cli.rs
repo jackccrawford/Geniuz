@@ -381,16 +381,16 @@ pub enum SettingsCommand {
 
 #[derive(Subcommand)]
 pub enum McpCommand {
-    /// Run as MCP server (stdio transport — used by Claude Desktop internally)
+    /// Run as an MCP server over stdio (how Claude Desktop starts Geniuz)
     Serve,
 
     /// Install Geniuz into Claude Desktop config
     #[command(
-        after_help = "Adds Geniuz as an MCP server in Claude Desktop's config file.\nAfter running this, restart Claude Desktop to activate.\n\nYour Claude will have three new tools: keep, recall, folders.\n\nUse --env KEY=VALUE to embed environment variables in the MCP entry —\nthe Windows installer uses this to pass GENIUZ_HOME so the sandboxed\nClaude knows where the user's data directory lives."
+        after_help = "Adds Geniuz as an MCP server in Claude Desktop's config file.\nAfter running this, restart Claude Desktop to activate.\n\nYour Claude will have three new tools: keep, recall, folders.\n\nUse --env KEY=VALUE to embed environment variables in the MCP entry:\nthe Windows installer uses this to pass GENIUZ_HOME so the sandboxed\nClaude knows where the user's data directory lives."
     )]
     Install {
         /// Embed an environment variable in the MCP server entry. Repeatable.
-        /// Example: --env GENIUZ_HOME=C:\Users\jackc\.geniuz
+        /// Example: --env GENIUZ_HOME=C:\Users\you\.geniuz
         #[arg(long, value_name = "KEY=VALUE")]
         env: Vec<String>,
     },
