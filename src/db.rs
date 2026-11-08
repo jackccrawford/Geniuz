@@ -18,8 +18,8 @@ fn escape_like(term: &str) -> String {
 }
 
 /// How many memories found by keyword, but not yet embedded, get a place on a
-/// page of results by meaning: every free slot, or half the page when none are
-/// free, never more than matched.
+/// page of results by meaning: every free slot, or half the page when fewer than
+/// half are free, never more than matched.
 ///
 /// A pure function so the arithmetic can be tested: `semantic_search` loads a
 /// real embedding model, so it can't be. Asking for unembedded memories only
@@ -39,9 +39,15 @@ pub const MIGRATION_SCRIPT: &str = "schema/migrate-before-4.0.sql";
 /// A file from before Geniuz 4.0 (a `signals` table, or a `signal_uuid` column) is
 /// refused with the way forward, not converted in place.
 fn check_format(conn: &Connection, db_path: &str) -> Result<(), String> {
-    let has = |sql: &str| conn.query_row(sql, [], |_| Ok(())).is_ok();
-    let old = has("SELECT 1 FROM sqlite_master WHERE type='table' AND name='signals'")
-        || has("SELECT 1 FROM pragma_table_info('memories') WHERE name='signal_uuid'");
+    // A read that fails is a refusal too: an old store must never open as an empty one.
+    let has = |sql: &str| -> Result<bool, String> {
+        conn.query_row(sql, [], |_| Ok(()))
+            .optional()
+            .map(|found| found.is_some())
+            .map_err(|e| format!("Couldn't read {}: {}", db_path, e))
+    };
+    let old = has("SELECT 1 FROM sqlite_master WHERE type='table' AND name='signals'")?
+        || has("SELECT 1 FROM pragma_table_info('memories') WHERE name='signal_uuid'")?;
     if old {
         return Err(format!(
             "{} is from a Geniuz before 4.0, which this version doesn't open. To bring it forward, \
@@ -95,11 +101,11 @@ impl DatabaseManager {
         // Files from before Geniuz 4.0 keep memories in a `signals` table. Geniuz
         // doesn't convert them on open: a script does that, run on purpose, with a
         // backup first. Refused here before anything writes to the file.
+        conn.busy_timeout(std::time::Duration::from_secs(30))
+            .map_err(|e| format!("Failed to set timeout: {}", e))?;
         check_format(&conn, db_path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")
             .map_err(|e| format!("Failed to enable WAL: {}", e))?;
-        conn.busy_timeout(std::time::Duration::from_secs(30))
-            .map_err(|e| format!("Failed to set timeout: {}", e))?;
 
         // Check for existing schema
         let has_memories: bool = conn.query_row(

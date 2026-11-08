@@ -102,6 +102,9 @@ pub struct Scan {
     pub blocked: Vec<Blocked>,
     /// Added directories that can't be reached right now, such as an unplugged drive.
     pub unavailable: Vec<PathBuf>,
+    /// Why the first folder couldn't be opened, when it couldn't (a file from before
+    /// Geniuz 4.0, say), so lists can say so rather than just "unavailable".
+    pub first_folder_problem: Option<String>,
     /// Interrupted moves whose original can't be reached, so can't be settled yet.
     pub pending_moves: Vec<PathBuf>,
 }
@@ -144,6 +147,18 @@ impl Registry {
     /// file never moves, and older versions can still open it.
     pub fn ensure_default(&self) -> Result<PathBuf, String> {
         let db = self.default_db();
+        // A first folder from before Geniuz 4.0 was station.db. Making a new, empty
+        // memory.db beside it would hide its memories without a word, so it's refused
+        // with the way forward instead.
+        let old = self.home.join("station.db");
+        if !db.exists() && old.exists() {
+            return Err(format!(
+                "Your first folder is {}, from a Geniuz before 4.0. Back it up and run {} on it, \
+                 then rename it memory.db.",
+                old.display(),
+                crate::db::MIGRATION_SCRIPT
+            ));
+        }
         if !db.exists() {
             crate::db::DatabaseManager::new(&db.to_string_lossy())?;
         }
@@ -167,8 +182,9 @@ impl Registry {
     /// Everything visible right now, resolving duplicates by list order.
     pub fn scan(&self) -> Scan {
         let mut out = Scan::default();
-        if self.ensure_default().is_err() {
+        if let Err(e) = self.ensure_default() {
             out.unavailable.push(self.home.clone());
+            out.first_folder_problem = Some(e);
         }
 
         let mut roots = vec![self.home.clone()];
@@ -1018,7 +1034,6 @@ fn same_file(_: &Path, _: &Path) -> bool {
     false
 }
 
-/// Read a file's identity. `None` means it isn't a folder, or can't be read.
 /// What a command that names no folder is told when the default is none. Shared, so
 /// callers can tell this refusal from other reasons a folder doesn't resolve.
 pub const NO_DEFAULT_MESSAGE: &str = "No default folder is set, so name a folder: the folder argument, or -f <folder> \
@@ -1029,6 +1044,7 @@ pub fn identity_at(db: &Path) -> Option<Folder> {
     read_identity(db)
 }
 
+/// Read a file's identity. `None` means it isn't a folder, or can't be read.
 fn read_identity(db: &Path) -> Option<Folder> {
     identity_from(&open_read_only(db).ok()?, db)
 }
@@ -1452,6 +1468,19 @@ mod tests {
         reg.ensure_default().unwrap();
         assert_eq!(read_identity(&db).unwrap().uuid, first.uuid);
         assert_eq!(db.file_name().unwrap(), DB_FILE);
+    }
+
+    #[test]
+    fn an_old_station_db_first_folder_is_refused_not_hidden() {
+        let (_tmp, reg) = setup();
+        std::fs::create_dir_all(&reg.home).unwrap();
+        Connection::open(reg.home.join("station.db")).unwrap()
+            .execute_batch("CREATE TABLE signals (signal_uuid TEXT);").unwrap();
+        let err = reg.ensure_default().unwrap_err();
+        assert!(err.contains("before 4.0") && err.contains(crate::db::MIGRATION_SCRIPT), "{err}");
+        assert!(!reg.home.join(DB_FILE).exists(), "no empty memory.db made beside it");
+        let scan = reg.scan();
+        assert!(scan.first_folder_problem.unwrap().contains("before 4.0"));
     }
 
     #[test]

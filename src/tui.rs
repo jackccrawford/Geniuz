@@ -366,7 +366,7 @@ impl App {
         };
         self.mode = Mode::Compose;
         self.detail = None;
-        self.status = "compose · Tab to switch field · Ctrl-S submit · Esc cancel".into();
+        self.status = "compose · Tab to switch field · Ctrl-S keep · Esc cancel".into();
         Ok(())
     }
 
@@ -720,7 +720,7 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_hint(f: &mut Frame, app: &App, area: Rect) {
     let text = if matches!(app.mode, Mode::Compose) {
-        " Tab = switch field · Enter = newline (content) · Ctrl-S = submit · Esc = cancel".to_string()
+        " Tab = switch field · Enter = newline (content) · Ctrl-S = keep · Esc = cancel".to_string()
     } else {
         format!(" {}", app.hint)
     };

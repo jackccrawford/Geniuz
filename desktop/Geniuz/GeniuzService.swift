@@ -532,8 +532,18 @@ class GeniuzService: ObservableObject {
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
 
         let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(next) else {
+        guard let known = try? encoder.encode(next),
+              var merged = (try? JSONSerialization.jsonObject(with: known)) as? [String: Any] else {
+            NSLog("[geniuz-app] settings encode failed")
+            return
+        }
+        // Keep fields this app doesn't know (written by the command line, another app
+        // or a newer Geniuz): only the ones it does know are replaced.
+        if let existing = FileManager.default.contents(atPath: path),
+           let old = (try? JSONSerialization.jsonObject(with: existing)) as? [String: Any] {
+            merged = old.merging(merged) { _, mine in mine }
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: merged, options: [.prettyPrinted, .sortedKeys]) else {
             NSLog("[geniuz-app] settings encode failed")
             return
         }

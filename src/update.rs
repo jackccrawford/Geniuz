@@ -29,19 +29,21 @@ fn file() -> PathBuf {
     crate::data_dir().join("update.json")
 }
 
+/// The last answer, always as an object: anything else in the file counts as empty.
 fn read() -> Value {
     std::fs::read_to_string(file())
         .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
+        .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+        .filter(Value::is_object)
         .unwrap_or_else(|| json!({}))
 }
 
-fn write(v: &Value) {
+fn write(v: &Value) -> Result<(), String> {
     let path = file();
     let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, v.to_string()).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
-    }
+    std::fs::write(&tmp, v.to_string())
+        .and_then(|_| std::fs::rename(&tmp, &path))
+        .map_err(|e| format!("Couldn't save {}: {}", path.display(), e))
 }
 
 fn time(v: &Value, key: &str) -> Option<DateTime<Utc>> {
@@ -120,7 +122,7 @@ pub fn check() -> Result<Option<Available>, String> {
         Ok(_) | Err(_) => {
             // A failed check doesn't count as a check: try again in an hour.
             v["retry_at"] = json!((now + Duration::hours(1)).to_rfc3339_opts(SecondsFormat::Secs, true));
-            write(&v);
+            write(&v)?;
             return Err("Couldn't get the latest release from GitHub".to_string());
         }
     };
@@ -141,7 +143,7 @@ pub fn check() -> Result<Option<Available>, String> {
         "latest": found.as_ref().map(|f| f.version.clone()),
         "url": found.as_ref().map(|f| f.url.clone()),
     });
-    write(&out);
+    write(&out)?;
     Ok(found)
 }
 
@@ -152,7 +154,12 @@ pub fn open(url: &str) -> Result<(), String> {
         return Err("Not a Geniuz release link".to_string());
     }
     let program = if cfg!(windows) { "explorer" } else if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    std::process::Command::new(program).arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    let mut child = std::process::Command::new(program).arg(url).spawn().map_err(|e| e.to_string())?;
+    // Waited on, so the finished opener doesn't linger as a zombie process.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
 }
 
 #[cfg(test)]

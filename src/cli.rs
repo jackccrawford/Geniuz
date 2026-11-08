@@ -8,7 +8,7 @@ use std::path::PathBuf;
     about = "Your AI remembers now",
     long_about = "GENIUZ: Your AI remembers now.\n\nYour AI starts every conversation from zero. Geniuz keeps what matters,\nthe calls you made and the reasons behind them, on your own computer,\nwhere any AI you use can find it: Claude Desktop through MCP, or any\nagent that can run a command. A memory is never edited, so the record holds.",
     before_help = "Start here: 'geniuz recall' shows what's in your folder.",
-    after_help = "Examples:\n  geniuz keep -c \"Chose the smaller vendor: faster support\" -g \"decision: vendor\"\n  geniuz recall \"vendor\"                 Search by meaning\n  geniuz recall --grep Acme              Exact words: every line that has them\n  geniuz recall 13625F6B:3487B9B0        Open one memory by its address\n  geniuz recall --all \"pricing\"          Every folder at once\n  geniuz capture ./policies/             Keep a folder of documents\n\nFolders: 'geniuz folder list' shows them; -f <name> uses one for a command.\n  A project, a team, an agent: each can have its own, or share one.\n\nData: everything stays in .geniuz in your home directory.\n  GENIUZ_HOME moves it; GENIUZ_DB names one memory file.\n\nUse \"geniuz <command> --help\" for more."
+    after_help = "Examples:\n  geniuz keep -c \"Chose the smaller vendor: faster support\" -g \"decision: vendor\"\n  geniuz recall \"vendor\"                 Search by meaning\n  geniuz recall --grep Acme              Literal text: every line that has it\n  geniuz recall 13625F6B:3487B9B0        Open one memory by its address\n  geniuz recall --all \"pricing\"          Every folder at once\n  geniuz capture ./policies/             Keep a folder of documents\n\nFolders: 'geniuz folder list' shows them; -f <name> uses one for a command.\n  A project, a team, an agent: each can have its own, or share one.\n\nData: everything stays in .geniuz in your home directory.\n  GENIUZ_HOME moves it; GENIUZ_DB names one memory file.\n\nUse \"geniuz <command> --help\" for more."
 )]
 pub struct Cli {
     // -f and --folder as well: agents name a folder on most calls, so it gets a short
@@ -207,7 +207,7 @@ pub enum Command {
         json: bool,
     },
 
-    /// Make memories that missed it searchable by meaning
+    /// Make memories without an embedding searchable by meaning
     #[command(
         after_help = "Embeds all content using ONNX (paraphrase-multilingual-MiniLM-L12-v2).\nFirst run downloads the model (~118MB). Subsequent runs only process new memories."
     )]

@@ -111,7 +111,13 @@ fn list(reg: &Registry, json: bool) -> Result<String, String> {
     for dir in &scan.pending_moves {
         lines.push(format!("? An unfinished move at {} is waiting for its original to be reachable.", dir.display()));
     }
-    for dir in &scan.unavailable {
+    if let Some(why) = &scan.first_folder_problem {
+        lines.push(format!("? {}", why));
+    }
+    // The data directory comes first in `unavailable` when the first folder failed;
+    // its reason is already said above.
+    let skip = usize::from(scan.first_folder_problem.is_some());
+    for dir in scan.unavailable.iter().skip(skip) {
         lines.push(format!("? Can't reach {} right now.", dir.display()));
     }
     Ok(lines.join("\n"))
@@ -156,6 +162,7 @@ fn list_json(reg: &Registry, scan: &Scan, using: &Option<PathBuf>) -> Result<Str
         "folders": folders,
         "blocked": blocked,
         "unavailable": scan.unavailable,
+        "first_folder_problem": scan.first_folder_problem,
     }))
     .map_err(|e| e.to_string())
 }

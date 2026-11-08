@@ -183,7 +183,7 @@ impl Settings {
                 Ok(v.as_str().to_string())
             }
             "recent_memories_count" => {
-                let v: u32 = value.parse().map_err(|_| format!("invalid count '{}': expected 0 or more", value))?;
+                let v: u32 = value.parse().map_err(|_| format!("invalid count '{}': expected a whole number, 0 or more", value))?;
                 self.recent_memories_count = v;
                 Ok(v.to_string())
             }

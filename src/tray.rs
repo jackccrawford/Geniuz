@@ -318,6 +318,7 @@ struct TrayApp {
     update_id: Option<(MenuId, String)>,
     /// An update check is running on its own thread.
     checking_update: Arc<std::sync::atomic::AtomicBool>,
+    last_update_attempt: Option<std::time::Instant>,
     last_tooltip_refresh: std::time::Instant,
 }
 
@@ -408,10 +409,15 @@ impl ApplicationHandler for TrayApp {
         if self.last_tooltip_refresh.elapsed() >= Duration::from_secs(5) {
             // An update check when one is due, on its own thread: it can take seconds.
             use std::sync::atomic::Ordering;
-            let settings = geniuz::settings::Settings::load();
-            if geniuz::update::due(&settings, chrono::Utc::now())
-                && !self.checking_update.swap(true, Ordering::SeqCst)
-            {
+            // Settings that can't be read mean no check: an opt-out must not be lost to a
+            // damaged file. And at most one attempt an hour, even if update.json can't be
+            // saved to record it.
+            let allowed = geniuz::settings::Settings::load_strict()
+                .map(|s| geniuz::update::due(&s, chrono::Utc::now()))
+                .unwrap_or(false)
+                && self.last_update_attempt.map_or(true, |t| t.elapsed() >= Duration::from_secs(3600));
+            if allowed && !self.checking_update.swap(true, Ordering::SeqCst) {
+                self.last_update_attempt = Some(std::time::Instant::now());
                 let flag = self.checking_update.clone();
                 std::thread::spawn(move || {
                     if let Err(e) = geniuz::update::check() {
@@ -476,6 +482,7 @@ fn main() {
         folder_ids,
         update_id,
         checking_update: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        last_update_attempt: None,
         last_tooltip_refresh: std::time::Instant::now(),
     };
 
