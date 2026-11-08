@@ -3,7 +3,7 @@
 // Two-field form: Gist (single line) + Content (multi-line). Matches the TUI's
 // two-field compose. Gist is optional; if blank the chassis auto-derives one
 // from the first 200 chars of content. Submit calls `remember_memory` which
-// wraps `db::signal()` — same write path as the CLI and TUI.
+// wraps `db::keep()` — same write path as the CLI and TUI.
 //
 // Reply to: optional, the memory this one threads to. Empty
 // starts a new thread, as before. Pick a memory by searching the chosen folder,

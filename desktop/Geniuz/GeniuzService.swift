@@ -539,8 +539,13 @@ class GeniuzService: ObservableObject {
         }
         // Keep fields this app doesn't know (written by the command line, another app
         // or a newer Geniuz): only the ones it does know are replaced.
-        if let existing = FileManager.default.contents(atPath: path),
-           let old = (try? JSONSerialization.jsonObject(with: existing)) as? [String: Any] {
+        // A file that exists but can't be read as settings is left alone, as the
+        // command line does: saving over it would lose what's in it.
+        if let existing = FileManager.default.contents(atPath: path) {
+            guard let old = (try? JSONSerialization.jsonObject(with: existing)) as? [String: Any] else {
+                NSLog("[geniuz-app] %@ can't be read as settings; not saving over it", path)
+                return
+            }
             merged = old.merging(merged) { _, mine in mine }
         }
         guard let data = try? JSONSerialization.data(withJSONObject: merged, options: [.prettyPrinted, .sortedKeys]) else {

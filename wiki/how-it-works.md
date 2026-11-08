@@ -33,7 +33,7 @@ A folder's UUID is permanent, and so is the UUID of every memory in it, and addr
 ## When you keep
 
 1. The command reads your text, which can be inline, from a file (`-c @notes.md`) or piped in (`-c -`).
-2. [`signal_with_backend`](../src/db.rs) refuses empty content and creates an ID. If you named a parent, it looks it up. An unknown parent does not stop the write: the memory is saved as the start of a new thread.
+2. [`keep_with_backend`](../src/db.rs) refuses empty content and creates an ID. If you named a parent, it looks it up. An unknown parent does not stop the write: the memory is saved as the start of a new thread.
 3. The text is turned into an embedding, a list of numbers that represents its meaning. Geniuz asks the small background helper first, then falls back to loading the model itself.
 4. If embedding fails, the memory is still saved and can be found by keyword until it is embedded later.
 5. The memory and its embedding are written in one transaction.
