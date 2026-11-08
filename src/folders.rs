@@ -33,7 +33,6 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 const DB_FILE: &str = "memory.db";
-const LEGACY_DB_FILE: &str = "station.db";
 const ADDED_FILE: &str = "added-folders";
 const CURRENT_FILE: &str = "current";
 /// What `current` holds when the person chose no default folder.
@@ -136,12 +135,9 @@ impl Registry {
         self.home.join(CURRENT_FILE)
     }
 
-    /// The database of the first folder: `memory.db`, or an older `station.db`
-    /// if that is all there is.
+    /// The database of the first folder.
     fn default_db(&self) -> PathBuf {
-        let db = self.home.join(DB_FILE);
-        let legacy = self.home.join(LEGACY_DB_FILE);
-        if !db.exists() && legacy.exists() { legacy } else { db }
+        self.home.join(DB_FILE)
     }
 
     /// Create the first folder if needed and give it an identity in place. The
@@ -910,12 +906,9 @@ pub fn validate_name(name: &str) -> Result<String, String> {
 /// The databases directly in `root` and one level below it.
 fn candidates(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
-    for file in [DB_FILE, LEGACY_DB_FILE] {
-        let db = root.join(file);
-        if db.is_file() {
-            out.push(db);
-            break;
-        }
+    let db = root.join(DB_FILE);
+    if db.is_file() {
+        out.push(db);
     }
     let Ok(entries) = std::fs::read_dir(root) else { return out };
     let mut dirs: Vec<_> = entries
@@ -1060,15 +1053,13 @@ fn is_geniuz_store(db: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// The table holding a store's memories and its UUID column: the current names,
-/// or the ones from before the rename, which are migrated when the store is opened.
+/// The table holding a store's memories and its UUID column. Files from before
+/// Geniuz 4.0 used other names; they are brought forward by a script, not read here.
 fn memory_table(conn: &Connection) -> Result<(&'static str, &'static str), String> {
-    for (table, column) in [("memories", "memory_uuid"), ("memories", "signal_uuid"), ("signals", "signal_uuid")] {
-        if conn.prepare(&format!("SELECT {} FROM {} LIMIT 1", column, table)).is_ok() {
-            return Ok((table, column));
-        }
+    if conn.prepare("SELECT memory_uuid FROM memories LIMIT 1").is_ok() {
+        return Ok(("memories", "memory_uuid"));
     }
-    Err("It has no memory table.".to_string())
+    Err("It has no memory table from Geniuz 4.0 or later.".to_string())
 }
 
 /// Every memory ID in a store, normalised for comparing.
@@ -1464,11 +1455,20 @@ mod tests {
     }
 
     #[test]
-    fn older_station_db_is_still_found() {
-        let (_tmp, reg) = setup();
-        crate::db::DatabaseManager::new(&reg.home.join(LEGACY_DB_FILE).to_string_lossy()).unwrap();
-        assert_eq!(reg.ensure_default().unwrap().file_name().unwrap(), LEGACY_DB_FILE);
-        assert!(!reg.home.join(DB_FILE).exists());
+    fn a_file_from_before_4_0_is_refused_and_left_unchanged() {
+        let tmp = TempDir::new().unwrap();
+        for schema in [
+            "CREATE TABLE signals (signal_uuid TEXT, payload TEXT, created_at TEXT);",
+            "CREATE TABLE memories (signal_uuid TEXT, payload TEXT, created_at TEXT);",
+        ] {
+            let db = tmp.path().join("old.db");
+            let _ = std::fs::remove_file(&db);
+            Connection::open(&db).unwrap().execute_batch(schema).unwrap();
+            let before = std::fs::read(&db).unwrap();
+            let err = crate::db::DatabaseManager::new(&db.to_string_lossy()).err().unwrap();
+            assert!(err.contains("before 4.0") && err.contains(crate::db::MIGRATION_SCRIPT), "{err}");
+            assert_eq!(std::fs::read(&db).unwrap(), before, "not touched");
+        }
     }
 
     #[test]
@@ -1956,15 +1956,15 @@ mod tests {
     }
 
     #[test]
-    fn review6_identical_legacy_stores_get_one_identity() {
+    fn review6_identical_unstamped_stores_get_one_identity() {
         let tmp = TempDir::new().unwrap();
         let (a, b) = (tmp.path().join("a.db"), tmp.path().join("b.db"));
         for db in [&a, &b] {
             Connection::open(db).unwrap().execute_batch(&format!(
                 "CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT);
                  INSERT INTO _meta VALUES ('product','geniuz');
-                 CREATE TABLE signals (signal_uuid TEXT, payload TEXT, created_at TEXT);
-                 INSERT INTO signals VALUES ('{}','{{}}','2026-01-01 00:00:00');", M1
+                 CREATE TABLE memories (memory_uuid TEXT, payload TEXT, created_at TEXT);
+                 INSERT INTO memories VALUES ('{}','{{}}','2026-01-01 00:00:00');", M1
             )).unwrap();
             stamp(db, "x").unwrap();
         }

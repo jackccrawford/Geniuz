@@ -33,6 +33,25 @@ fn unembedded_share(limit: usize, semantic_hits: usize, unembedded_hits: usize) 
 /// The names Geniuz has written into a store's `product` field over time.
 pub const OWN_PRODUCTS: [&str; 3] = ["geniuz", "clawmark", "relay-for-claw"];
 
+/// Where a file from before Geniuz 4.0 can be brought forward.
+pub const MIGRATION_SCRIPT: &str = "schema/migrate-before-4.0.sql";
+
+/// A file from before Geniuz 4.0 (a `signals` table, or a `signal_uuid` column) is
+/// refused with the way forward, not converted in place.
+fn check_format(conn: &Connection, db_path: &str) -> Result<(), String> {
+    let has = |sql: &str| conn.query_row(sql, [], |_| Ok(())).is_ok();
+    let old = has("SELECT 1 FROM sqlite_master WHERE type='table' AND name='signals'")
+        || has("SELECT 1 FROM pragma_table_info('memories') WHERE name='signal_uuid'");
+    if old {
+        return Err(format!(
+            "{} is from a Geniuz before 4.0, which this version doesn't open. To bring it forward, \
+             back it up and run {} on it (it has the steps), from the Geniuz repository.",
+            db_path, MIGRATION_SCRIPT
+        ));
+    }
+    Ok(())
+}
+
 /// Opening a store updates its schema, so a store another product wrote is
 /// refused before anything touches it. A file with no `_meta` is new or empty.
 fn check_product(conn: &Connection, db_path: &str) -> Result<(), String> {
@@ -73,6 +92,10 @@ impl DatabaseManager {
 
     fn prepare(conn: Connection, db_path: &str) -> Result<Self, String> {
         check_product(&conn, db_path)?;
+        // Files from before Geniuz 4.0 keep memories in a `signals` table. Geniuz
+        // doesn't convert them on open: a script does that, run on purpose, with a
+        // backup first. Refused here before anything writes to the file.
+        check_format(&conn, db_path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL;")
             .map_err(|e| format!("Failed to enable WAL: {}", e))?;
         conn.busy_timeout(std::time::Duration::from_secs(30))
@@ -84,29 +107,8 @@ impl DatabaseManager {
             [], |_| Ok(true),
         ).unwrap_or(false);
 
-        let has_legacy: bool = conn.query_row(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='signals'",
-            [], |_| Ok(true),
-        ).unwrap_or(false);
-
-        if has_legacy && !has_memories {
-            // Migrate old schema: signals → memories, signal_uuid → memory_uuid
-            conn.execute_batch("
-                ALTER TABLE signals RENAME TO memories;
-                ALTER TABLE memories RENAME COLUMN signal_uuid TO memory_uuid;
-                ALTER TABLE signal_embeddings RENAME TO memory_embeddings;
-                ALTER TABLE memory_embeddings RENAME COLUMN signal_uuid TO memory_uuid;
-                DROP VIEW IF EXISTS signal_chains;
-                DROP TRIGGER IF EXISTS prevent_signal_delete;
-                DROP TRIGGER IF EXISTS prevent_signal_update;
-            ").map_err(|e| format!("Failed to migrate schema: {}", e))?;
-            // Recreate views and triggers with new names
-            let schema = include_str!("../schema/schema.sql");
-            conn.execute_batch(schema)
-                .map_err(|e| format!("Failed to apply schema after migration: {}", e))?;
-            eprintln!("[geniuz] Migrated legacy schema (signals → memories)");
-        } else if !has_memories {
-            // Fresh database — create from scratch
+        if !has_memories {
+            // Fresh database: create from scratch
             let schema = include_str!("../schema/schema.sql");
             conn.execute_batch(schema)
                 .map_err(|e| format!("Failed to init schema: {}", e))?;

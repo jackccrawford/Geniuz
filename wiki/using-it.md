@@ -159,6 +159,8 @@ Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory
 
 Read the schema freely, and write through Geniuz, which keeps embeddings and identity right.
 
+**A memory file from before Geniuz 4.0** isn't opened: Geniuz says so and names [`schema/migrate-before-4.0.sql`](../schema/migrate-before-4.0.sql), which brings it forward once, with a backup first. The steps are in the script, written so an AI agent can carry them out.
+
 ## Settings
 
 | Variable | What it does |
