@@ -1387,16 +1387,30 @@ pub fn status() -> Result<String, String> {
         ));
     }
 
-    // Station info
-    let station = crate::default_db_path();
-    if station.exists() {
-        if let Ok(db) = crate::get_db() {
-            let count = db.count().unwrap_or(0);
-            let embeddings = db.embedding_count().unwrap_or(0);
-            lines.push(format!("Folder: {} ({} memories, {}/{} embedded)", station.display(), count, embeddings, count));
+    // The folder a memory goes to when it names none: the one resolve picks.
+    let reg = geniuz::folders::Registry::from_env();
+    match crate::resolve_db_path() {
+        Err(_) if reg.no_default() => {
+            lines.push("Folder: no default; each memory names its folder".to_string());
         }
-    } else {
-        lines.push("Folder: not created yet (will be created on first keep)".to_string());
+        Err(e) => lines.push(format!("Folder: {}", e)),
+        Ok(path) if !path.exists() => {
+            lines.push("Folder: not created yet (will be created on first keep)".to_string());
+        }
+        Ok(path) => {
+            let name = reg
+                .scan()
+                .folders
+                .into_iter()
+                .find(|f| std::fs::canonicalize(&f.db_path).ok() == std::fs::canonicalize(&path).ok())
+                .map(|f| format!("{} ({})", f.name, f.short_id()))
+                .unwrap_or_else(|| path.display().to_string());
+            if let Ok(db) = crate::get_db() {
+                let count = db.count().unwrap_or(0);
+                let embeddings = db.embedding_count().unwrap_or(0);
+                lines.push(format!("Folder: {} ({} memories, {}/{} embedded)", name, count, embeddings, count));
+            }
+        }
     }
 
     if !any_installed {

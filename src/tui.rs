@@ -312,7 +312,7 @@ impl App {
                 self.status = format!(
                     "{} memories · db: {}",
                     count,
-                    crate::resolve_db_path().map(|p| p.display().to_string()).unwrap_or_default()
+                    crate::resolve_db_path().map(|p| p.display().to_string()).unwrap_or_else(|e| e)
                 );
             }
             "version" => {

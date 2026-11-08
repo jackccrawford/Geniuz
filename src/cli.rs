@@ -150,7 +150,7 @@ pub enum Command {
     },
 
     /// See and manage your folders
-    #[command(subcommand)]
+    #[command(subcommand, alias = "folders")]
     Folder(FolderCommand),
 
     /// Capture files or directories into a folder
