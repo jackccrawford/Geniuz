@@ -42,6 +42,8 @@ struct Status {
     folders: Vec<(String, String, bool)>,
     /// The default was set to none: every memory must name its folder.
     no_default: bool,
+    /// A newer release, from the last update check.
+    update: Option<geniuz::update::Available>,
 }
 
 impl Status {
@@ -92,6 +94,7 @@ impl Status {
         Status {
             folders,
             no_default,
+            update: geniuz::update::available(),
             memory_count,
             station_exists,
             recent_gists,
@@ -200,6 +203,8 @@ struct MenuBuild {
     /// Folder rows, each with the UUID it switches to. Other submenu items are
     /// disabled (no click action), so we don't track their IDs.
     folder_ids: Vec<(MenuId, String)>,
+    /// The Download row, with the link it opens, when an update is available.
+    update_id: Option<(MenuId, String)>,
 }
 
 /// The "None: ask which folder" row, told apart from folder UUIDs by this name.
@@ -215,6 +220,12 @@ fn build_menu(status: &Status) -> MenuBuild {
         None,
     );
     menu.append(&header).ok();
+    // A newer release, when the last check found one: the one thing worth a click here.
+    let update_id = status.update.as_ref().map(|u| {
+        let item = MenuItem::new(format!("Geniuz {} is available: Download", u.version), true, None);
+        menu.append(&item).ok();
+        (item.id().clone(), u.url.clone())
+    });
     menu.append(&PredefinedMenuItem::separator()).ok();
 
     // The default folder: where Claude, the command line and the MCP keep a memory
@@ -281,6 +292,7 @@ fn build_menu(status: &Status) -> MenuBuild {
         configure_id,
         quit_id,
         folder_ids,
+        update_id,
     }
 }
 
@@ -303,6 +315,9 @@ struct TrayApp {
     current_configure_id: Arc<Mutex<Option<MenuId>>>,
     current_quit_id: Arc<Mutex<MenuId>>,
     folder_ids: Vec<(MenuId, String)>,
+    update_id: Option<(MenuId, String)>,
+    /// An update check is running on its own thread.
+    checking_update: Arc<std::sync::atomic::AtomicBool>,
     last_tooltip_refresh: std::time::Instant,
 }
 
@@ -321,6 +336,7 @@ impl TrayApp {
         *self.current_configure_id.lock().unwrap() = build.configure_id;
         *self.current_quit_id.lock().unwrap() = build.quit_id;
         self.folder_ids = build.folder_ids;
+        self.update_id = build.update_id;
     }
 
     fn refresh_tooltip_only(&mut self) {
@@ -348,6 +364,14 @@ impl ApplicationHandler for TrayApp {
             if event.id == quit {
                 event_loop.exit();
                 return;
+            }
+            if let Some((id, url)) = &self.update_id {
+                if event.id == *id {
+                    if let Err(e) = geniuz::update::open(url) {
+                        eprintln!("[geniuz-tray] opening the download failed: {}", e);
+                    }
+                    return;
+                }
             }
             let chosen = self.folder_ids.iter().find(|(id, _)| *id == event.id).map(|(_, uuid)| uuid.clone());
             if let Some(uuid) = chosen {
@@ -382,6 +406,20 @@ impl ApplicationHandler for TrayApp {
         // isn't visible; it rebuilds on right-click via Windows tray mechanics
         // when set_menu is next called.
         if self.last_tooltip_refresh.elapsed() >= Duration::from_secs(5) {
+            // An update check when one is due, on its own thread: it can take seconds.
+            use std::sync::atomic::Ordering;
+            let settings = geniuz::settings::Settings::load();
+            if geniuz::update::due(&settings, chrono::Utc::now())
+                && !self.checking_update.swap(true, Ordering::SeqCst)
+            {
+                let flag = self.checking_update.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = geniuz::update::check() {
+                        eprintln!("[geniuz-tray] update check: {}", e);
+                    }
+                    flag.store(false, Ordering::SeqCst);
+                });
+            }
             self.refresh_tooltip_only();
             // Also rebuild the menu so the next right-click is fresh.
             self.rebuild_menu();
@@ -427,6 +465,7 @@ fn main() {
     let current_configure_id = Arc::new(Mutex::new(build.configure_id));
     let current_quit_id = Arc::new(Mutex::new(build.quit_id));
     let folder_ids = build.folder_ids;
+    let update_id = build.update_id;
 
     let mut app = TrayApp {
         tray,
@@ -435,6 +474,8 @@ fn main() {
         current_configure_id,
         current_quit_id,
         folder_ids,
+        update_id,
+        checking_update: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         last_tooltip_refresh: std::time::Instant::now(),
     };
 
