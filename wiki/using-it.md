@@ -24,6 +24,10 @@ cp target/release/geniuz ~/.local/bin/
 
 To build the dashboard as well: `cd desktop/dashboard && cargo tauri build`.
 
+### Updates
+
+On a Mac, the menubar tells you when a newer Geniuz is out, and **Download** opens it. Install it the same way, by dragging it to Applications. Under **Settings → Updates** you choose how often it checks (daily, weekly, or only when you ask) or check now. The dashboard's Status page shows the same answer. A check asks GitHub for the latest release and sends nothing from your folders.
+
 ## Connect your AI
 
 | You use | Next step |
@@ -41,6 +45,8 @@ geniuz keep -c "what happened" -g "category: short summary"
 geniuz keep -c @notes.md -g "session: review"
 echo "content" | geniuz keep -c - -g "piped: from a process"
 geniuz keep -c "follow-up" -g "update" -p 98672A90
+geniuz keep -c "what we decided" -g "decision: pricing" --at 2026-03-21
+geniuz -f Work keep -c "for the Work folder" -g "note: client call"
 
 geniuz recall "topic"
 geniuz recall "topic" --since 7d
@@ -61,13 +67,21 @@ geniuz capture ./docs/
 geniuz backfill
 geniuz status
 geniuz watch
+geniuz watch --since 13625F6B:9D778206 --exec "echo {uuid} {gist}"
+geniuz watch --once --since 13625F6B:9D778206
 geniuz mcp install
 geniuz mcp status
 geniuz mcp serve
 geniuz settings list
 ```
 
-`geniuz remember` still works as another name for `keep`, and `geniuz recent` for `recall` with no search. `keep` and `recall` take `--in <folder>`, as does every other command that reads or writes memories.
+`keep` answers with the new memory's address, such as `Kept 13625F6B:F96D91B4`. Anyone can open it from any folder with `geniuz recall 13625F6B:F96D91B4`, so it's the thing to pass along.
+
+`--at` dates a memory to when it happened, for notes and records you bring in from somewhere else: a date (`2026-03-21`), a local time (`"2026-03-21 14:00"`) or RFC 3339. A future time is refused.
+
+Every command takes `-f <folder>` (or `--in <folder>`), anywhere on the line, to use that folder for one command. `watch --since` takes an address and shows only what came after it. Give it the last address you saw and it continues where you stopped, even after a restart. `--once` checks a single time and exits with 0 if there's something new, which suits a script.
+
+`geniuz remember` still works as another name for `keep`, and `geniuz recent` for `recall` with no search.
 
 ## Folders
 
@@ -78,6 +92,7 @@ geniuz folder show Work
 geniuz folder create Work -d "Client projects. No passwords here."
 geniuz folder create Notes --at ~/notes
 geniuz folder use Work
+geniuz folder use --none
 geniuz folder rename Work Clients
 geniuz folder describe Clients "Client projects, and who owns them."
 geniuz folder add /some/directory
@@ -89,7 +104,23 @@ geniuz folder pin Clients
 geniuz folder unpin Clients
 ```
 
-In the dashboard, folders are in the sidebar and in the Folders menu. Click the pin beside a name to keep it at the top of every list. Keep has a pulldown for choosing a folder, and Find can search any selection of them. To give a project its own folder, put the folder's name in a `.geniuz-folder` file in the project.
+**A name or an ID, either one.** Wherever a command takes a folder, you can give its name or the first 8 characters of its ID, in any case: `Work`, `work` and `95e6e59c` all open the same folder, and so does the full ID. A typo is an error, never a near match. If two folders share a name, use the ID; if two IDs share their first 8 characters (very unlikely), use the name or the full ID.
+
+In the dashboard, folders are in the sidebar and in the Folders menu. Click the pin beside a name to keep it at the top of every list. Keep has a pulldown for choosing a folder, and Find can search any selection of them. A folder that sits in a directory named `agents` is listed under **Agents**, and the rest under **Shared**, so each agent's own folder is easy to tell from the ones it shares.
+
+To give a project its own folder, put the folder's name or ID in a `.geniuz-folder` file in the project. Commands run there, and agents working there, use that folder.
+
+### The default folder
+
+When a command or your AI names no folder, the memory goes to the default. Choose it under **Settings → Default folder** in the menubar, or with `geniuz folder use <folder>`. In the dashboard sidebar a small dot marks it.
+
+Looking is not choosing. Opening a folder in the dashboard or the Mac menubar shows it to you; it doesn't change where new memories go. Keeping from the dashboard uses the folder you're looking at, which the pulldown shows.
+
+You can also choose **None: ask which folder** (or `geniuz folder use --none`). Then nothing is kept by guess: a command that names no folder stops and asks for one. A project's `.geniuz-folder` still applies.
+
+### Reading a folder
+
+The memories view loads 100 at a time, newest or oldest first, and loads more as you scroll. Memories are numbered by age, so #1 is always the oldest, whichever way you sort.
 
 Editing a description keeps the old wording. Your first folder, "My memory", can be renamed, but it can't be moved or archived, because other files live beside it.
 
@@ -120,7 +151,7 @@ On Windows and Linux, use Ctrl in place of ⌘.
 
 ## Where your data lives
 
-Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory per folder you made, `archive/`, `models/`, `settings.json` and `bin/`. A few small files hold your choices: `current`, `added-folders`, `pinned-folders` and `shortcuts.json`.
+Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory per folder you made, `archive/`, `models/`, `settings.json` and `bin/`. A few small files hold your choices: `current` (the default folder, or `none`), `added-folders`, `pinned-folders` and `shortcuts.json`.
 
 **To back up**, use Export under Data & Export in the dashboard, which saves the folder in use as one complete file. Time Machine and similar tools are fine too. A backup is a file to keep, not a folder to use: it holds the same permanent IDs, so Geniuz refuses it while the original is present.
 

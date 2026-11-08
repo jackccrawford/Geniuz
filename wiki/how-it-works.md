@@ -20,7 +20,7 @@ The same file serves many uses: a project, a standard, a knowledge base, persona
 
 Geniuz looks in two places: its data directory, and directories you added on purpose. It reads each one level down and never searches your disk. That decides what Geniuz shows. Your file permissions decide who can read, so a file it can't read is simply left out. The rules are in [`src/folders.rs`](../src/folders.rs).
 
-A command uses the first of these that applies: `--in <name>`, the `GENIUZ_DB` file path, a `.geniuz-folder` file in this directory or a parent, the folder chosen with `geniuz folder use`, then "My memory". A name that matches nothing is an error, so a typo can't send a memory somewhere else. In the dashboard, Keep has a pulldown for the folder, and an open window stays with the folder it shows.
+A command uses the first of these that applies: `-f <folder>` (or `--in`), the `GENIUZ_DB` file path, a `.geniuz-folder` file in this directory or a parent, the default folder, then "My memory". If you set the default to none, the last two steps are skipped and the command asks for a folder instead. A folder can be named or given by its short ID, and one that matches nothing is an error, so a typo can't send a memory somewhere else. In the dashboard, Keep has a pulldown for the folder, and an open window stays with the folder it shows. Looking at a folder never changes the default: that is a setting, changed only on purpose.
 
 ### One of each
 
@@ -37,6 +37,13 @@ A folder's UUID is permanent, and so is the UUID of every memory in it, and addr
 3. The text is turned into an embedding, a list of numbers that represents its meaning. Geniuz asks the small background helper first, then falls back to loading the model itself.
 4. If embedding fails, the memory is still saved and can be found by keyword until it is embedded later.
 5. The memory and its embedding are written in one transaction.
+6. Geniuz answers with the memory's address, folder then memory, such as `13625F6B:F96D91B4`.
+
+A memory is dated now, unless you pass `--at` with when it happened. That is for memories brought in from somewhere else, so a record imported today still sorts where it belongs. A future time is refused.
+
+## When you watch
+
+`geniuz watch` checks a folder every five minutes, or as often as `--interval` says, and shows each memory kept since the last check, or runs a command for it with `--exec`. With `--since` and an address it starts after that memory, so a watcher that saves the last address it saw picks up exactly where it stopped. An address also says which folder to watch. Two memories kept in the same second are both seen, in the order they were written.
 
 ## When you recall
 
@@ -72,6 +79,6 @@ When Geniuz runs, it stores all your data locally, in a file on your computer. T
 For completeness, Geniuz reaches the network in a few small ways, and none of them sends your memories:
 
 - **Hugging Face:** to download the model, once.
-- **GitHub:** when you run the install script or download a release.
+- **GitHub:** when you run the install script or download a release, and when the Mac menubar checks for a newer version. That check sends the version you have and nothing from your folders. In Settings you can make it weekly, only when you ask, or turn it off.
 
 Geniuz itself sends memory text to another address in only one case: if the built-in model fails to load and `GENIUZ_EMBED_URL` points at another machine, text goes there to be embedded. By default that address is your own machine. What you recall through an AI tool goes wherever that tool sends it.

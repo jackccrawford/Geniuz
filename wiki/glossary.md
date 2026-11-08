@@ -8,7 +8,10 @@
 | Thread | Memories linked by parent, such as a problem and its solution. |
 | Parent | The earlier memory that a memory replies to. |
 | Folder | A directory holding one `memory.db`, with its own permanent UUID, name and description. |
-| Address | Two short IDs that open one memory from anywhere: `13625F6B:3487B9B0`, folder then memory. |
+| Address | Two short IDs that open one memory from anywhere: `13625F6B:3487B9B0`, folder then memory. `keep` answers with one. |
+| Short ID | The first 8 characters of a UUID. A folder's short ID works anywhere its name does. |
+| Default folder | Where a memory goes when nothing names a folder. A setting, which can be none: then Geniuz asks. |
+| Agents, Shared | The two groups in the sidebar. A folder in a directory named `agents` is an agent's own; the rest are shared. |
 | Allow list | The directories you added, where Geniuz looks for folders besides its own data directory. |
 | Pin | Keeping a folder at the top of every list. |
 | Archive | Hiding a folder by moving it into `archive/`. Nothing is deleted, and it can be restored. |

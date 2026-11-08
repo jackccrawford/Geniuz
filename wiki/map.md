@@ -8,8 +8,8 @@ The ways in, for you and for your AI.
 
 | Part | What it does | Guardrail | Source |
 |---|---|---|---|
-| Dashboard | The desktop app. Browse, keep and find across your folders, pin the ones you use most, and change your shortcuts. | A window stays with the folder it shows, so a draft can't land somewhere else. | [`desktop/dashboard`](../desktop/dashboard) |
-| Menubar | The folder in use, a way to switch, and your recent memories, always one click away. A tray menu on Windows and Linux. | The Mac menubar only ever reads your memories. | [`desktop/Geniuz`](../desktop/Geniuz), [`src/tray.rs`](../src/tray.rs) |
+| Dashboard | The desktop app. Browse, keep and find across your folders, pin the ones you use most, and change your shortcuts. | A window stays with the folder it shows, so a draft can't land somewhere else. Looking at a folder doesn't change your default. | [`desktop/dashboard`](../desktop/dashboard) |
+| Menubar | Your folders and recent memories, always one click away, and Settings for the default folder and updates. A tray menu on Windows and Linux. | The Mac menubar only ever reads your memories. | [`desktop/Geniuz`](../desktop/Geniuz), [`src/tray.rs`](../src/tray.rs) |
 | MCP | How your AI reaches Geniuz: `keep`, `recall` and `folders`, plus guidance on when to use them. | A wrong folder name is an error, never a different folder. | [`src/mcp.rs`](../src/mcp.rs) |
 | CLI | Every command, for people, scripts and agents. | `capture` refuses files that are not prose unless you pass `--force`. | [`src/cli.rs`](../src/cli.rs), [`src/main.rs`](../src/main.rs) |
 | Terminal UI | Browse and compose in a terminal. | Refuses to start without a real terminal. | [`src/tui.rs`](../src/tui.rs) |
@@ -34,6 +34,7 @@ Reached only when needed, and never with your memories by default.
 |---|---|---|---|
 | Hugging Face | Where the model is downloaded from. | Once, then local. | [`src/embedding.rs`](../src/embedding.rs) |
 | Ollama | A second way to embed, by default on your own machine. | Used only if the built-in model fails to load. | [`src/embedding.rs`](../src/embedding.rs) |
+| GitHub | Where the Mac menubar checks for a newer release. | Sends nothing from your folders. Daily, weekly or only when you ask. | [`desktop/Geniuz`](../desktop/Geniuz) |
 
 ## Connections
 
@@ -43,6 +44,7 @@ Reached only when needed, and never with your memories by default.
 | Dashboard | Library | app commands |
 | Menubar | CLI | asks which folder is in use |
 | Menubar | Store | read-only SQL |
+| Menubar | GitHub | update check |
 | MCP | Folders | finds the folder for each call |
 | MCP | Library | tool calls |
 | CLI | Folders | finds the folder for each command |
