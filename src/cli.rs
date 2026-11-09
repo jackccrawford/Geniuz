@@ -8,7 +8,7 @@ use std::path::PathBuf;
     about = "Your AI remembers now",
     long_about = "GENIUZ: Your AI remembers now.\n\nYour AI starts every conversation from zero. Geniuz keeps what matters,\nthe calls you made and the reasons behind them, on your own computer,\nwhere any AI you use can find it: Claude Desktop through MCP, or any\nagent that can run a command. A memory is never edited, so the record holds.",
     before_help = "Start here: 'geniuz recall' shows what's in your folder.",
-    after_help = "Examples:\n  geniuz keep -c \"Chose the smaller vendor: faster support\" -g \"decision: vendor\"\n  geniuz recall \"vendor\"                 Search by meaning\n  geniuz recall --grep Acme              Literal text: every line that has it\n  geniuz recall 13625F6B:3487B9B0        Open one memory by its address\n  geniuz recall --all \"pricing\"          Every folder at once\n  geniuz capture ./policies/             Keep a folder of documents\n\nFolders: 'geniuz folder list' shows them; -f <name> uses one for a command.\n  A project, a team, an agent: each can have its own, or share one.\n\nData: everything stays in .geniuz in your home directory.\n  GENIUZ_HOME moves it; GENIUZ_DB names one memory file.\n\nUse \"geniuz <command> --help\" for more."
+    after_help = "Examples:\n  geniuz keep -f Work -c \"Chose the smaller vendor: faster support\" -g \"decision: vendor\"\n  geniuz recall \"vendor\"                 Search by meaning\n  geniuz recall --grep Acme              Literal text: every line that has it\n  geniuz recall 13625F6B:3487B9B0        Open one memory by its address\n  geniuz recall --all \"pricing\"          Every folder at once\n  geniuz capture ./policies/             Keep a folder of documents\n\nFolders: 'geniuz folder list' shows them; -f <name> uses one for a command.\n  A project, a team, an agent: each can have its own, or share one.\n\nData: everything stays in .geniuz in your home directory.\n  GENIUZ_HOME moves it; GENIUZ_DB names one memory file.\n\nUse \"geniuz <command> --help\" for more."
 )]
 pub struct Cli {
     // -f and --folder as well: agents name a folder on most calls, so it gets a short
@@ -44,7 +44,7 @@ pub enum Command {
     #[command(
         alias = "remember",
         arg_required_else_help = true,
-        after_help = "Examples:\n  geniuz keep -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz keep -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz keep -c - -g \"piped: from process\"\n\nThe gist is required: it's how future agents find this memory. Write for them."
+        after_help = "Examples:\n  geniuz keep -f Work -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz keep -f LIMEN -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz keep -f Work -c - -g \"piped: from process\"\n\nThe folder and the gist are required: name where it goes, and write the gist for whoever finds it next. `geniuz folders` lists the folders."
     )]
     Keep {
         /// Content to save
@@ -152,7 +152,7 @@ pub enum Command {
     /// Capture files or directories into a folder
     #[command(
         arg_required_else_help = true,
-        after_help = "Examples:\n  geniuz capture notes.md                              Single file\n  geniuz capture ./docs/                               All .md files in directory\n  geniuz capture *.md                                  Shell glob\n  geniuz capture --split notes.md                      Split by ## headers\n  geniuz capture --gist-prefix \"docs:\" a.md            Prefix all gists\n  geniuz capture --dry-run ./notes/                    Preview without importing\n\nEach file becomes a memory. With --split, each ## section becomes\na threaded memory under the file's root."
+        after_help = "Examples:\n  geniuz capture -f Docs notes.md                      Single file\n  geniuz capture -f Docs ./docs/                       All .md files in directory\n  geniuz capture -f Docs *.md                          Shell glob\n  geniuz capture -f Docs --split notes.md              Split by ## headers\n  geniuz capture -f Docs --gist-prefix \"docs:\" a.md            Prefix all gists\n  geniuz capture -f Docs --dry-run ./notes/            Preview without importing\n\nEach file becomes a memory. With --split, each ## section becomes\na threaded memory under the file's root."
     )]
     Capture {
         /// Files or directories to capture

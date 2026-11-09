@@ -80,11 +80,20 @@ fn tool_definitions() -> Value {
     let mut tools = base_tool_definitions();
     let folder = json!({
         "type": "string",
-        "description": "Which folder to use, by name or 8-character ID. Choose one with the folders tool. Left out, this uses the folder set for where you were started (a .geniuz-folder file or GENIUZ_DB), else My memory. An unknown name is an error, never a different folder."
+        "description": "Which folder to read, by name or 8-character ID. Choose one with the folders tool. Left out, this reads the folder set for where you were started (a .geniuz-folder file or GENIUZ_DB), else My memory. An unknown name is an error, never a different folder."
     });
     for tool in tools["tools"].as_array_mut().into_iter().flatten() {
         if tool["name"] != "folders" {
             tool["inputSchema"]["properties"]["folder"] = folder.clone();
+        }
+        // A memory is written only where the writer says: keep needs its folder.
+        if tool["name"] == "keep" {
+            tool["inputSchema"]["properties"]["folder"]["description"] = json!(
+                "Which folder to keep this in, by name or 8-character ID. Required: find it with the folders tool first. An unknown name is an error, never a different folder."
+            );
+            if let Some(req) = tool["inputSchema"]["required"].as_array_mut() {
+                req.push(json!("folder"));
+            }
         }
     }
     tools
@@ -583,6 +592,12 @@ fn call_tool(
             return execute_recall_all(reg, backend, args);
         }
     }
+    // Writing never falls back to a folder nobody named.
+    if matches!(name, "keep" | "remember")
+        && args.get("folder").and_then(|f| f.as_str()).map(str::trim).is_none_or(str::is_empty)
+    {
+        return ("Error: folder is required: name the folder to keep this in. The folders tool lists them.".to_string(), true);
+    }
     let db = match open_for_call(reg, args) {
         Ok(db) => db,
         Err(e) => return (format!("Error: {}", e), true),
@@ -868,6 +883,20 @@ mod tests {
             assert!(is_error && out.contains("gist"), "{out}");
         }
         assert_eq!(reg.find("My memory").unwrap().stats().unwrap().0, 0, "nothing kept");
+    }
+
+    #[test]
+    fn keep_needs_a_named_folder_and_never_falls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path());
+        reg.ensure_default().unwrap();
+        for args in [json!({ "content": "x", "gist": "g" }), json!({ "content": "x", "gist": "g", "folder": "  " })] {
+            let (out, is_error) = call_tool(&reg, None, "keep", &args);
+            assert!(is_error && out.contains("folder is required"), "{out}");
+        }
+        assert_eq!(reg.find("My memory").unwrap().stats().unwrap().0, 0, "nothing kept by fallback");
+        let keep = tool_definitions()["tools"].as_array().unwrap().iter().find(|t| t["name"] == "keep").unwrap().clone();
+        assert!(keep["inputSchema"]["required"].as_array().unwrap().contains(&json!("folder")), "{keep}");
     }
 
     #[test]

@@ -156,6 +156,20 @@ pub fn get_db() -> Result<db::DatabaseManager, String> {
     open_resolved(resolve_db_path)
 }
 
+/// What `keep` and `capture` say without `-f`. A memory is written only where the
+/// writer says (Jack, 8 Nov, as relay always did: "station was ALWAYS required for
+/// signal. no default station existed"). Reading may fall back; writing never does.
+pub const KEEP_NEEDS_FOLDER: &str = "Name the folder to keep this in, with -f <folder>: \
+    `geniuz keep -f <folder> -c \"...\" -g \"...\"`. `geniuz folders` lists them.";
+
+/// The database a memory is written to: exactly the folder named with -f. No
+/// fallback to My memory, a .geniuz-folder file or GENIUZ_DB.
+pub fn get_db_to_keep() -> Result<db::DatabaseManager, String> {
+    let named = IN_FOLDER.get().and_then(|f| f.as_deref()).ok_or_else(|| KEEP_NEEDS_FOLDER.to_string())?;
+    let reg = geniuz::folders::Registry::from_env();
+    open_resolved(|| reg.find(named).map(|f| f.db_path))
+}
+
 /// Open the folder `find` names. If it moved in between, ask once more: it will
 /// be at its new path. Never create a store as a side effect of choosing a folder.
 pub fn open_resolved(find: impl Fn() -> Result<PathBuf, String>) -> Result<db::DatabaseManager, String> {
@@ -471,7 +485,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 return Ok(String::new());
             }
 
-            let db = get_db()?;
+            let db = get_db_to_keep()?;
             let backend = geniuz::embedding::create_backend()?;
             let prefix = gist_prefix.as_deref().unwrap_or("");
             let mut created = 0usize;
@@ -570,7 +584,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 content
             };
 
-            let db = get_db()?;
+            let db = get_db_to_keep()?;
             let result = db.keep(&resolved, &gist, parent.as_deref())?;
 
             let address = db.address(&result.uuid);
