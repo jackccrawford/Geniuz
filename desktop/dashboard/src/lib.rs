@@ -532,10 +532,23 @@ fn update_settings(patch: SettingsPatch) -> Result<Settings, String> {
     Ok(Settings::load())
 }
 
+/// Export one folder as a single complete file: the folder named, else the one
+/// this window shows.
 #[tauri::command]
-fn export_memory_db_to(target_path: String) -> Result<u64, String> {
-    let source = db_path()?;
-    geniuz::folders::backup_to(std::path::Path::new(&source), std::path::Path::new(&target_path))
+fn export_memory_db_to(target_path: String, folder: Option<String>) -> Result<u64, String> {
+    let source = match folder.as_deref().map(str::trim).filter(|f| !f.is_empty()) {
+        Some(q) => Registry::from_env().find(q)?.db_path,
+        None => std::path::PathBuf::from(db_path()?),
+    };
+    geniuz::folders::backup_to(&source, std::path::Path::new(&target_path))
+}
+
+/// A folder's size on disk: its memory.db and the -wal beside it.
+#[tauri::command]
+fn folder_disk_bytes(folder: String) -> Result<u64, String> {
+    let db = Registry::from_env().find(&folder)?.db_path;
+    let size = |p: std::path::PathBuf| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0);
+    Ok(size(db.clone()) + size(db.with_extension("db-wal")))
 }
 
 #[derive(Serialize)]
@@ -1048,6 +1061,7 @@ pub fn run() {
             get_settings,
             update_settings,
             export_memory_db_to,
+            folder_disk_bytes,
             get_data_dir,
             list_folders,
             bind_current_folder,
@@ -1300,6 +1314,19 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    /// Export copies the folder picked on the page, not whichever the window shows.
+    /// Shares GENIUZ_HOME with the other test here, so both run in one test.
+    fn export_takes_the_folder_picked(dir: &std::path::Path) {
+        let reg = Registry::from_env();
+        let work = reg.create("Work", "", None).unwrap();
+        DatabaseManager::open_existing(&work.db_path.to_string_lossy()).unwrap().keep("in work", "w", None).unwrap();
+        let out = dir.join("export.db");
+        export_memory_db_to(out.to_string_lossy().into_owned(), Some(work.short_id())).unwrap();
+        let copy = geniuz::folders::identity_at(&out).unwrap();
+        assert_eq!(copy.uuid, work.uuid, "the export is the folder picked");
+        assert!(folder_disk_bytes(work.uuid.clone()).unwrap() > 0);
+    }
+
     /// Find's Exact mode returns lines, the harvest and the scope, from the
     /// data folder GENIUZ_HOME names (a scratch one here, never a real one).
     #[test]
@@ -1321,6 +1348,7 @@ mod tests {
         assert_eq!(r.lines.len(), 1);
         assert_eq!(r.pointers, ["13625F6B:D824ADA7"]);
         assert!(find("x".into(), "exact".into(), Some("someday".into()), None, None).is_err());
+        export_takes_the_folder_picked(&dir);
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -179,8 +179,14 @@ export function updateSettings(settings) {
  * Copy memory.db to `target_path` (full path including filename).
  * Returns the number of bytes copied.
  */
-export function exportMemoryDbTo(targetPath) {
-  return invoke('export_memory_db_to', { targetPath });
+/** Export one folder (its UUID; null means the one on screen) to `targetPath`. */
+export function exportMemoryDbTo(targetPath, folder = null) {
+  return invoke('export_memory_db_to', { targetPath, folder });
+}
+
+/** A folder's size on disk in bytes: its memory.db and its -wal. */
+export function folderDiskBytes(folder) {
+  return invoke('folder_disk_bytes', { folder });
 }
 
 /** Open a web link from a memory in the viewer's browser. */
