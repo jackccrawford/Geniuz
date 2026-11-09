@@ -59,10 +59,6 @@ pub enum Command {
         #[arg(short, long)]
         parent: Option<String>,
 
-        /// When it happened, if not now: 2026-03-21, "2026-03-21 14:00" (local), RFC 3339
-        #[arg(long, value_name = "WHEN")]
-        at: Option<String>,
-
         /// Output as JSON
         #[arg(long)]
         json: bool,

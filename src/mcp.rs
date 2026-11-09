@@ -110,10 +110,6 @@ fn base_tool_definitions() -> Value {
                         "thread": {
                             "type": "string",
                             "description": "Optional. Short UUID or address of a memory in the same folder to thread this to. Builds chains: prospect to client, draft to final, problem to solution. A memory in another folder can't be threaded to: keep this in that folder, or put its address in the content instead."
-                        },
-                        "at": {
-                            "type": "string",
-                            "description": "Optional. When this happened, if not now: a date ('2026-03-21'), a local time ('2026-03-21 14:00') or RFC 3339. Use it when bringing older memories in, so each keeps its own date. Never in the future."
                         }
                     },
                     "required": ["content", "gist"]
@@ -205,15 +201,9 @@ fn execute_keep(
     };
     let gist = params.get("gist").and_then(|g| g.as_str());
     let thread = params.get("thread").and_then(|t| t.as_str());
-    let at = match params.get("at").and_then(|a| a.as_str()).filter(|a| !a.trim().is_empty()) {
-        Some(a) => match geniuz::window::moment(a) {
-            Ok(t) => Some(t),
-            Err(e) => return (format!("Error: {}", e.replacen("--at", "at", 1)), true),
-        },
-        None => None,
-    };
-
-    match db.keep_with_backend(content, gist, thread, at.as_deref(), backend) {
+    // A memory's time is when it was kept, never a time the caller gives (Jack, 8 Nov):
+    // something about the past is said in the gist and content.
+    match db.keep_with_backend(content, gist, thread, backend) {
         Ok(result) if result.embedded => (format!("Kept ({})", db.address(&result.uuid)), false),
         // State, not instruction. This server exposes three tools and none of
         // them runs the CLI, so telling the caller to run `backfill` is a
@@ -752,6 +742,24 @@ fn entry_line(e: &MemoryEntry) -> String {
 mod tests {
     use super::*;
 
+    /// A memory with a fixed time, written straight to the table: only a test may
+    /// choose a memory's time, and the library offers no way to (no backdating).
+    /// Returns the short ID, as `keep` does; `parent` is a short ID too.
+    fn keep_dated(db: &DatabaseManager, content: &str, gist: &str, parent: Option<&str>, at: &str) -> String {
+        let uuid = uuid::Uuid::new_v4().to_string().to_uppercase();
+        let payload = json!({ "content": content, "gist": gist }).to_string();
+        let conn = rusqlite::Connection::open(&db.db_path).unwrap();
+        let parent: Option<String> = parent.map(|p| {
+            conn.query_row("SELECT memory_uuid FROM memories WHERE memory_uuid LIKE ?1 || '%'", [p], |r| r.get(0)).unwrap()
+        });
+        conn.execute(
+            "INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![uuid, payload, at, parent],
+        )
+        .unwrap();
+        uuid[..8].to_string()
+    }
+
     fn entry(parent: Option<&str>, score: Option<f32>) -> MemoryEntry {
         MemoryEntry {
             memory_uuid: "5B1A36D9-0000-0000-0000-000000000000".into(),
@@ -776,7 +784,7 @@ mod tests {
     fn an_empty_windowed_answer_carries_its_scope() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        db.keep("an old note", Some("old"), None, Some("2020-01-01 00:00:00")).unwrap();
+        keep_dated(&db, "an old note", "old", None, "2020-01-01 00:00:00");
         let (out, is_err) = execute_recall_recent(&db, &json!({"since": "7d"}));
         assert!(!is_err, "{out}");
         assert!(out.ends_with("searched: 0 memories · since 7d · recent"), "{out}");
@@ -792,8 +800,8 @@ mod tests {
     fn an_answer_ends_with_its_harvest_then_its_scope() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        db.keep("Review notes\nThe PR went to Devin, see 00000000:87C1FADC.", Some("reviews"), None, None).unwrap();
-        db.keep("More review\nAsked Devin again.", Some("reviews again"), None, None).unwrap();
+        db.keep("Review notes\nThe PR went to Devin, see 00000000:87C1FADC.", Some("reviews"), None).unwrap();
+        db.keep("More review\nAsked Devin again.", Some("reviews again"), None).unwrap();
         let (out, _) = execute_recall_recent(&db, &json!({}));
         let lines: Vec<&str> = out.lines().collect();
         let n = lines.len();
@@ -806,9 +814,9 @@ mod tests {
     fn a_pointer_to_a_memory_here_is_offered_as_live() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        let first = db.keep("the original", Some("first"), None, None).unwrap().uuid;
+        let first = db.keep("the original", Some("first"), None).unwrap().uuid;
         let id = first[..8].to_uppercase();
-        db.keep(&format!("see {id}"), Some("second"), None, None).unwrap();
+        db.keep(&format!("see {id}"), Some("second"), None).unwrap();
         let (out, _) = execute_recall(&db, &json!({ "query": "second", "limit": 1 }));
         assert!(!out.contains("not found here"), "{out}");
     }
@@ -818,7 +826,7 @@ mod tests {
     fn recall_with_grep_returns_the_matching_lines() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        db.keep("Roundup\nCubic reviewed the PR.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
+        db.keep("Roundup\nCubic reviewed the PR.\nDevin filed issues.", Some("reviews"), None).unwrap();
         let (out, is_err) = execute_recall(&db, &json!({"grep": "cubic"}));
         assert!(!is_err, "{out}");
         assert!(out.contains(" · Cubic reviewed the PR."), "{out}");
@@ -833,9 +841,9 @@ mod tests {
     fn recall_with_thread_reads_the_whole_conversation() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        let root = db.keep("the question", Some("question"), None, Some("2026-09-01 00:00:00")).unwrap().uuid;
-        let reply = db.keep("the answer", Some("answer"), Some(&root), Some("2026-09-02 00:00:00")).unwrap().uuid;
-        db.keep("elsewhere", Some("elsewhere"), None, Some("2026-09-03 00:00:00")).unwrap();
+        let root = keep_dated(&db, "the question", "question", None, "2026-09-01 00:00:00");
+        let reply = keep_dated(&db, "the answer", "answer", Some(&root), "2026-09-02 00:00:00");
+        keep_dated(&db, "elsewhere", "elsewhere", None, "2026-09-03 00:00:00");
         let (out, is_err) = execute_recall(&db, &json!({"thread": reply}));
         assert!(!is_err, "{out}");
         let q = out.find("question").unwrap();
@@ -889,7 +897,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
         for gist in ["one", "two", "three", "four", "five"] {
-            db.keep("body", Some(gist), None, Some("2026-09-01 00:00:00")).unwrap();
+            keep_dated(&db, "body", gist, None, "2026-09-01 00:00:00");
         }
         let (out, _) = execute_recall(&db, &json!({ "limit": 1 }));
         assert!(out.contains("five"), "{out}");
@@ -916,7 +924,7 @@ mod tests {
         let reg = Registry::new(&home);
         let work = reg.create("Work", "", None).unwrap();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        db.keep("the whole body", Some("the gist"), None, None).unwrap();
+        db.keep("the whole body", Some("the gist"), None).unwrap();
         let (out, _) = call_tool(&reg, None, "recall", &json!({ "all": true, "full": true }));
         assert!(out.contains("the gist") && out.contains("the whole body"), "{out}");
         let (out, _) = call_tool(&reg, None, "recall", &json!({ "all": true }));
@@ -952,7 +960,7 @@ mod tests {
         let reg = Registry::new(&home);
         let work = reg.create("Work", "", None).unwrap();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        let id = db.keep("the whole body", Some("the gist"), None, None).unwrap().uuid;
+        let id = db.keep("the whole body", Some("the gist"), None).unwrap().uuid;
         let address = format!("{}:{}", work.short_id(), &id[..8]);
 
         let (out, is_err) = call_tool(&reg, None, "recall", &json!({ "query": address }));
@@ -989,7 +997,7 @@ mod tests {
     fn grep_across_folders_searches_and_shows_addresses() {
         let (_tmp, reg, work) = registry_with_work();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        let id = db.keep("first line\nThe Cubic review passed.", Some("g"), None, None).unwrap().uuid;
+        let id = db.keep("first line\nThe Cubic review passed.", Some("g"), None).unwrap().uuid;
 
         let (text, is_err) = call_tool(&reg, None, "recall", &json!({ "all": true, "grep": "cubic" }));
         assert!(!is_err, "{text}");
@@ -1005,7 +1013,7 @@ mod tests {
     fn an_address_opens_even_when_all_is_set() {
         let (_tmp, reg, work) = registry_with_work();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        let id = db.keep("the whole body", Some("g"), None, None).unwrap().uuid;
+        let id = db.keep("the whole body", Some("g"), None).unwrap().uuid;
         let address = format!("{}:{}", work.short_id(), &id[..8]);
         let (text, _) = call_tool(&reg, None, "recall", &json!({ "query": address, "all": true }));
         assert!(text.contains("the whole body"), "{text}");
@@ -1015,7 +1023,7 @@ mod tests {
     fn an_empty_folder_says_where_the_memories_are() {
         let (_tmp, reg, work) = registry_with_work();
         let empty = reg.create("Empty", "", None).unwrap();
-        DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap().keep("x", Some("g"), None, None).unwrap();
+        DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap().keep("x", Some("g"), None).unwrap();
         let (text, _) = call_tool(&reg, None, "recall", &json!({ "folder": empty.name }));
         assert!(text.contains("Work (1)"), "{text}");
     }

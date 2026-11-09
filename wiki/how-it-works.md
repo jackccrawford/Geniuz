@@ -51,7 +51,7 @@ Agents point at each other's memories by address, such as `13625F6B:3487B9B0`, s
 5. The memory and its embedding are written in one transaction.
 6. Geniuz answers with the memory's address, folder then memory, such as `13625F6B:F96D91B4`.
 
-A memory is dated now, unless you pass `--at` with when it happened. That is for memories brought in from somewhere else, so a record imported today still sorts where it belongs. A future time is refused.
+A memory is dated the moment it's kept, and nobody chooses that time. Something about the past goes in the gist and content ("21 Mar meeting: ..."). What matters most is order: memories written in the same second share a time, and Geniuz still keeps them in the order they were written.
 
 ## When you watch
 
