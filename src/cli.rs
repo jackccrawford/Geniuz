@@ -212,6 +212,14 @@ pub enum Command {
     /// Show usage guide for agents
     Skill,
 
+    /// Pick a gist from a note's own text: the sentence closest in meaning to the whole.
+    /// Hidden: a building block for the window, not yet a promise
+    #[command(hide = true)]
+    Gist {
+        /// The note. Leave it out, or give -, to read it from standard input
+        text: Vec<String>,
+    },
+
     /// Show stats for the folder in use
     Status,
 

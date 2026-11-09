@@ -389,6 +389,21 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(skill_text())
         }
 
+        Command::Gist { text } => {
+            let text = if text.is_empty() || text == ["-"] {
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut s).map_err(|e| format!("Couldn't read the note: {}", e))?;
+                s
+            } else {
+                text.join(" ")
+            };
+            let backend = geniuz::embedding::create_backend()?;
+            let started = std::time::Instant::now();
+            let gist = geniuz::gist::pick(&text, |t| backend.embed(t))?;
+            eprintln!("[geniuz] picked in {} ms", started.elapsed().as_millis());
+            Ok(gist)
+        }
+
         Command::Folder(cmd) => folder_cli::run(cmd),
 
         Command::Tui => {

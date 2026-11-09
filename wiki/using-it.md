@@ -104,7 +104,7 @@ geniuz folder unpin Clients
 
 **A name or an ID, either one.** Wherever a command takes a folder, you can give its name or the first 8 characters of its ID, in any case: `Work`, `work` and `95e6e59c` all open the same folder, and so does the full ID. A typo is an error, never a near match. If two folders share a name, use the ID; if two IDs share their first 8 characters (very unlikely), use the name or the full ID.
 
-In the dashboard, folders are in the sidebar and in the Folders menu. Click the pin beside a name to keep it at the top of every list. Keep has a pulldown for choosing a folder, and Find can search any selection of them. A folder that sits in a directory named `agents` is listed under **Agents**, and the rest under **Shared**, so each agent's own folder is easy to tell from the ones it shares.
+In the dashboard, folders are in the sidebar and in the Folders menu. Each folder has a face: its first letter on a tile whose colour comes from the folder's ID, so it stays the same when the folder is renamed. Hover a folder and click **···** to pin it to the top, edit its name and description, or copy its ID. With more than ten folders, the sidebar shows the pinned ones first and then the rest, most recently written first. Keep has a pulldown for choosing a folder, and Find can search any selection of them.
 
 To give a project its own folder for reading, put the folder's name or ID in a `.geniuz-folder` file in the project: `recall` run there, by you or an agent, reads that folder when none is named. Keeping still names its folder every time.
 
@@ -135,7 +135,7 @@ In the dashboard. Change any of these under Settings, and the menu follows at on
 | Settings | ⌘, |
 | Show or hide the sidebar | ⌘B |
 | Status | ⇧⌘S |
-| Your first nine folders, in sidebar order (not changeable) | ⌘1 to ⌘9 |
+| Your first nine folders, pinned first and then by name, as in the Folders menu (not changeable) | ⌘1 to ⌘9 |
 
 On Windows and Linux, use Ctrl in place of ⌘.
 

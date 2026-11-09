@@ -830,13 +830,13 @@ mod tests {
     fn an_answer_ends_with_its_harvest_then_its_scope() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        db.keep("Review notes\nThe PR went to Devin, see 00000000:87C1FADC.", "reviews", None).unwrap();
+        db.keep("Review notes\nThe PR went to Devin, see EEEEEEEE:87C1FADC.", "reviews", None).unwrap();
         db.keep("More review\nAsked Devin again.", "reviews again", None).unwrap();
         let (out, _) = execute_recall_recent(&db, &json!({}));
         let lines: Vec<&str> = out.lines().collect();
         let n = lines.len();
         assert_eq!(lines[n - 3], "names seen: Devin (2)", "{out}");
-        assert_eq!(lines[n - 2], "pointers not found here: 00000000:87C1FADC", "{out}");
+        assert_eq!(lines[n - 2], "pointers not found here: EEEEEEEE:87C1FADC", "{out}");
         assert!(lines[n - 1].starts_with("searched: "), "{out}");
     }
 
