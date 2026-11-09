@@ -27,7 +27,7 @@ fn a_memory_naming_no_folder_goes_to_my_memory_and_an_old_current_file_is_ignore
     let first = reg.resolve(None, None, None).unwrap();
     assert_eq!(first, reg.home.join(DB_FILE));
     assert_eq!(reg.find(DEFAULT_NAME).unwrap().db_path, first);
-    // A `current` file from before 5.1, naming a folder or "none", is not read and not touched.
+    // A `current` file from before 5.0.8, naming a folder or "none", is not read and not touched.
     for old in [format!("{}\n", work.uuid), "none\n".to_string()] {
         std::fs::write(reg.home.join("current"), &old).unwrap();
         assert_eq!(reg.resolve(None, None, None).unwrap(), first);

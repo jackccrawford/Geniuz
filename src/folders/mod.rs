@@ -679,10 +679,10 @@ fn same_file(_: &Path, _: &Path) -> bool {
     false
 }
 
-/// What `geniuz folder use` says since 5.1, which has no default folder. The
+/// What `geniuz folder use` says since 5.0.8, which has no default folder. The
 /// command stays so scripts and agents that learned it are told the new way.
 /// (A `current` file left by an older version is no longer read, and is left alone.)
-pub const NO_DEFAULT_FOLDER: &str = "Geniuz 5.1 has no default folder: every keep names its folder, with \
+pub const NO_DEFAULT_FOLDER: &str = "Geniuz 5.0.8 has no default folder: every keep names its folder, with \
      -f <folder>. `geniuz folder list` lists them.";
 
 fn read_dotfile(start: &Path) -> Option<(PathBuf, String)> {

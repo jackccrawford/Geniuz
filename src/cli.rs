@@ -287,7 +287,7 @@ pub enum FolderCommand {
         path: PathBuf,
     },
 
-    /// Removed in 5.1 (there is no default folder). Kept, hidden, so it can say what to do instead
+    /// Removed in 5.0.8 (there is no default folder). Kept, hidden, so it can say what to do instead
     #[command(hide = true)]
     Use {
         /// Ignored

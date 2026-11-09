@@ -649,7 +649,7 @@ dependencies = [
 
 [[package]]
 name = "geniuz"
-version = "5.0.7"
+version = "5.0.8"
 dependencies = [
  "anyhow",
  "chrono",
