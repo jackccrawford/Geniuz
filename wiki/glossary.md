@@ -9,7 +9,6 @@
 | Backfill | Embedding memories that do not have one yet. |
 | Capture | Loading existing files into memory in bulk. |
 | Content | The full detail of a memory. |
-| Default folder | Where a memory goes when nothing names a folder. A setting, which can be none: then Geniuz asks. |
 | Embed helper | `geniuz-embed`, which keeps the model loaded between calls. |
 | Embedding | Numbers representing a memory's meaning, used to search by meaning. |
 | Folder | A directory holding one `memory.db`, with its own permanent UUID, name and description. |
@@ -19,6 +18,7 @@
 | Keep | Saving a memory. `remember` still works as another name for it. |
 | MCP | Model Context Protocol, a standard way for AI tools to call other programs. |
 | Memory | One entry that Geniuz will not change: a gist, content, and optionally a parent. |
+| My memory | Your first folder, made on first run. A memory that names no folder goes here. |
 | Parent | The earlier memory that a memory replies to. |
 | Pin | Keeping a folder at the top of every list. |
 | Recall | Searching your memories, by meaning or exactly. With nothing to search for, it shows the newest. |

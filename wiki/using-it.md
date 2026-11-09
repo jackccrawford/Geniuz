@@ -91,8 +91,6 @@ geniuz folder list --archived
 geniuz folder show Work
 geniuz folder create Work -d "Client projects. No passwords here."
 geniuz folder create Notes --at ~/notes
-geniuz folder use Work
-geniuz folder use --none
 geniuz folder rename Work Clients
 geniuz folder describe Clients "Client projects, and who owns them."
 geniuz folder add /some/directory
@@ -110,13 +108,9 @@ In the dashboard, folders are in the sidebar and in the Folders menu. Click the 
 
 To give a project its own folder, put the folder's name or ID in a `.geniuz-folder` file in the project. Commands run there, and agents working there, use that folder.
 
-### The default folder
+### Where a memory goes
 
-When a command or your AI names no folder, the memory goes to the default. Choose it under **Settings → Default folder** in the menubar, or with `geniuz folder use <folder>`. In the dashboard sidebar a small dot marks it.
-
-Looking is not choosing. Opening a folder in the dashboard or the Mac menubar shows it to you; it doesn't change where new memories go. Keeping from the dashboard uses the folder you're looking at, which the pulldown shows.
-
-You can also choose **None: ask which folder** (or `geniuz folder use --none`). Then nothing is kept by guess: a command that names no folder stops and asks for one. A project's `.geniuz-folder` still applies.
+When a command or your AI names no folder, the memory goes to **My memory**, on every computer. To send it elsewhere, name the folder (`-f Work`, the pulldown in Keep, or ask your AI to use it), or give a project its own folder with a `.geniuz-folder` file. There is no default-folder setting to change, so nothing you look at in the dashboard or the menubar can move your memories somewhere else.
 
 ### Reading a folder
 
@@ -151,9 +145,9 @@ On Windows and Linux, use Ctrl in place of ⌘.
 
 ## Where your data lives
 
-Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory per folder you made, `archive/`, `models/`, `settings.json` and `bin/`. A few small files hold your choices: `current` (the default folder, or `none`), `added-folders`, `pinned-folders` and `shortcuts.json`.
+Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory per folder you made, `archive/`, `models/`, `settings.json` and `bin/`. A few small files hold your choices: `added-folders`, `pinned-folders` and `shortcuts.json`. A `current` file from before 5.1 is no longer read.
 
-**To back up**, use Export under Data & Export in the dashboard, which saves the folder in use as one complete file. Time Machine and similar tools are fine too. A backup is a file to keep, not a folder to use: it holds the same permanent IDs, so Geniuz refuses it while the original is present.
+**To back up**, use Export under Data & Export in the dashboard, which saves the folder on screen as one complete file. Time Machine and similar tools are fine too. A backup is a file to keep, not a folder to use: it holds the same permanent IDs, so Geniuz refuses it while the original is present.
 
 **Do not copy a folder by hand to use it elsewhere.** A copy of a live database can lose recent memories, and copies aren't supported. Use `geniuz folder move`.
 

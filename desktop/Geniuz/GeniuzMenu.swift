@@ -435,25 +435,6 @@ struct GeniuzSettingsView: View {
                 }
             }
 
-            Section("Default folder") {
-                Picker("New memories go to", selection: defaultFolderBinding) {
-                    Text("None: ask which folder").tag("none")
-                    if defaultFolderBinding.wrappedValue.isEmpty {
-                        // Never chosen (the first folder is used), or a folder that isn't
-                        // reachable right now (a drive not connected).
-                        Text(service.defaultFolderSetting == nil ? "First folder (not chosen yet)" : "A folder that isn't available").tag("")
-                    }
-                    ForEach(service.folders) { f in
-                        Text(f.name).tag(f.uuid)
-                    }
-                }
-                Text(service.defaultFolderSetting?.lowercased() == "none"
-                     ? "Claude, the command line and the MCP must name a folder; nothing is kept in a folder by guess. Agents' homes still use their own folder."
-                     : "Where Claude, the command line and the MCP keep memories when no folder is named. Looking at a folder in the menu or the dashboard doesn't change it.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-
             Section("Display") {
                 Stepper(
                     "Recent memories shown: \(service.settings.recentMemoriesCount)",
@@ -519,17 +500,6 @@ struct GeniuzSettingsView: View {
         Binding(
             get: { service.settings.launchAtLogin },
             set: { v in service.updateSettings { $0.launchAtLogin = v } }
-        )
-    }
-
-    private var defaultFolderBinding: Binding<String> {
-        Binding(
-            get: {
-                guard let v = service.defaultFolderSetting else { return "" }
-                if v.lowercased() == "none" { return "none" }
-                return service.folders.first(where: { $0.uuid.caseInsensitiveCompare(v) == .orderedSame })?.uuid ?? ""
-            },
-            set: { v in if !v.isEmpty { service.setDefaultFolder(v) } }
         )
     }
 

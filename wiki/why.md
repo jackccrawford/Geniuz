@@ -26,11 +26,11 @@ Memories point at each other by address, so an ID that changes breaks every memo
 
 If a copy turns up anyway, every copy stops working until one is moved. Nothing can tell which is the original, and carrying on with the wrong one would split the history in two. That's disruptive when it happens, and we chose it knowingly: an error you can fix beats a loss you can't see.
 
-## Looking is not choosing
+## No default folder
 
-Where your memories go is a setting you change on purpose, not a side effect of what you happen to be looking at. Browsing another folder in the dashboard or the Mac menubar doesn't move the default, so your AI keeps writing where you told it to. And if you'd rather nothing were kept by guess, the default can be none, and every command has to name its folder.
+A memory that names no folder goes to My memory, always. Until 5.1 that place was a setting you could change, and could set to none; it caused more confusion than it saved, because what a command did depended on a file somewhere else. Now a memory goes where it says, or to My memory. Projects and agents that want their own folder name it, with `-f` or a `.geniuz-folder` file.
 
-The cost is one more step when you do want to switch. In return, a glance can't redirect a week of memories.
+The cost is naming the folder when you mean another one. In return, nothing you look at, and no setting you forgot, can send a week of memories somewhere you didn't expect.
 
 ## The AI has to be told
 

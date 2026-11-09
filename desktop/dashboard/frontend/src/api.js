@@ -29,12 +29,6 @@ export function listFolders() {
   return invoke('list_folders');
 }
 
-/** Make this the folder in use, Mac-wide: where Claude, the CLI and the MCP keep
- *  memories when no folder is named. The dashboard no longer calls it; the menu bar sets it. */
-export function useFolder(uuid) {
-  return invoke('use_folder', { uuid });
-}
-
 /** Show this folder in this window, and change nothing else: looking
  *  is not choosing where memories go. */
 export function viewFolder(uuid) {

@@ -18,3 +18,6 @@ Geniuz-Setup.exe
 installer/windows/output/
 release-artifacts/
 TODO.md
+
+# A local build helper on one machine, never committed.
+desktop/.local-build.sh
