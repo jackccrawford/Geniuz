@@ -16,14 +16,18 @@ CREATE INDEX IF NOT EXISTS idx_memories_parent ON memories(parent_uuid);
 
 -- Convenience views for anyone reading a folder with SQL, in any language, without
 -- parsing the JSON payload (relay had signal_full and signal_gist). A thread's root
--- is stored as its own parent; here it reads as NULL, plainly "no parent". seq is the
--- write order, which is the order memories were kept.
+-- is stored as its own parent; here it reads as NULL, plainly "no parent".
+-- seq orders rows in the order memories were written. It is NOT a durable cursor:
+-- seq is SQLite's hidden rowid, which another tool's VACUUM may renumber (order kept,
+-- numbers changed). To remember a position, keep the memory's ID or address, as
+-- `geniuz watch` does. A payload that isn't valid JSON reads as NULL gist and content
+-- rather than failing the whole query.
 CREATE VIEW IF NOT EXISTS memory_full AS
 SELECT memory_uuid,
     CASE WHEN parent_uuid = memory_uuid THEN NULL ELSE parent_uuid END AS parent_uuid,
     created_at,
-    json_extract(payload, '$.gist') AS gist,
-    json_extract(payload, '$.content') AS content,
+    CASE WHEN json_valid(payload) THEN json_extract(payload, '$.gist') END AS gist,
+    CASE WHEN json_valid(payload) THEN json_extract(payload, '$.content') END AS content,
     rowid AS seq
 FROM memories;
 
@@ -31,7 +35,7 @@ CREATE VIEW IF NOT EXISTS memory_gist AS
 SELECT memory_uuid,
     CASE WHEN parent_uuid = memory_uuid THEN NULL ELSE parent_uuid END AS parent_uuid,
     created_at,
-    json_extract(payload, '$.gist') AS gist,
+    CASE WHEN json_valid(payload) THEN json_extract(payload, '$.gist') END AS gist,
     rowid AS seq
 FROM memories;
 

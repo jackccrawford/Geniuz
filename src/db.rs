@@ -1354,6 +1354,12 @@ mod tests {
         assert!(rows[0].4 < rows[1].4, "seq is write order");
         let gists: i64 = conn.query_row("SELECT count(*) FROM memory_gist WHERE gist IN ('question','answer')", [], |r| r.get(0)).unwrap();
         assert_eq!(gists, 2);
+        // A row with a payload that isn't JSON (written by hand, say) reads as NULL;
+        // the view still answers.
+        conn.execute("INSERT INTO memories (memory_uuid, payload) VALUES ('BADJSON0-0000-0000-0000-000000000000', 'not json')", []).unwrap();
+        let (n, bad): (i64, Option<String>) = conn.query_row(
+            "SELECT count(*), max(CASE WHEN memory_uuid LIKE 'BADJSON0%' THEN gist END) FROM memory_full", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!((n, bad), (3, None));
     }
 
     /// Shortcut: keep a memory with the mock backend and return its short UUID. With
