@@ -1,7 +1,7 @@
 ---
 name: geniuz
 version: "{{GENIUZ_VERSION}}"
-description: Memory that lasts beyond a chat, kept on this computer. Use it to keep decisions, progress and context worth coming back to, and to recall them later by meaning, by exact words, or by address (FOLDER:MEMORY). If `geniuz --version` is newer than this skill's version, run `geniuz skill` to see the current one.
+description: Memory that lasts beyond a chat, kept on this computer. Use it to keep decisions, progress and context worth coming back to, and to recall them later by meaning, by exact words, or by address (FOLDER:MEMORY). If `geniuz --version` is newer than this skill's version, run `geniuz skill` to see the current one. A version still in double braces means this copy came from the source repository, and `geniuz skill` prints the stamped one.
 ---
 
 # geniuz
@@ -22,11 +22,11 @@ Memories compound. A single memory is a note. A folder of memories is institutio
 
 ## Asking first
 
-Most people like to be asked, once, whether notes should be kept in Geniuz: decisions, progress, what to pick up next time. When they agree, keeping as you go and mentioning what was kept works well. It helps in this chat and in the next.
+Most people like to be asked, once, whether notes should be kept in Geniuz: decisions, progress, what to pick up next time. When they agree, keeping as you go and mentioning what was kept works well. It helps in this chat and in the next. In a scheduled or unattended run, with no one to ask, keeping what the next run will need is what Geniuz is for.
 
 ## Commands
 
-Every keep names its folder (`--in`) and its gist (`-g`).
+Every keep names its folder (`--in`) and its gist (`-g`). A plain recall reads My memory (or the folder named in `.geniuz-folder`); add `--in Work` to read Work, or `--all` for every folder.
 
 ```bash
 # A fresh install has one folder, "My memory". These examples keep in a folder
@@ -50,8 +50,8 @@ geniuz keep --in Work -c @session-notes.md -g "session: March 19 architecture re
 geniuz keep --in Work -c "Same fix needed in staging compose" -g "fix: staging auth ordering" -p A1B2C3D4
 
 # Search by meaning — not keywords
-geniuz recall "authentication middleware"
-geniuz recall "what broke in production" --since 7d
+geniuz recall --in Work "authentication middleware"
+geniuz recall --in Work "what broke in production" --since 7d
 
 # Proper names match exactly and come first (a Capitalized word after the
 # first, or anything in "quotes")

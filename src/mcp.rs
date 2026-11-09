@@ -84,6 +84,7 @@ a search then finds what's relevant to the topic at hand. \
 Many people like to be asked once whether notes should be kept. \
 When they agree, keep saves what a later chat would need and couldn't get from the files: \
 decisions and why, preferences, what to pick up next. \
+In a scheduled or unattended run, with no one to ask, keeping what the next run will need is what Geniuz is for. \
 Notes live in folders, each describing what belongs there; the folders tool lists them. \
 A note can't be moved or removed afterwards.";
 
@@ -125,11 +126,11 @@ fn base_tool_definitions() -> Value {
                         },
                         "gist": {
                             "type": "string",
-                            "description": "A one-line summary for finding this later. Format: 'category: key insight'. Example: 'client: Maria, Q2 retention focus, $40K budget'"
+                            "description": "A one-line summary for finding this later. Format: 'category: key insight'. Example: 'decision: ship 5.0.9 Monday, skill header now stamped'"
                         },
                         "thread": {
                             "type": "string",
-                            "description": "Optional. Short UUID or address of a memory in the same folder to thread this to. Builds chains: prospect to client, draft to final, problem to solution. A memory in another folder can't be threaded to: keep this in that folder, or put its address in the content instead."
+                            "description": "Optional. Short UUID or address of a memory in the same folder to thread this to. Builds chains: question to answer, draft to final, problem to solution. A memory in another folder can't be threaded to: keep this in that folder, or put its address in the content instead."
                         }
                     },
                     "required": ["content", "gist"]

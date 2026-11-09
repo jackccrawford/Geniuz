@@ -1070,7 +1070,7 @@ mod skill_tests {
         for line in super::skill_text().lines() {
             // The words after `geniuz keep` on this line, so a "-f" inside quoted text
             // further along can't stand in for the flag: --in or -f must be followed by a value.
-            if let Some(rest) = line.split("geniuz keep ").nth(1) {
+            for rest in line.split("geniuz keep ").skip(1) {
                 let words: Vec<&str> = rest.split_whitespace().collect();
                 let named = words.windows(2).any(|w| (w[0] == "--in" || w[0] == "-f") && !w[1].starts_with('-'));
                 assert!(named, "keep without a folder: {line}");
