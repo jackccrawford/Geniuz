@@ -1319,7 +1319,7 @@ mod tests {
     fn export_takes_the_folder_picked(dir: &std::path::Path) {
         let reg = Registry::from_env();
         let work = reg.create("Work", "", None).unwrap();
-        DatabaseManager::open_existing(&work.db_path.to_string_lossy()).unwrap().keep("in work", Some("w"), None).unwrap();
+        DatabaseManager::open_existing(&work.db_path.to_string_lossy()).unwrap().keep("in work", "w", None).unwrap();
         let out = dir.join("export.db");
         export_memory_db_to(out.to_string_lossy().into_owned(), Some(work.short_id())).unwrap();
         let copy = geniuz::folders::identity_at(&out).unwrap();
