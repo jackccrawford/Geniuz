@@ -324,10 +324,10 @@ impl Registry {
         ))
     }
 
-    /// Which database a command should use. In order: the `--in` flag, the
-    /// `GENIUZ_DB` file path, a `.geniuz-folder` file here or in a parent
-    /// directory, then the first folder ("My memory"). There is no default-folder
-    /// setting (5.1): a memory that names no folder goes to the first folder.
+    /// Which database a command reads. In order: the `--in` flag, the `GENIUZ_DB`
+    /// file path, a `.geniuz-folder` file here or in a parent directory, then the
+    /// first folder ("My memory"). Writing doesn't use this: a keep goes only to the
+    /// folder it names (see `get_db_to_keep` in main.rs, and the MCP keep tool).
     pub fn resolve(
         &self,
         flag: Option<&str>,
@@ -682,8 +682,8 @@ fn same_file(_: &Path, _: &Path) -> bool {
 /// What `geniuz folder use` says since 5.1, which has no default folder. The
 /// command stays so scripts and agents that learned it are told the new way.
 /// (A `current` file left by an older version is no longer read, and is left alone.)
-pub const NO_DEFAULT_FOLDER: &str = "Geniuz 5.1 has no default folder: a memory that names no folder goes to \
-     \"My memory\". Name the folder with -f <folder>, or put a .geniuz-folder file in your project.";
+pub const NO_DEFAULT_FOLDER: &str = "Geniuz 5.1 has no default folder: every keep names its folder, with \
+     -f <folder>. `geniuz folder list` lists them.";
 
 fn read_dotfile(start: &Path) -> Option<(PathBuf, String)> {
     for dir in start.ancestors() {

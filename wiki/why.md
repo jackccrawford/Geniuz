@@ -26,11 +26,13 @@ Memories point at each other by address, so an ID that changes breaks every memo
 
 If a copy turns up anyway, every copy stops working until one is moved. Nothing can tell which is the original, and carrying on with the wrong one would split the history in two. That's disruptive when it happens, and we chose it knowingly: an error you can fix beats a loss you can't see.
 
-## No default folder
+## The writer names the folder
 
-A memory that names no folder goes to My memory, unless the project it was written from names one in a `.geniuz-folder` file. Until 5.1 that place was a setting you could change, and could set to none; it caused more confusion than it saved, because what a command did depended on a file somewhere else. Now a memory goes where it says, or to My memory. Projects and agents that want their own folder name it, with `-f` or a `.geniuz-folder` file.
+Every keep names its folder. Nothing chooses one for you: no default setting, no fallback, no file in the project. Geniuz is first of all a way for agents to remember, and an agent finds its folder by searching (the folders tool), then keeps with its ID. People keep the same way, usually by asking their AI to save something.
 
-The cost is naming the folder when you mean another one. In return, nothing you look at, and no setting you forgot, can send a week of memories somewhere you didn't expect.
+Until 5.1 a memory that named no folder went to a default you could change; it caused more confusion than it saved, because where a memory went depended on a setting somewhere else. A memory can never be moved, so the moment of writing is the only chance to put it in the right place, and the one who knows the right place is the writer.
+
+The cost is naming the folder every time. In return, nothing you look at, and no setting you forgot, can send a week of memories somewhere you didn't expect.
 
 ## The AI has to be told
 

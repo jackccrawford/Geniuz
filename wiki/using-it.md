@@ -41,11 +41,11 @@ Then keep talking. Your AI saves what matters as you go. Tomorrow, in a new chat
 ## Commands
 
 ```bash
-geniuz keep -c "what happened" -g "category: short summary"
-geniuz keep -c @notes.md -g "session: review"
-echo "content" | geniuz keep -c - -g "piped: from a process"
-geniuz keep -c "follow-up" -g "update" -p 98672A90
-geniuz keep -c "On 21 Mar we decided ..." -g "decision, 21 Mar: pricing"
+geniuz keep -f Work -c "what happened" -g "category: short summary"
+geniuz keep -f Work -c @notes.md -g "session: review"
+echo "content" | geniuz keep -f Work -c - -g "piped: from a process"
+geniuz keep -f Work -c "follow-up" -g "update" -p 98672A90
+geniuz keep -f Work -c "On 21 Mar we decided ..." -g "decision, 21 Mar: pricing"
 geniuz -f Work keep -c "for the Work folder" -g "note: client call"
 
 geniuz recall "topic"
@@ -63,7 +63,7 @@ geniuz recall --all "topic"
 geniuz recall 13625F6B:3487B9B0
 geniuz tui
 geniuz dashboard
-geniuz capture ./docs/
+geniuz capture -f Docs ./docs/
 geniuz backfill
 geniuz status
 geniuz watch
@@ -106,11 +106,13 @@ geniuz folder unpin Clients
 
 In the dashboard, folders are in the sidebar and in the Folders menu. Click the pin beside a name to keep it at the top of every list. Keep has a pulldown for choosing a folder, and Find can search any selection of them. A folder that sits in a directory named `agents` is listed under **Agents**, and the rest under **Shared**, so each agent's own folder is easy to tell from the ones it shares.
 
-To give a project its own folder, put the folder's name or ID in a `.geniuz-folder` file in the project. Commands run there, and agents working there, use that folder.
+To give a project its own folder for reading, put the folder's name or ID in a `.geniuz-folder` file in the project: `recall` run there, by you or an agent, reads that folder when none is named. Keeping still names its folder every time.
 
 ### Where a memory goes
 
-When a command or your AI names no folder, the memory goes to **My memory**, on every computer. To send it elsewhere, name the folder (`-f Work`, the pulldown in Keep, or ask your AI to use it), or give a project its own folder with a `.geniuz-folder` file. There is no default-folder setting to change, so nothing you look at in the dashboard or the menubar can move your memories somewhere else.
+Wherever the writer says. Every keep names its folder: `-f Work` on the command line, the folder in the dashboard's Keep pulldown, or the folder your AI chooses with its folders tool. A keep that names no folder is refused; nothing is kept by guess. The easiest way to keep something is to ask your AI to save it: it knows your folders and picks the right one.
+
+Reading is more forgiving. `recall` with no folder reads the database `GENIUZ_DB` names, else the project's `.geniuz-folder`, else My memory, and `recall --all` reads every folder.
 
 ### Reading a folder
 

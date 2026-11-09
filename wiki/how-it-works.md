@@ -20,7 +20,7 @@ The same file serves many uses: a project, a standard, a knowledge base, persona
 
 Geniuz looks in two places: its data directory, and directories you added on purpose. It reads each one level down and never searches your disk. That decides what Geniuz shows. Your file permissions decide who can read, so a file it can't read is simply left out. The rules are in [`src/folders/`](../src/folders/).
 
-A command uses the first of these that applies: `-f <folder>` (or `--in`), the `GENIUZ_DB` file path, a `.geniuz-folder` file in this directory or a parent, then "My memory". There is no default-folder setting. A folder can be named or given by its short ID, and one that matches nothing is an error, so a typo can't send a memory somewhere else. In the dashboard, Keep has a pulldown for the folder, and an open window stays with the folder it shows.
+On the command line and over MCP, a keep goes to the folder it names with `-f <folder>` (or `--in`, or MCP's folder), and only there: without one it's refused. In the dashboard and the terminal app, Keep writes to the folder on screen. Reading uses the first of these that applies: `-f`, the `GENIUZ_DB` file path, a `.geniuz-folder` file in this directory or a parent, then "My memory". A folder can be named or given by its short ID, and one that matches nothing is an error, so a typo can't send a memory somewhere else. In the dashboard, Keep has a pulldown for the folder, and an open window stays with the folder it shows.
 
 ### One of each
 
@@ -37,7 +37,7 @@ An AI agent that works with you across many sessions gets a folder of its own: i
 An agent's home is an ordinary folder. What makes it the agent's is where it lives and how the agent finds it:
 
 - **It is listed under Agents.** A folder that sits in a directory named `agents` shows in the dashboard's sidebar under **Agents**, and the rest under **Shared**, so each agent's home is easy to tell from the folders agents share. Find can search either group, or both.
-- **The agent finds it without being told.** A `.geniuz-folder` file in the agent's working directory names its folder, so everything the agent keeps from there goes home unless it names another folder. An agent in an app without a working directory names its folder on every call instead.
+- **The agent names it.** Every keep names its folder, so an agent keeps at home with `-f <its folder>` (or the folder parameter in MCP). Its bootstrap carries its folder's ID, as relay agents carried their station's. A `.geniuz-folder` file in the agent's working directory still decides what `recall` reads when no folder is named.
 - **It isn't the only folder the agent uses.** Work shared with people or with other agents goes in a shared folder: a project, a team's room, a knowledge base. The agent keeps there what others need, and keeps in its home what only it needs.
 
 Agents point at each other's memories by address, such as `13625F6B:3487B9B0`, so a note in a shared folder can lead straight to the reasoning in someone's home, and the other way round.
