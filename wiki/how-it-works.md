@@ -18,9 +18,9 @@ A folder is a directory holding one `memory.db`. Its identity is inside that fil
 
 The same file serves many uses: a project, a standard, a knowledge base, personal notes, what an agent keeps between sessions, messages between agents. There are no folder types. The description says what a folder is for, and the prompt for writing one is "What should whoever comes here next know?"
 
-Geniuz looks in two places: its data directory, and directories you added on purpose. It reads each one level down and never searches your disk. That decides what Geniuz shows. Your file permissions decide who can read, so a file it can't read is simply left out. The rules are in [`src/folders.rs`](../src/folders.rs).
+Geniuz looks in two places: its data directory, and directories you added on purpose. It reads each one level down and never searches your disk. That decides what Geniuz shows. Your file permissions decide who can read, so a file it can't read is simply left out. The rules are in [`src/folders/`](../src/folders/).
 
-A command uses the first of these that applies: `-f <folder>` (or `--in`), the `GENIUZ_DB` file path, a `.geniuz-folder` file in this directory or a parent, the default folder, then "My memory". If you set the default to none, the last two steps are skipped and the command asks for a folder instead. A folder can be named or given by its short ID, and one that matches nothing is an error, so a typo can't send a memory somewhere else. In the dashboard, Keep has a pulldown for the folder, and an open window stays with the folder it shows. Looking at a folder never changes the default: that is a setting, changed only on purpose.
+A command uses the first of these that applies: `-f <folder>` (or `--in`), the `GENIUZ_DB` file path, a `.geniuz-folder` file in this directory or a parent, then "My memory". There is no default-folder setting. A folder can be named or given by its short ID, and one that matches nothing is an error, so a typo can't send a memory somewhere else. In the dashboard, Keep has a pulldown for the folder, and an open window stays with the folder it shows.
 
 ### One of each
 

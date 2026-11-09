@@ -36,9 +36,6 @@ const DB_FILE: &str = "memory.db";
 /// The file name before Geniuz 4.0: found only to say what to do with it.
 const OLD_DB_FILE: &str = "station.db";
 const ADDED_FILE: &str = "added-folders";
-const CURRENT_FILE: &str = "current";
-/// What `current` holds when the person chose no default folder.
-const NO_DEFAULT: &str = "none";
 const PINNED_FILE: &str = "pinned-folders";
 const ARCHIVE_DIR: &str = "archive";
 const MOVED_MARK: &str = ".moved-";
@@ -137,10 +134,6 @@ impl Registry {
 
     fn added_path(&self) -> PathBuf {
         self.home.join(ADDED_FILE)
-    }
-
-    fn current_path(&self) -> PathBuf {
-        self.home.join(CURRENT_FILE)
     }
 
     /// The database of the first folder.
@@ -333,8 +326,8 @@ impl Registry {
 
     /// Which database a command should use. In order: the `--in` flag, the
     /// `GENIUZ_DB` file path, a `.geniuz-folder` file here or in a parent
-    /// directory, the default folder, then the first folder. If the default was
-    /// set to none, there is no last step: it's an error asking for a folder.
+    /// directory, then the first folder ("My memory"). There is no default-folder
+    /// setting (5.1): a memory that names no folder goes to the first folder.
     pub fn resolve(
         &self,
         flag: Option<&str>,
@@ -355,21 +348,6 @@ impl Registry {
                     .map_err(|e| format!("{} (from {})", e, file.display()));
             }
         }
-        if self.no_default() {
-            return Err(NO_DEFAULT_MESSAGE.to_string());
-        }
-        if let Some(q) = self.current() {
-            return self
-                .find(&q)
-                .map(|f| f.db_path)
-                .map_err(|e| {
-                    if e.contains("Move one of them") {
-                        e
-                    } else {
-                        format!("The current folder ({}) isn't available. Choose one with `geniuz folder use <folder>`.", q)
-                    }
-                });
-        }
         let first = self.ensure_default()?;
         let scan = self.scan();
         if let Some(b) = scan.blocked.iter().find(|b| canonical(&b.db_path) == canonical(&first)) {
@@ -380,40 +358,6 @@ impl Registry {
             ));
         }
         Ok(first)
-    }
-
-    /// The folder chosen with `use`, if any.
-    pub fn current(&self) -> Option<String> {
-        std::fs::read_to_string(self.current_path())
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case(NO_DEFAULT))
-    }
-
-    /// Whether the default was set to none: a command that names no folder must
-    /// ask for one rather than guess: on a machine many
-    /// agents share, a memory in the wrong folder can't be moved afterwards).
-    pub fn no_default(&self) -> bool {
-        std::fs::read_to_string(self.current_path())
-            .map(|s| s.trim().eq_ignore_ascii_case(NO_DEFAULT))
-            .unwrap_or(false)
-    }
-
-    /// Set the default to none (see `no_default`).
-    pub fn clear_default(&self) -> Result<(), String> {
-        self.with_registry_lock(|| write_atomic(&self.current_path(), &format!("{}\n", NO_DEFAULT)))
-    }
-
-    /// Make a folder the one used when none is named. Records its UUID, so
-    /// renaming it changes nothing.
-    pub fn use_folder(&self, query: &str) -> Result<Folder, String> {
-        self.with_registry_lock(|| self.use_folder_unlocked(query))
-    }
-
-    fn use_folder_unlocked(&self, query: &str) -> Result<Folder, String> {
-        let folder = self.find(query)?;
-        write_atomic(&self.current_path(), &format!("{}\n", folder.uuid))?;
-        Ok(folder)
     }
 
     /// Create a folder, in the data directory unless `at` names another place.
@@ -735,10 +679,11 @@ fn same_file(_: &Path, _: &Path) -> bool {
     false
 }
 
-/// What a command that names no folder is told when the default is none. Shared, so
-/// callers can tell this refusal from other reasons a folder doesn't resolve.
-pub const NO_DEFAULT_MESSAGE: &str = "No default folder is set, so name a folder: the folder argument, or -f <folder> \
-     on the command line. A default can be chosen in Settings, or with `geniuz folder use <folder>`.";
+/// What `geniuz folder use` says since 5.1, which has no default folder. The
+/// command stays so scripts and agents that learned it are told the new way.
+/// (A `current` file left by an older version is no longer read, and is left alone.)
+pub const NO_DEFAULT_FOLDER: &str = "Geniuz 5.1 has no default folder: a memory that names no folder goes to \
+     \"My memory\". Name the folder with -f <folder>, or put a .geniuz-folder file in your project.";
 
 fn read_dotfile(start: &Path) -> Option<(PathBuf, String)> {
     for dir in start.ancestors() {

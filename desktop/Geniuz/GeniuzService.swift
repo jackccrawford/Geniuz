@@ -169,7 +169,7 @@ class GeniuzService: ObservableObject {
     var onStateChange: (() -> Void)?
 
     /// Tooltip text shown on hover of the menu-bar icon.
-    /// Matches the Windows tray.rs format: identity + count, then the
+    /// Identity + count, then the
     /// most-recent gist on a second line if any. Connection status is
     /// intentionally excluded — it lives in the popover.
     func tooltipText() -> String {
@@ -205,16 +205,14 @@ class GeniuzService: ObservableObject {
         return "\(realHome)/.geniuz"
     }
 
-    /// The first folder: where everything goes until another is chosen.
+    /// The first folder, My memory: where a memory goes when no folder is named.
     var firstFolderPath: String {
         return "\(dataDir)/memory.db"
     }
 
-    /// The folder this menu shows: the one picked here, else the default folder,
-    /// else the first. Picking here only changes what the menu shows (looking
-    /// is not choosing where memories go); the default folder is a
-    /// setting. The binary owns the rules for finding folders, so this never has a
-    /// second copy of them.
+    /// The folder this menu shows: the one picked here, else My memory. Picking
+    /// here only changes what the menu shows. The binary owns the rules for
+    /// finding folders, so this never has a second copy of them.
     var folderPath: String { folderPath(shown: shownFolderID) }
 
     /// The same, for a folder picked in the menu read on the main thread beforehand
@@ -226,17 +224,6 @@ class GeniuzService: ObservableObject {
 
     /// The folder picked in this menu, if any (kept for this run of the app).
     @Published var shownFolderID: String?
-
-    /// The default folder setting, as Geniuz stores it: a folder's UUID, "none"
-    /// (a command that names no folder must ask for one), or nil for never set
-    /// (the first folder).
-    @Published var defaultFolderSetting: String?
-
-    private func readDefaultSetting() -> String? {
-        guard let raw = try? String(contentsOfFile: "\(dataDir)/current", encoding: .utf8) else { return nil }
-        let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return v.isEmpty ? nil : v
-    }
 
     // MARK: - Folders
 
@@ -275,11 +262,11 @@ class GeniuzService: ObservableObject {
         return (attrs?[.modificationDate] as? Date).map { "\($0.timeIntervalSince1970)" } ?? "-"
     }
 
-    /// Ask the binary only when something may have changed: the current folder,
-    /// the list of added directories, a folder that has gone from where it was,
+    /// Ask the binary only when something may have changed: the list of added
+    /// directories, a folder that has gone from where it was,
     /// or once a minute for what the rest of the app writes.
     private func readFolders() -> [FolderOption] {
-        let stamp = fileStamp("\(dataDir)/current") + "|" + fileStamp("\(dataDir)/added-folders")
+        let stamp = fileStamp("\(dataDir)/added-folders")
         let inUseGone = cachedFolders.first(where: { $0.inUse }).map {
             !FileManager.default.fileExists(atPath: $0.path)
         } ?? false
@@ -300,16 +287,6 @@ class GeniuzService: ObservableObject {
     func showFolder(_ folder: FolderOption) {
         shownFolderID = folder.uuid
         refresh()
-    }
-
-    /// The default folder setting: a folder's UUID, or "none" to ask instead.
-    func setDefaultFolder(_ value: String) {
-        work.async { [weak self] in
-            guard let self = self else { return }
-            _ = self.runGeniuz(value == "none" ? ["folder", "use", "--none"] : ["folder", "use", value])
-            self.foldersReadAt = .distantPast
-            self.refresh()
-        }
     }
 
     var settingsPath: String {
@@ -377,7 +354,6 @@ class GeniuzService: ObservableObject {
             let claudeCode = self.checkClaudeCodeConnected()
             let onPath = self.checkCliOnPath()
             let s = self.loadSettings()
-            let defaultSetting = self.readDefaultSetting()
 
             DispatchQueue.main.async {
                 self.folders = folders
@@ -392,7 +368,6 @@ class GeniuzService: ObservableObject {
                 self.claudeCodeConnected = claudeCode
                 self.cliOnPath = onPath
                 self.settings = s
-                self.defaultFolderSetting = defaultSetting
                 self.onStateChange?()
                 self.checkForUpdateIfDue()
             }

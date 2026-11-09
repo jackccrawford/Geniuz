@@ -291,13 +291,13 @@ pub enum FolderCommand {
         path: PathBuf,
     },
 
-    /// Make a folder the default, used whenever none is named (or --none: ask instead)
+    /// Removed in 5.1 (there is no default folder). Kept, hidden, so it can say what to do instead
+    #[command(hide = true)]
     Use {
-        /// Name or 8-character ID
-        #[arg(required_unless_present = "none")]
+        /// Ignored
         name: Option<String>,
-        /// No default: a command that names no folder asks for one instead of guessing
-        #[arg(long, conflicts_with = "name")]
+        /// Ignored
+        #[arg(long)]
         none: bool,
     },
 

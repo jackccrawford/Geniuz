@@ -31,18 +31,9 @@ path = "src/main.rs"
 name = "geniuz-embed"
 path = "src/embed_server.rs"
 
-[[bin]]
-name = "geniuz-tray"
-path = "src/tray.rs"
-required-features = ["tray"]
-
-[features]
-default = []
-tray = ["dep:tray-icon", "dep:image", "dep:winit"]
-
 [build-dependencies]
 # Embed a Windows VersionInfo resource so Task Manager shows "Geniuz"
-# instead of "geniuz-tray.exe". Only runs on Windows builds; no-op
+# instead of "geniuz.exe". Only runs on Windows builds; no-op
 # on Mac/Linux. Compile-time only; not in the shipped binary.
 winresource = "0.1"
 
@@ -69,9 +60,6 @@ anyhow = "1"
 
 # Tray — feature-gated, Windows only ship. Tooltip + right-click menu only,
 # no GUI window, no webview. Keeps binary small (~3MB vs ~7MB with eframe).
-tray-icon = { version = "0.19", optional = true }
-image = { version = "0.25", default-features = false, features = ["png"], optional = true }
-winit = { version = "0.30", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

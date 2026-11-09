@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
 
-/// The folder in use, shared with the CLI and MCP through the same `current`
-/// file. Resolved every time, because any of them can change it or move it.
+/// The folder this window works in. Resolved every time, because a folder can
+/// move while the window is open.
 fn db_path() -> Result<String, String> {
     let reg = Registry::from_env();
     let shown = SHOWN.lock().map_err(|_| "The app is in a bad state.".to_string())?.clone();
@@ -30,28 +30,25 @@ fn db_path() -> Result<String, String> {
 /// can't land in a folder that isn't the one on screen.
 static SHOWN: std::sync::Mutex<Shown> = std::sync::Mutex::new(Shown::NotYet);
 
-/// The folder the person chose to look at in this window. Looking is not choosing
-/// where memories go: picking a folder here changes only what
-/// this window shows. The folder in use for Claude, the CLI and the MCP changes only
-/// elsewhere: the menu bar's picker, `geniuz folder use`. Keep here starts on the folder
-/// on screen and writes where its pulldown says. This is the window's own state, not the machine's.
-/// Kept across page reloads; a new launch opens on the folder in use.
+/// The folder the person chose to look at in this window: the window's own state,
+/// not the machine's. Keep here starts on the folder on screen and writes where its
+/// pulldown says. Kept across page reloads; a new launch opens on My memory.
 static VIEW: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-/// The folder in use, Mac-wide (the `current` file), as its UUID.
-fn in_use_uuid(reg: &Registry) -> Option<String> {
+/// Where a memory goes when no folder is named (My memory), as its UUID.
+fn first_uuid(reg: &Registry) -> Option<String> {
     let using = reg.resolve(None, None, None).ok().map(|p| std::fs::canonicalize(&p).unwrap_or(p))?;
     reg.scan().folders.iter()
         .find(|f| std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()) == using)
         .map(|f| f.uuid.clone())
 }
 
-/// The folder this window shows: the one chosen here, else the folder in use.
+/// The folder this window shows: the one chosen here, else My memory.
 fn shown_uuid(reg: &Registry) -> Option<String> {
     if let Ok(slot) = SHOWN.lock() {
         if let Shown::Folder(u) = &*slot { return Some(u.clone()); }
     }
-    in_use_uuid(reg)
+    first_uuid(reg)
 }
 
 #[derive(Clone)]
@@ -553,9 +550,6 @@ struct FolderRow {
     location: String,
     /// The folder this window shows.
     current: bool,
-    /// The folder in use: where Claude, the CLI and the MCP keep memories when
-    /// no folder is named. Not the same as `current` once you look elsewhere.
-    in_use: bool,
     /// The first folder lives beside the others, so it stays where it is.
     fixed: bool,
     pinned: bool,
@@ -573,7 +567,7 @@ struct FolderList {
     unavailable: usize,
 }
 
-fn folder_row(f: &Folder, current: Option<&str>, in_use: Option<&str>, pinned: bool) -> FolderRow {
+fn folder_row(f: &Folder, current: Option<&str>, pinned: bool) -> FolderRow {
     let canonical = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let (memories, last_written) = f.stats().unwrap_or((0, None));
     let dir = f.db_path.parent().unwrap_or(&f.db_path);
@@ -586,7 +580,6 @@ fn folder_row(f: &Folder, current: Option<&str>, in_use: Option<&str>, pinned: b
         last_written,
         location: dir.to_string_lossy().into_owned(),
         current: current.is_some_and(|c| c.eq_ignore_ascii_case(&f.uuid)),
-        in_use: in_use.is_some_and(|c| c.eq_ignore_ascii_case(&f.uuid)),
         fixed: canonical(dir) == canonical(&geniuz::data_dir()),
         pinned,
         tree: tree_of(dir),
@@ -608,23 +601,22 @@ fn list_folders() -> FolderList {
 
 /// The list, with `current` marking exactly this folder.
 fn folder_list(reg: &Registry, current: Option<&str>) -> FolderList {
-    let in_use = in_use_uuid(reg);
     let scan = reg.scan();
     let pins = reg.pinned();
     FolderList {
         folders: scan
             .folders
             .iter()
-            .map(|f| folder_row(f, current, in_use.as_deref(), pins.iter().any(|p| p.eq_ignore_ascii_case(&f.uuid))))
+            .map(|f| folder_row(f, current, pins.iter().any(|p| p.eq_ignore_ascii_case(&f.uuid))))
             .collect(),
-        archived: reg.archived().iter().map(|f| folder_row(f, None, None, false)).collect(),
+        archived: reg.archived().iter().map(|f| folder_row(f, None, false)).collect(),
         blocked: scan.blocked.len(),
         unavailable: scan.unavailable.len() + scan.pending_moves.len(),
     }
 }
 
-/// Called once per page load: show the folder chosen in this window, else the
-/// folder in use, and stay with it.
+/// Called once per page load: show the folder chosen in this window, else My
+/// memory, and stay with it.
 #[tauri::command]
 fn bind_current_folder() -> Result<FolderList, String> {
     let reg = Registry::from_env();
@@ -635,25 +627,19 @@ fn bind_current_folder() -> Result<FolderList, String> {
         return Ok(folder_list(&reg, Some(&uuid)));
     }
     // One decision: what's bound is exactly what the page is told it's showing.
-    // With no default folder set, the window opens on the first folder: looking
-    // needs no default, only writing without a folder does.
-    let resolved = reg.resolve(None, None, None).or_else(|e| {
-        if reg.no_default() { reg.ensure_default() } else { Err(e) }
-    });
+    let resolved = reg.resolve(None, None, None);
     let chosen = resolved.and_then(|p| {
         let path = std::fs::canonicalize(&p).unwrap_or(p);
         let scan = reg.scan();
         let found = scan.folders.iter().find(|f| {
             std::fs::canonicalize(&f.db_path).unwrap_or_else(|_| f.db_path.clone()) == path
         });
-        found.map(|f| f.uuid.clone()).ok_or_else(|| "The folder in use isn't available.".to_string())
+        found.map(|f| f.uuid.clone()).ok_or_else(|| "My memory isn't available.".to_string())
     });
     let mut slot = SHOWN.lock().map_err(|_| "The app is in a bad state.".to_string())?;
     match chosen {
         Ok(uuid) => {
             *slot = Shown::Folder(uuid.clone());
-            // What's on screen stays on screen: a later change of the default
-            // folder elsewhere doesn't move this window.
             // Replace, not keep: a viewed folder that vanished must not pull the window
             // back when it returns.
             if let Ok(mut v) = VIEW.lock() { *v = Some(uuid.clone()); }
@@ -666,14 +652,6 @@ fn bind_current_folder() -> Result<FolderList, String> {
     }
 }
 
-/// Make this the folder in use, Mac-wide: where Claude, the CLI and the MCP keep
-/// memories when none is named. The dashboard no longer calls it (the menu bar's picker
-/// and `geniuz folder use` set it); kept for whatever asks explicitly.
-#[tauri::command]
-fn use_folder(uuid: String) -> Result<(), String> {
-    Registry::from_env().use_folder(&uuid).map(|_| ())
-}
-
 /// Show this folder in this window. Changes nothing anywhere else.
 #[tauri::command]
 fn view_folder(uuid: String) -> Result<(), String> {
@@ -682,7 +660,7 @@ fn view_folder(uuid: String) -> Result<(), String> {
     Ok(())
 }
 
-/// A new folder opens here; it becomes the folder in use only if chosen for that.
+/// A new folder opens in this window.
 #[tauri::command]
 fn create_folder(name: String, description: String) -> Result<(), String> {
     let reg = Registry::from_env();
@@ -937,7 +915,7 @@ fn build_menu(app: &tauri::AppHandle, shortcuts: bool) -> tauri::Result<Menu<tau
     folders_menu.append(&item("menu_new_folder", "New Folder…")?)?;
     folders_menu.append(&MenuItem::with_id(app, "menu_archived", "Archived", true, None::<&str>)?)?;
     folders_menu.append(&PredefinedMenuItem::separator(app)?)?;
-    // With many folders a menu of all of them is a wall: show the one in use,
+    // With many folders a menu of all of them is a wall: show the one on screen,
     // the pinned ones and the week's (newest first, up to ten), then All Folders….
     const MENU_ALL_UP_TO: usize = 20;
     let shown: Vec<&FolderRow> = if list.folders.len() <= MENU_ALL_UP_TO {
@@ -1074,7 +1052,6 @@ pub fn run() {
             get_data_dir,
             list_folders,
             bind_current_folder,
-            use_folder,
             create_folder,
             update_folder,
             add_folders,
