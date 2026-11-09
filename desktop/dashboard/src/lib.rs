@@ -164,9 +164,9 @@ fn get_app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-/// A newer release, if the menu-bar app's last check found one. The menu-bar
-/// app asks GitHub and writes `update.json` in the data directory; the dashboard
-/// only reads it, so the two never disagree and GitHub is asked once.
+/// A newer release, if the last check found one. The Mac menu bar (or, on
+/// Windows and Linux, this app's tray) asks GitHub and writes `update.json` in
+/// the data directory; the pages only read it, so every surface agrees.
 #[derive(serde::Serialize)]
 struct UpdateInfo {
     version: String,
@@ -1178,6 +1178,44 @@ pub fn run() {
                     ],
                 )?;
 
+                // "Update available": on Windows and Linux this tray does what the
+                // Mac menu bar does. Every 5 minutes it asks whether a check is due
+                // (daily or weekly, per settings; never when updates are off or set
+                // to manual), and when a newer release is known, a line at the top
+                // of the menu opens it in the browser. Nothing downloads or installs.
+                {
+                    let menu = tray_menu.clone();
+                    let handle = handle.clone();
+                    std::thread::spawn(move || {
+                        let mut shown = false;
+                        loop {
+                            if let Ok(s) = geniuz::settings::Settings::load_strict() {
+                                if geniuz::update::due(&s, chrono::Utc::now()) {
+                                    let _ = geniuz::update::check();
+                                }
+                            }
+                            if !shown {
+                                if let Some(found) = geniuz::update::available() {
+                                    let label = format!("Update available: Geniuz {}…", found.version);
+                                    let menu = menu.clone();
+                                    let h = handle.clone();
+                                    // Menus are changed on the main thread.
+                                    let _ = handle.run_on_main_thread(move || {
+                                        if let Ok(item) = MenuItem::with_id(&h, "tray_update", label, true, None::<&str>) {
+                                            let _ = menu.insert(&item, 0);
+                                            if let Ok(sep) = PredefinedMenuItem::separator(&h) {
+                                                let _ = menu.insert(&sep, 1);
+                                            }
+                                        }
+                                    });
+                                    shown = true;
+                                }
+                            }
+                            std::thread::sleep(std::time::Duration::from_secs(300));
+                        }
+                    });
+                }
+
                 let _tray = TrayIconBuilder::new()
                     .icon(app.default_window_icon().cloned().expect("default window icon"))
                     .tooltip("Geniuz")
@@ -1185,6 +1223,12 @@ pub fn run() {
                     .show_menu_on_left_click(false)
                     .on_menu_event(|app, event| {
                         let id = event.id().0.as_str();
+                        if id == "tray_update" {
+                            if let Some(found) = geniuz::update::available() {
+                                let _ = geniuz::update::open(&found.url);
+                            }
+                            return;
+                        }
                         let Some(window) = app.get_webview_window("main") else { return };
                         match id {
                             "tray_open" => {
