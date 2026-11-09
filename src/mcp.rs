@@ -69,12 +69,17 @@ fn tool_result(id: Value, text: &str, is_error: bool) -> JsonRpcResponse {
 /// in testing, agents with no other guidance used Geniuz in 0 of 8 sessions, and
 /// with this in 4 of 4. They ignore "use this at the start" on a tool they aren't
 /// yet thinking of calling.
-const INSTRUCTIONS: &str = "Geniuz is your memory across sessions; without it, the next session starts knowing nothing. \
-At the start of a conversation, call recall with no query, then search for the topic at hand. \
-Before you finish a task, call keep for what a future session would need and could not get from the files: \
-decisions and why, people, preferences, constraints. Skip what the code or files already say. \
-Before your first keep in a conversation, call folders and choose the one that fits, then follow what its description says. \
-A memory can't be moved or removed afterwards.";
+///
+/// Worded as explanation, not orders (Jack, 9 Nov): a model reads "do this, then that"
+/// from a tool as a possible injection, and asks before keeping on the user's behalf.
+const INSTRUCTIONS: &str = "Geniuz keeps notes that last beyond this chat, on this computer. \
+Recall with no query shows the most recent notes, a quick way to see what's already known when a conversation starts; \
+a search then finds what's relevant to the topic at hand. \
+Many people like to be asked once whether notes should be kept. \
+When they agree, keep saves what a later chat would need and couldn't get from the files: \
+decisions and why, preferences, what to pick up next. \
+Notes live in folders, each describing what belongs there; the folders tool lists them. \
+A note can't be moved or removed afterwards.";
 
 fn tool_definitions() -> Value {
     let mut tools = base_tool_definitions();
@@ -104,7 +109,7 @@ fn base_tool_definitions() -> Value {
         "tools": [
             {
                 "name": "keep",
-                "description": "Keep something worth remembering for future sessions. Use this when you learn something important about the user: their preferences, decisions, client details, project context, or anything they would not want to repeat. Your future self will find it by meaning, not keywords. Keep more than you think you should: storage is free, forgetting is expensive.",
+                "description": "Saves a note for later chats: a decision and why, a preference, project context, what to pick up next. It's found later by meaning, not exact words. Each note goes in a named folder, with a one-line gist.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {

@@ -20,9 +20,9 @@ A memory that says what broke, why it broke, and how you fixed it saves an hour.
 
 Memories compound. A single memory is a note. A folder of memories is institutional knowledge. Write for the version of you that knows nothing.
 
-## Ask first
+## Asking first
 
-At the start of a chat, ask whether the user would like you to keep notes in Geniuz: decisions, progress, what to pick up next time. If they agree, keep as you go and mention what you kept. It helps you support them better, in this chat and in the next.
+Most people like to be asked, once, whether notes should be kept in Geniuz: decisions, progress, what to pick up next time. When they agree, keeping as you go and mentioning what was kept works well. It helps in this chat and in the next.
 
 ## Commands
 
