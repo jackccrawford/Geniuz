@@ -28,6 +28,11 @@ scp $WIN:C:/build/geniuz-X.Y.Z/installer/windows/output/Geniuz-Setup.exe release
 # 5. Upload with the release (gh release upload vX.Y.Z release-artifacts/vX.Y.Z/Geniuz-Setup.exe).
 ```
 
+Running a build straight from its folder as another Windows user (built as
+`orbit`, run as `jackc`): `DirectML.dll` there is a link into the builder's own
+profile, which the other user can't read, so the app quits without a word. Copy
+the real file over the link first. The installer is unaffected; it packs the file.
+
 Testing a download the way a user would: `Invoke-WebRequest` sets no
 Mark-of-the-Web, so SmartScreen is not exercised. Set `ZoneId=3` on the file
 first, then run it.
