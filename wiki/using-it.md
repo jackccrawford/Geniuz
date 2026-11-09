@@ -106,13 +106,13 @@ geniuz folder unpin Clients
 
 In the dashboard, folders are in the sidebar and in the Folders menu. Click the pin beside a name to keep it at the top of every list. Keep has a pulldown for choosing a folder, and Find can search any selection of them. A folder that sits in a directory named `agents` is listed under **Agents**, and the rest under **Shared**, so each agent's own folder is easy to tell from the ones it shares.
 
-To give a project its own folder, put the folder's name or ID in a `.geniuz-folder` file in the project. Commands run there, and agents working there, use that folder.
+To give a project its own folder for reading, put the folder's name or ID in a `.geniuz-folder` file in the project: `recall` run there, by you or an agent, reads that folder when none is named. Keeping still names its folder every time.
 
 ### Where a memory goes
 
 Wherever the writer says. Every keep names its folder: `-f Work` on the command line, the folder in the dashboard's Keep pulldown, or the folder your AI chooses with its folders tool. A keep that names no folder is refused; nothing is kept by guess. The easiest way to keep something is to ask your AI to save it: it knows your folders and picks the right one.
 
-Reading is more forgiving. `recall` with no folder reads the project's `.geniuz-folder` if there is one, else My memory, and `recall --all` reads every folder.
+Reading is more forgiving. `recall` with no folder reads the database `GENIUZ_DB` names, else the project's `.geniuz-folder`, else My memory, and `recall --all` reads every folder.
 
 ### Reading a folder
 

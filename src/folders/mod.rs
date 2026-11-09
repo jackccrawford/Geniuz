@@ -683,7 +683,7 @@ fn same_file(_: &Path, _: &Path) -> bool {
 /// command stays so scripts and agents that learned it are told the new way.
 /// (A `current` file left by an older version is no longer read, and is left alone.)
 pub const NO_DEFAULT_FOLDER: &str = "Geniuz 5.1 has no default folder: every keep names its folder, with \
-     -f <folder>. `geniuz folders` lists them.";
+     -f <folder>. `geniuz folder list` lists them.";
 
 fn read_dotfile(start: &Path) -> Option<(PathBuf, String)> {
     for dir in start.ancestors() {

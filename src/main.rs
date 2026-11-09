@@ -160,7 +160,7 @@ pub fn get_db() -> Result<db::DatabaseManager, String> {
 /// writer says (Jack, 8 Nov, as relay always did: "station was ALWAYS required for
 /// signal. no default station existed"). Reading may fall back; writing never does.
 pub const KEEP_NEEDS_FOLDER: &str = "Name the folder to keep this in, with -f <folder>: \
-    `geniuz keep -f <folder> -c \"...\" -g \"...\"`. `geniuz folders` lists them.";
+    `geniuz keep -f <folder> -c \"...\" -g \"...\"`. `geniuz folder list` lists them.";
 
 /// The database a memory is written to: exactly the folder named with -f. No
 /// fallback to My memory, a .geniuz-folder file or GENIUZ_DB.
@@ -480,12 +480,13 @@ fn run(cli: Cli) -> Result<String, String> {
                 println!("  {}", f.display());
             }
 
+            // The folder is checked first, so a dry run fails the way the real one would.
+            let db = get_db_to_keep()?;
             if dry_run {
                 println!("\n--dry-run: no changes made.");
                 return Ok(String::new());
             }
 
-            let db = get_db_to_keep()?;
             let backend = geniuz::embedding::create_backend()?;
             let prefix = gist_prefix.as_deref().unwrap_or("");
             let mut created = 0usize;
