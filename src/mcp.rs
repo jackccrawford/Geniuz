@@ -80,7 +80,7 @@ fn tool_definitions() -> Value {
     let mut tools = base_tool_definitions();
     let folder = json!({
         "type": "string",
-        "description": "Which folder to use, by name or 8-character ID. Choose one with the folders tool. Left out, this uses My memory. An unknown name is an error, never a different folder."
+        "description": "Which folder to use, by name or 8-character ID. Choose one with the folders tool. Left out, this uses the folder set for where you were started (a .geniuz-folder file or GENIUZ_DB), else My memory. An unknown name is an error, never a different folder."
     });
     for tool in tools["tools"].as_array_mut().into_iter().flatten() {
         if tool["name"] != "folders" {

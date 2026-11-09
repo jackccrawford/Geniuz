@@ -11,7 +11,7 @@ The ways in, for you and for your AI.
 | CLI | Every command, for people, scripts and agents. | `capture` refuses files that are not prose unless you pass `--force`. | [`src/cli.rs`](../src/cli.rs), [`src/main.rs`](../src/main.rs) |
 | Dashboard | The desktop app. Browse, keep and find across your folders, pin the ones you use most, and change your shortcuts. | A window stays with the folder it shows, so a draft can't land somewhere else. Looking at a folder doesn't change your default. | [`desktop/dashboard`](../desktop/dashboard) |
 | MCP | How your AI reaches Geniuz: `keep`, `recall` and `folders`, plus guidance on when to use them. | A wrong folder name is an error, never a different folder. | [`src/mcp.rs`](../src/mcp.rs) |
-| Menubar | Your folders and recent memories, always one click away, and Settings for updates. On Windows and Linux the dashboard's tray menu does this. | The Mac menubar only ever reads your memories. | [`desktop/Geniuz`](../desktop/Geniuz), [`desktop/dashboard`](../desktop/dashboard) |
+| Menubar | Your folders and recent memories, always one click away, and Settings for updates. On Windows and Linux a tray icon opens the dashboard and its pages instead. | The Mac menubar only ever reads your memories. | [`desktop/Geniuz`](../desktop/Geniuz), [`desktop/dashboard`](../desktop/dashboard) |
 | Terminal UI | Browse and compose in a terminal. | Refuses to start without a real terminal. | [`src/tui.rs`](../src/tui.rs) |
 
 ## Core

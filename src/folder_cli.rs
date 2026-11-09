@@ -14,7 +14,7 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
         FolderCommand::Show { name, json } => show(&reg, name.as_deref(), json),
         FolderCommand::Create { name, description, at } => {
             let f = reg.create(&name, &description, at.as_deref())?;
-            Ok(format!("Created {} ({})\nKeep a memory in it with: geniuz keep -f \"{}\" -g \"...\"", f.name, f.short_id(), f.name))
+            Ok(format!("Created {} ({})\nKeep a memory in it with: geniuz keep -f {} -c \"...\" -g \"...\"", f.name, f.short_id(), f.short_id()))
         }
         FolderCommand::Add { path } => {
             let found = reg.add(&path)?;

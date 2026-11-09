@@ -28,7 +28,7 @@ If a copy turns up anyway, every copy stops working until one is moved. Nothing 
 
 ## No default folder
 
-A memory that names no folder goes to My memory, always. Until 5.1 that place was a setting you could change, and could set to none; it caused more confusion than it saved, because what a command did depended on a file somewhere else. Now a memory goes where it says, or to My memory. Projects and agents that want their own folder name it, with `-f` or a `.geniuz-folder` file.
+A memory that names no folder goes to My memory, unless the project it was written from names one in a `.geniuz-folder` file. Until 5.1 that place was a setting you could change, and could set to none; it caused more confusion than it saved, because what a command did depended on a file somewhere else. Now a memory goes where it says, or to My memory. Projects and agents that want their own folder name it, with `-f` or a `.geniuz-folder` file.
 
 The cost is naming the folder when you mean another one. In return, nothing you look at, and no setting you forgot, can send a week of memories somewhere you didn't expect.
 
