@@ -1196,7 +1196,8 @@ pub fn run() {
                             }
                             if !shown {
                                 if let Some(found) = geniuz::update::available() {
-                                    let label = format!("Update available: Geniuz {}…", found.version);
+                                    // On Windows the link is the installer itself, so say "Download".
+                                    let label = format!("Download Geniuz {} (update available)", found.version);
                                     let menu = menu.clone();
                                     let h = handle.clone();
                                     // Menus are changed on the main thread.
@@ -1299,6 +1300,21 @@ pub fn run() {
                     }
                 }
             }
+        })
+        .on_window_event(|window, event| {
+            // On Windows and Linux the tray lives in this app, so closing the
+            // window hides it instead of quitting: the tray, and its update
+            // check, stay. "Quit Geniuz" in the tray quits; opening Geniuz again
+            // brings the window back (see single_instance above).
+            #[cfg(not(target_os = "macos"))]
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+            #[cfg(target_os = "macos")]
+            let _ = (window, event);
         })
         .run(tauri::generate_context!())
         .expect("error while running geniuz-dashboard");
