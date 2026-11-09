@@ -44,16 +44,16 @@ pub enum Command {
     #[command(
         alias = "remember",
         arg_required_else_help = true,
-        after_help = "Examples:\n  geniuz keep -c \"Fixed the auth bug\"\n  geniuz keep -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz keep -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz keep -c - -g \"piped: from process\"\n\nTip: The gist is how future agents find this memory. Write for them."
+        after_help = "Examples:\n  geniuz keep -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz keep -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz keep -c - -g \"piped: from process\"\n\nThe gist is required: it's how future agents find this memory. Write for them."
     )]
     Keep {
         /// Content to save
         #[arg(short, long)]
         content: String,
 
-        /// The short line it's found by: write it for whoever reads it next
+        /// The short line it's found by: write it for whoever reads it next (required)
         #[arg(short, long)]
-        gist: Option<String>,
+        gist: String,
 
         /// Thread to a parent memory (UUID prefix)
         #[arg(short, long)]

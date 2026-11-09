@@ -155,18 +155,18 @@ impl DatabaseManager {
     // KEEP (write)
     // =========================================================================
 
-    /// Keep a memory, with an optional gist and parent. Returns its short UUID.
+    /// Keep a memory, with its gist and an optional parent. Returns its short UUID.
     /// Embeds content inline if no backend is provided (creates one per call).
     /// Its time is the moment it's kept: nobody chooses it (Jack, 8 Nov: "if an agent
     /// wants to say something about the past, they may do so in gist and content, but
     /// not in created_at"). Order matters more than the time.
-    pub fn keep(&self, content: &str, gist: Option<&str>, parent: Option<&str>) -> Result<KeepResult, String> {
+    pub fn keep(&self, content: &str, gist: &str, parent: Option<&str>) -> Result<KeepResult, String> {
         self.keep_inner(content, gist, parent, None, None)
     }
 
     /// Keep a memory, optionally reusing an embedding backend already loaded.
     pub fn keep_with_backend(
-        &self, content: &str, gist: Option<&str>, parent: Option<&str>,
+        &self, content: &str, gist: &str, parent: Option<&str>,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,
     ) -> Result<KeepResult, String> {
         self.keep_inner(content, gist, parent, None, backend)
@@ -177,7 +177,7 @@ impl DatabaseManager {
     /// an AI or another program reaches can call it.
     #[cfg(test)]
     pub(crate) fn keep_at_for_tests(
-        &self, content: &str, gist: Option<&str>, parent: Option<&str>,
+        &self, content: &str, gist: &str, parent: Option<&str>,
         created_at: Option<&str>,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,
     ) -> Result<KeepResult, String> {
@@ -185,12 +185,18 @@ impl DatabaseManager {
     }
 
     fn keep_inner(
-        &self, content: &str, gist: Option<&str>, parent: Option<&str>,
+        &self, content: &str, gist: &str, parent: Option<&str>,
         created_at: Option<&str>,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,
     ) -> Result<KeepResult, String> {
         if content.trim().is_empty() {
             return Err("Content cannot be empty".to_string());
+        }
+        // Every memory has a gist the writer chose (Jack, 8 Nov): the headline every
+        // list and search shows. Spaces alone don't count.
+        let gist = gist.trim();
+        if gist.is_empty() {
+            return Err("A memory needs a gist: one line saying what it is, for whoever finds it later.".to_string());
         }
         // Every time in the store has one shape, UTC `YYYY-MM-DD HH:MM:SS`: times are
         // compared as text, so another shape sorts and filters wrongly. Some
@@ -204,22 +210,9 @@ impl DatabaseManager {
         }
 
         let uuid = uuid::Uuid::new_v4().to_string().to_uppercase();
-        let auto_gist = gist.map(|g| g.to_string()).unwrap_or_else(|| {
-            let trimmed = content.trim();
-            // Truncate by char, not byte — `len()`/byte-slicing splits multibyte
-            // characters mid-codepoint and panics (e.g. multilingual content,
-            // which this project's embedding model explicitly targets).
-            if trimmed.chars().count() <= 200 {
-                trimmed.to_string()
-            } else {
-                let truncated: String = trimmed.chars().take(197).collect();
-                format!("{}...", truncated)
-            }
-        });
-
         let payload = serde_json::json!({
             "content": content.trim(),
-            "gist": auto_gist,
+            "gist": gist,
         });
         let payload_str = serde_json::to_string(&payload)
             .map_err(|e| format!("Failed to serialize: {}", e))?;
@@ -1307,12 +1300,12 @@ mod tests {
     #[test]
     fn a_reply_to_a_memory_not_in_this_folder_is_refused_not_dropped() {
         let (db, _dir) = fresh_db();
-        let root = db.keep_with_backend("root", Some("root"), None, Some(&MockBackend)).unwrap().uuid;
+        let root = db.keep_with_backend("root", "root", None, Some(&MockBackend)).unwrap().uuid;
         let conn = db.conn().unwrap();
         conn.execute_batch("CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT); \
             INSERT OR REPLACE INTO _meta VALUES ('folder_uuid', 'AFEA772B-E060-5D19-BEB9-925128692FAE');").unwrap();
         drop(conn);
-        let reply = |parent: &str| db.keep_with_backend("reply", Some("reply"), Some(parent), Some(&MockBackend));
+        let reply = |parent: &str| db.keep_with_backend("reply", "reply", Some(parent), Some(&MockBackend));
 
         // Missing here, by prefix and by full ID.
         assert!(reply("6B3F7B38").unwrap_err().contains("No memory 6B3F7B38 in this folder"));
@@ -1331,9 +1324,23 @@ mod tests {
         }
     }
 
-    /// Shortcut: keep a memory with the mock backend and return its short UUID.
+    #[test]
+    fn a_memory_needs_a_gist_and_spaces_alone_dont_count() {
+        let (db, _dir) = fresh_db();
+        for blank in ["", " ", "\n\t  "] {
+            let err = db.keep_with_backend("some content", blank, None, Some(&MockBackend)).unwrap_err();
+            assert!(err.contains("needs a gist"), "{blank:?}: {err}");
+        }
+        assert_eq!(db.count().unwrap(), 0, "nothing kept");
+        let kept = db.keep_with_backend("some content", "  note: trimmed  ", None, Some(&MockBackend)).unwrap();
+        let entry = db.recent(1).unwrap().into_iter().find(|e| e.memory_uuid.starts_with(&kept.uuid)).unwrap();
+        assert_eq!(entry.gist, "note: trimmed", "stored trimmed");
+    }
+
+    /// Shortcut: keep a memory with the mock backend and return its short UUID. With
+    /// no gist given, the content stands in for one.
     fn insert(db: &DatabaseManager, content: &str, gist: Option<&str>, parent: Option<&str>) -> String {
-        db.keep_with_backend(content, gist, parent, Some(&MockBackend))
+        db.keep_with_backend(content, gist.unwrap_or(content), parent, Some(&MockBackend))
             .expect("keep_with_backend")
             .uuid
     }
@@ -1382,7 +1389,7 @@ mod tests {
     fn keep_rejects_empty_content() {
         let (db, _dir) = fresh_db();
         let err = db
-            .keep_with_backend("", Some("gist"), None, Some(&MockBackend))
+            .keep_with_backend("", "gist", None, Some(&MockBackend))
             .expect_err("empty content should error");
         assert!(err.contains("empty"), "error mentions emptiness: {}", err);
     }
@@ -1391,7 +1398,7 @@ mod tests {
     fn keep_rejects_whitespace_only_content() {
         let (db, _dir) = fresh_db();
         let err = db
-            .keep_with_backend("   \n\t  ", None, None, Some(&MockBackend))
+            .keep_with_backend("   \n\t  ", "   \n\t  ", None, Some(&MockBackend))
             .expect_err("whitespace-only content should error");
         assert!(err.contains("empty"), "error mentions emptiness: {}", err);
     }
@@ -1405,39 +1412,16 @@ mod tests {
         assert_eq!(entry.gist, "remembered something small");
     }
 
-    #[test]
-    fn keep_truncates_auto_gist_for_long_content() {
-        let (db, _dir) = fresh_db();
-        // 300-char content — auto-gist truncates at 197 + "..."
-        let long = "x".repeat(300);
-        let short = insert(&db, &long, None, None);
-        let entries = db.recent(10).unwrap();
-        let entry = entries.iter().find(|e| e.memory_uuid.starts_with(&short)).expect("inserted entry");
-        assert_eq!(entry.gist.len(), 200, "auto-gist is exactly 200 chars (197 + '...')");
-        assert!(entry.gist.ends_with("..."), "auto-gist ends with ellipsis");
-    }
 
-    #[test]
-    fn keep_truncates_multibyte_content_without_panicking() {
-        let (db, _dir) = fresh_db();
-        // 250 multibyte chars (750 bytes) — byte-slicing at index 197 would land
-        // mid-codepoint and panic. Char-based truncation must not.
-        let long = "あ".repeat(250);
-        let short = insert(&db, &long, None, None);
-        let entries = db.recent(10).unwrap();
-        let entry = entries.iter().find(|e| e.memory_uuid.starts_with(&short)).expect("inserted entry");
-        assert_eq!(entry.gist.chars().count(), 200, "auto-gist is exactly 200 chars (197 + '...')");
-        assert!(entry.gist.ends_with("..."), "auto-gist ends with ellipsis");
-    }
 
     #[test]
     fn keep_reports_embedded_status_from_backend_outcome() {
         let (db, _dir) = fresh_db();
-        let ok = db.keep_with_backend("embeds fine", None, None, Some(&MockBackend))
+        let ok = db.keep_with_backend("embeds fine", "embeds fine", None, Some(&MockBackend))
             .unwrap();
         assert!(ok.embedded, "successful embed reports embedded = true");
 
-        let failed = db.keep_with_backend("embedding unavailable", None, None, Some(&FailingBackend))
+        let failed = db.keep_with_backend("embedding unavailable", "embedding unavailable", None, Some(&FailingBackend))
             .unwrap();
         assert!(!failed.embedded, "failed embed still saves the memory but reports embedded = false");
         // The memory itself is still written, just without a cached embedding.
@@ -1448,9 +1432,9 @@ mod tests {
     #[test]
     fn keyword_search_unembedded_only_returns_memories_without_cached_embedding() {
         let (db, _dir) = fresh_db();
-        db.keep_with_backend("authentication flow embedded", None, None, Some(&MockBackend))
+        db.keep_with_backend("authentication flow embedded", "authentication flow embedded", None, Some(&MockBackend))
             .unwrap();
-        db.keep_with_backend("authentication flow unembedded", None, None, Some(&FailingBackend))
+        db.keep_with_backend("authentication flow unembedded", "authentication flow unembedded", None, Some(&FailingBackend))
             .unwrap();
         let hits = db.keyword_search_unembedded("authentication", &Window::all(), 10).unwrap();
         assert_eq!(hits.len(), 1, "only the unembedded memory should surface here");
@@ -1481,9 +1465,9 @@ mod tests {
     fn unembedded_count_tracks_memories_the_backend_could_not_embed() {
         let (db, _dir) = fresh_db();
         assert_eq!(db.unembedded_count().unwrap(), 0, "a fresh folder has nothing pending");
-        db.keep_with_backend("embeds fine", None, None, Some(&MockBackend)).unwrap();
+        db.keep_with_backend("embeds fine", "embeds fine", None, Some(&MockBackend)).unwrap();
         assert_eq!(db.unembedded_count().unwrap(), 0, "a successful embed leaves nothing pending");
-        db.keep_with_backend("backend was down", None, None, Some(&FailingBackend)).unwrap();
+        db.keep_with_backend("backend was down", "backend was down", None, Some(&FailingBackend)).unwrap();
         assert_eq!(db.unembedded_count().unwrap(), 1, "a failed embed is reportable, not silent");
     }
 
@@ -1525,7 +1509,7 @@ mod tests {
 
         // Threading a new memory onto the ambiguous prefix must error, not
         // silently pick one candidate and corrupt the lineage.
-        let err = db.keep_with_backend("child", None, Some("AAAAAAAA"), Some(&MockBackend))
+        let err = db.keep_with_backend("child", "child", Some("AAAAAAAA"), Some(&MockBackend))
             .expect_err("ambiguous prefix should error, not silently resolve");
         assert!(err.contains("Ambiguous"), "error mentions ambiguity: {}", err);
     }
@@ -1553,11 +1537,11 @@ mod tests {
     fn recent_returns_newest_first() {
         let (db, _dir) = fresh_db();
         // Use explicit timestamps so ordering is deterministic without sleeping.
-        db.keep_at_for_tests("oldest", Some("oldest"), None, Some("2026-01-01 00:00:00"), Some(&MockBackend))
+        db.keep_at_for_tests("oldest", "oldest", None, Some("2026-01-01 00:00:00"), Some(&MockBackend))
             .unwrap();
-        db.keep_at_for_tests("middle", Some("middle"), None, Some("2026-02-01 00:00:00"), Some(&MockBackend))
+        db.keep_at_for_tests("middle", "middle", None, Some("2026-02-01 00:00:00"), Some(&MockBackend))
             .unwrap();
-        db.keep_at_for_tests("newest", Some("newest"), None, Some("2026-03-01 00:00:00"), Some(&MockBackend))
+        db.keep_at_for_tests("newest", "newest", None, Some("2026-03-01 00:00:00"), Some(&MockBackend))
             .unwrap();
         let entries = db.recent(10).unwrap();
         assert_eq!(entries.len(), 3);
@@ -1571,7 +1555,7 @@ mod tests {
         let (db, _dir) = fresh_db();
         for m in 1..=5 {
             let at = format!("2026-0{}-01 00:00:00", m);
-            db.keep_at_for_tests(&format!("m{m}"), Some(&format!("m{m}")), None, Some(&at), Some(&MockBackend))
+            db.keep_at_for_tests(&format!("m{m}"), &format!("m{m}"), None, Some(&at), Some(&MockBackend))
                 .unwrap();
         }
         let gists = |v: Vec<MemoryEntry>| v.into_iter().map(|e| e.gist).collect::<Vec<_>>();
@@ -1588,21 +1572,21 @@ mod tests {
     fn a_time_in_any_other_shape_is_refused() {
         let (db, _dir) = fresh_db();
         for bad in ["2026-03-21T02:00:00", "2026-03-21T02:00:00Z", "2026-03-21", "2026-03-21 02:00", "21/03/2026 02:00:00"] {
-            let err = db.keep_at_for_tests("x", Some("x"), None, Some(bad), Some(&MockBackend)).unwrap_err();
+            let err = db.keep_at_for_tests("x", "x", None, Some(bad), Some(&MockBackend)).unwrap_err();
             assert!(err.contains("YYYY-MM-DD HH:MM:SS"), "{bad}: {err}");
         }
-        assert!(db.keep_at_for_tests("x", Some("x"), None, Some("2026-03-21 02:00:00"), Some(&MockBackend)).is_ok());
+        assert!(db.keep_at_for_tests("x", "x", None, Some("2026-03-21 02:00:00"), Some(&MockBackend)).is_ok());
     }
 
     #[test]
     fn watch_position_sees_every_memory_in_the_same_second() {
         let (db, _dir) = fresh_db();
         let at = Some("2026-03-21 12:00:00");
-        let first = db.keep_at_for_tests("a", Some("a"), None, at, Some(&MockBackend)).unwrap();
+        let first = db.keep_at_for_tests("a", "a", None, at, Some(&MockBackend)).unwrap();
         for g in ["b", "c", "d"] {
-            db.keep_at_for_tests(g, Some(g), None, at, Some(&MockBackend)).unwrap();
+            db.keep_at_for_tests(g, g, None, at, Some(&MockBackend)).unwrap();
         }
-        db.keep_at_for_tests("e", Some("e"), None, Some("2026-03-21 12:00:01"), Some(&MockBackend)).unwrap();
+        db.keep_at_for_tests("e", "e", None, Some("2026-03-21 12:00:01"), Some(&MockBackend)).unwrap();
         let start = db.position_of(&first.uuid).unwrap().unwrap();
         let gists = |v: Vec<((String, i64), MemoryEntry)>| v.into_iter().map(|(_, e)| e.gist).collect::<Vec<_>>();
         // After "a": the three in the same second, then the next second.
@@ -1643,10 +1627,10 @@ mod tests {
     #[test]
     fn watch_sees_a_memory_dated_before_the_cursor() {
         let (db, _dir) = fresh_db();
-        let first = db.keep_at_for_tests("now", Some("now"), None, Some("2026-11-08 09:00:00"), Some(&MockBackend)).unwrap();
+        let first = db.keep_at_for_tests("now", "now", None, Some("2026-11-08 09:00:00"), Some(&MockBackend)).unwrap();
         let start = db.position_of(&first.uuid).unwrap().unwrap();
         // Kept afterwards, dated months earlier (copied in with its original date).
-        db.keep_at_for_tests("old", Some("old"), None, Some("2026-03-21 00:00:00"), Some(&MockBackend)).unwrap();
+        db.keep_at_for_tests("old", "old", None, Some("2026-03-21 00:00:00"), Some(&MockBackend)).unwrap();
         let after: Vec<String> = db.after(&start, 10).unwrap().into_iter().map(|(_, e)| e.gist).collect();
         assert_eq!(after, ["old"]);
         assert!(db.after(&db.last_position().unwrap().unwrap(), 10).unwrap().is_empty(), "the newest written is the end");
@@ -1732,9 +1716,9 @@ mod tests {
     #[test]
     fn last_write_timestamp_reflects_most_recent_insert() {
         let (db, _dir) = fresh_db();
-        db.keep_at_for_tests("first", None, None, Some("2026-01-01 12:00:00"), Some(&MockBackend))
+        db.keep_at_for_tests("first", "first", None, Some("2026-01-01 12:00:00"), Some(&MockBackend))
             .unwrap();
-        db.keep_at_for_tests("last", None, None, Some("2026-06-15 09:30:00"), Some(&MockBackend))
+        db.keep_at_for_tests("last", "last", None, Some("2026-06-15 09:30:00"), Some(&MockBackend))
             .unwrap();
         let ts = db.last_write_timestamp().unwrap().expect("has timestamp");
         assert!(ts.starts_with("2026-06-15"), "got: {}", ts);
@@ -1759,11 +1743,11 @@ mod tests {
         let (db, dir) = fresh_db();
         for i in 0..30 {
             let ts = format!("2026-{:02}-{:02} 12:00:00", 2 + i / 6, 1 + (i % 6) * 4);
-            db.keep_at_for_tests(&format!("code review notes, round {i}"), Some(&format!("review round {i}")),
+            db.keep_at_for_tests(&format!("code review notes, round {i}"), &format!("review round {i}"),
                 None, Some(&ts), Some(&ReviewAxis)).unwrap();
         }
         let recent = (chrono::Utc::now() - chrono::Duration::days(3)).format("%Y-%m-%d %H:%M:%S").to_string();
-        let r = db.keep_at_for_tests("Cubic reviewed the PR; third-party reviewer", Some("Cubic reviewed the PR"),
+        let r = db.keep_at_for_tests("Cubic reviewed the PR; third-party reviewer", "Cubic reviewed the PR",
             None, Some(&recent), Some(&ReviewAxis)).unwrap();
         (db, dir, r.uuid)
     }
@@ -1799,7 +1783,7 @@ mod tests {
     fn branching_thread(db: &DatabaseManager) -> [String; 5] {
         let at = |m: u32| format!("2026-09-{:02} 12:00:00", m);
         let w = |c: &str, p: Option<&str>, t: &str| {
-            db.keep_at_for_tests(c, Some(c), p, Some(t), Some(&MockBackend)).unwrap().uuid
+            db.keep_at_for_tests(c, c, p, Some(t), Some(&MockBackend)).unwrap().uuid
         };
         let root = w("root", None, &at(1));
         let a = w("branch a", Some(&root), &at(2));
@@ -1851,7 +1835,7 @@ mod tests {
                      'FFFFFFFF-0000-4000-8000-000000000000')",
             [orphan],
         ).unwrap();
-        let child = db.keep_at_for_tests("child", Some("child"), Some("0RPHAN00"),
+        let child = db.keep_at_for_tests("child", "child", Some("0RPHAN00"),
             Some("2026-09-02 00:00:00"), Some(&MockBackend)).unwrap().uuid;
         let t = db.thread_in(&child, &Window::all(), 50).unwrap();
         assert_eq!(t.root, orphan);
@@ -1868,8 +1852,7 @@ mod tests {
     #[test]
     fn grep_finds_a_name_deep_in_a_body_inside_the_window() {
         let (db, _dir, cubic) = review_folder();
-        db.keep_at_for_tests("Weekly notes\nlots of other text\n\nIn the end Cubic signed off.",
-            Some("weekly notes"), None, Some("2026-03-01 00:00:00"), Some(&ReviewAxis)).unwrap();
+        db.keep_at_for_tests("Weekly notes\nlots of other text\n\nIn the end Cubic signed off.", "weekly notes", None, Some("2026-03-01 00:00:00"), Some(&ReviewAxis)).unwrap();
         let terms = crate::dig::Terms::parse(&["cubic"]).unwrap();
         let all = db.grep_in(&terms, &Window::all(), None, 50).unwrap();
         assert_eq!((all.memories, all.lines), (2, 3), "gist line + body line, and the deep one");
@@ -1900,12 +1883,12 @@ mod tests {
     fn a_proper_name_in_the_query_puts_its_memories_first() {
         let (db, _dir) = fresh_db();
         for i in 0..30 {
-            db.keep_at_for_tests(&format!("code review notes, round {i}"), Some(&format!("review {i}")),
+            db.keep_at_for_tests(&format!("code review notes, round {i}"), &format!("review {i}"),
                 None, Some(&format!("2026-09-{:02} 12:00:00", 1 + i % 28)), Some(&LunchAxis)).unwrap();
         }
-        let cubic = db.keep_at_for_tests("Cubic and I had lunch", Some("lunch"), None,
+        let cubic = db.keep_at_for_tests("Cubic and I had lunch", "lunch", None,
             Some("2026-06-01 12:00:00"), Some(&LunchAxis)).unwrap().uuid;
-        db.keep_at_for_tests("a cubic box for lunch", Some("box"), None,
+        db.keep_at_for_tests("a cubic box for lunch", "box", None,
             Some("2026-06-02 12:00:00"), Some(&LunchAxis)).unwrap();
 
         let named = db.semantic_search_with("reviewers like Cubic", &Window::all(), 5, Some(&LunchAxis)).unwrap();
@@ -1928,12 +1911,12 @@ mod tests {
     fn count_since_days_filters_by_time_window() {
         let (db, _dir) = fresh_db();
         // Insert one very old, one recent.
-        db.keep_at_for_tests("old", None, None, Some("2020-01-01 00:00:00"), Some(&MockBackend))
+        db.keep_at_for_tests("old", "old", None, Some("2020-01-01 00:00:00"), Some(&MockBackend))
             .unwrap();
         let recent_ts = chrono::Utc::now()
             .format("%Y-%m-%d %H:%M:%S")
             .to_string();
-        db.keep_at_for_tests("recent", None, None, Some(&recent_ts), Some(&MockBackend))
+        db.keep_at_for_tests("recent", "recent", None, Some(&recent_ts), Some(&MockBackend))
             .unwrap();
         // 30-day window catches only the recent.
         let n = db.count_since_days(30).unwrap();
@@ -1944,9 +1927,9 @@ mod tests {
     fn daily_activity_buckets_by_day() {
         let (db, _dir) = fresh_db();
         let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
-        db.keep_at_for_tests("a", None, None, Some(&format!("{} 09:00:00", today)), Some(&MockBackend))
+        db.keep_at_for_tests("a", "a", None, Some(&format!("{} 09:00:00", today)), Some(&MockBackend))
             .unwrap();
-        db.keep_at_for_tests("b", None, None, Some(&format!("{} 14:00:00", today)), Some(&MockBackend))
+        db.keep_at_for_tests("b", "b", None, Some(&format!("{} 14:00:00", today)), Some(&MockBackend))
             .unwrap();
         let buckets = db.daily_activity(7).unwrap();
         let today_bucket = buckets.iter().find(|(d, _)| d == &today);
@@ -2018,9 +2001,9 @@ mod tests {
     #[test]
     fn since_returns_memories_after_timestamp() {
         let (db, _dir) = fresh_db();
-        db.keep_at_for_tests("before", Some("before"), None, Some("2026-01-01 00:00:00"), Some(&MockBackend))
+        db.keep_at_for_tests("before", "before", None, Some("2026-01-01 00:00:00"), Some(&MockBackend))
             .unwrap();
-        db.keep_at_for_tests("after", Some("after"), None, Some("2026-03-01 00:00:00"), Some(&MockBackend))
+        db.keep_at_for_tests("after", "after", None, Some("2026-03-01 00:00:00"), Some(&MockBackend))
             .unwrap();
         let results = db.since("2026-02-01 00:00:00", 10).unwrap();
         assert_eq!(results.len(), 1);

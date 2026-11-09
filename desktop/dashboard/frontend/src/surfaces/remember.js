@@ -1,8 +1,8 @@
 // remember.js — author a new memory.
 //
 // Two-field form: Gist (single line) + Content (multi-line). Matches the TUI's
-// two-field compose. Gist is optional; if blank the chassis auto-derives one
-// from the first 200 chars of content. Submit calls `remember_memory` which
+// two-field compose. Both are required: the gist is the headline every list and
+// search shows, written by whoever keeps it. Submit calls `remember_memory` which
 // wraps `db::keep()` — same write path as the CLI and TUI.
 //
 // Reply to: optional, the memory this one threads to. Empty
@@ -116,7 +116,8 @@ export async function mount(container) {
         class="remember-field__input"
         name="gist"
         autocomplete="off"
-        placeholder="(optional, auto-derived from content if blank)"
+        required
+        placeholder="One line saying what this is"
       />
     </label>
     <label class="remember-field">
@@ -152,10 +153,12 @@ export async function mount(container) {
 
   const chosenFolder = () => folderSelect?.value || shown?.uuid || null;
 
+  // Keep needs both a gist and content (spaces alone don't count).
   const updateSubmitState = () => {
-    submitBtn.disabled = !contentInput.value.trim();
+    submitBtn.disabled = !contentInput.value.trim() || !gistInput.value.trim();
   };
   contentInput.addEventListener('input', updateSubmitState);
+  gistInput.addEventListener('input', updateSubmitState);
 
   // ---- Reply to ----------------------------------------------------------
 
@@ -398,7 +401,7 @@ export async function mount(container) {
     e.preventDefault();
     const gist = gistInput.value.trim();
     const content = contentInput.value.trim();
-    if (!content) return;
+    if (!content || !gist) return;
     submitBtn.disabled = true;
     status.textContent = 'Saving…';
     try {
