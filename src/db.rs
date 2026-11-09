@@ -173,9 +173,10 @@ impl DatabaseManager {
     }
 
     /// For tests only: keep a memory with a chosen time, so windows and ordering can
-    /// be tested on fixed dates. Nothing a person or an AI reaches may call this.
-    #[doc(hidden)]
-    pub fn keep_at_for_tests(
+    /// be tested on fixed dates. It exists only in test builds, so nothing a person,
+    /// an AI or another program reaches can call it.
+    #[cfg(test)]
+    pub(crate) fn keep_at_for_tests(
         &self, content: &str, gist: Option<&str>, parent: Option<&str>,
         created_at: Option<&str>,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,

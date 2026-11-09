@@ -742,6 +742,24 @@ fn entry_line(e: &MemoryEntry) -> String {
 mod tests {
     use super::*;
 
+    /// A memory with a fixed time, written straight to the table: only a test may
+    /// choose a memory's time, and the library offers no way to (no backdating).
+    /// Returns the short ID, as `keep` does; `parent` is a short ID too.
+    fn keep_dated(db: &DatabaseManager, content: &str, gist: &str, parent: Option<&str>, at: &str) -> String {
+        let uuid = uuid::Uuid::new_v4().to_string().to_uppercase();
+        let payload = json!({ "content": content, "gist": gist }).to_string();
+        let conn = rusqlite::Connection::open(&db.db_path).unwrap();
+        let parent: Option<String> = parent.map(|p| {
+            conn.query_row("SELECT memory_uuid FROM memories WHERE memory_uuid LIKE ?1 || '%'", [p], |r| r.get(0)).unwrap()
+        });
+        conn.execute(
+            "INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![uuid, payload, at, parent],
+        )
+        .unwrap();
+        uuid[..8].to_string()
+    }
+
     fn entry(parent: Option<&str>, score: Option<f32>) -> MemoryEntry {
         MemoryEntry {
             memory_uuid: "5B1A36D9-0000-0000-0000-000000000000".into(),
@@ -766,7 +784,7 @@ mod tests {
     fn an_empty_windowed_answer_carries_its_scope() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        db.keep_at_for_tests("an old note", Some("old"), None, Some("2020-01-01 00:00:00"), None).unwrap();
+        keep_dated(&db, "an old note", "old", None, "2020-01-01 00:00:00");
         let (out, is_err) = execute_recall_recent(&db, &json!({"since": "7d"}));
         assert!(!is_err, "{out}");
         assert!(out.ends_with("searched: 0 memories · since 7d · recent"), "{out}");
@@ -823,9 +841,9 @@ mod tests {
     fn recall_with_thread_reads_the_whole_conversation() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        let root = db.keep_at_for_tests("the question", Some("question"), None, Some("2026-09-01 00:00:00"), None).unwrap().uuid;
-        let reply = db.keep_at_for_tests("the answer", Some("answer"), Some(&root), Some("2026-09-02 00:00:00"), None).unwrap().uuid;
-        db.keep_at_for_tests("elsewhere", Some("elsewhere"), None, Some("2026-09-03 00:00:00"), None).unwrap();
+        let root = keep_dated(&db, "the question", "question", None, "2026-09-01 00:00:00");
+        let reply = keep_dated(&db, "the answer", "answer", Some(&root), "2026-09-02 00:00:00");
+        keep_dated(&db, "elsewhere", "elsewhere", None, "2026-09-03 00:00:00");
         let (out, is_err) = execute_recall(&db, &json!({"thread": reply}));
         assert!(!is_err, "{out}");
         let q = out.find("question").unwrap();
@@ -879,7 +897,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
         for gist in ["one", "two", "three", "four", "five"] {
-            db.keep_at_for_tests("body", Some(gist), None, Some("2026-09-01 00:00:00"), None).unwrap();
+            keep_dated(&db, "body", gist, None, "2026-09-01 00:00:00");
         }
         let (out, _) = execute_recall(&db, &json!({ "limit": 1 }));
         assert!(out.contains("five"), "{out}");
