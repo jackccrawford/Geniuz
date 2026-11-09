@@ -1061,15 +1061,19 @@ mod skill_tests {
     fn skill_header_carries_this_binarys_version() {
         let s = super::skill_text();
         assert!(s.starts_with("---\nname: geniuz\n"), "header first: {}", &s[..60.min(s.len())]);
-        assert!(s.contains(&format!("\nversion: {}\n", env!("CARGO_PKG_VERSION"))));
+        assert!(s.contains(&format!("\nversion: \"{}\"\n", env!("CARGO_PKG_VERSION"))));
         assert!(!s.contains("{{"), "a placeholder was left unstamped");
     }
 
     #[test]
     fn every_keep_example_names_its_folder() {
         for line in super::skill_text().lines() {
-            if line.contains("geniuz keep ") {
-                assert!(line.contains("--in ") || line.contains("-f "), "keep without a folder: {line}");
+            // The words after `geniuz keep` on this line, so a "-f" inside quoted text
+            // further along can't stand in for the flag: --in or -f must be followed by a value.
+            if let Some(rest) = line.split("geniuz keep ").nth(1) {
+                let words: Vec<&str> = rest.split_whitespace().collect();
+                let named = words.windows(2).any(|w| (w[0] == "--in" || w[0] == "-f") && !w[1].starts_with('-'));
+                assert!(named, "keep without a folder: {line}");
             }
         }
     }

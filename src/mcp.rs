@@ -66,9 +66,15 @@ fn tool_result(id: Value, text: &str, is_error: bool) -> JsonRpcResponse {
 // =============================================================================
 
 /// What an agent is told when it connects. Tool descriptions alone weren't enough:
-/// in testing, agents with no other guidance used Geniuz in 0 of 8 sessions, and
-/// with this in 4 of 4. They ignore "use this at the start" on a tool they aren't
-/// yet thinking of calling.
+/// in earlier testing, agents with no other guidance used Geniuz in 0 of 8 sessions,
+/// and with the imperative wording that preceded this one, in 4 of 4.
+///
+/// This wording, measured 9 Nov (fresh claude -p, only Geniuz, empty memory, 2-3 runs
+/// each, old wording vs this): asked "I've just installed a new MCP called Geniuz.
+/// Could you take a look at it?", both read folders and recall; the old wording then
+/// went digging in the shell, this one stopped and told the user Geniuz "suggests
+/// asking you once whether notes should be kept". Asked for garden advice, neither
+/// called a tool; this one offered to keep notes in 1 of 3, the old one in 0 of 3.
 ///
 /// Worded as explanation, not orders (Jack, 9 Nov): a model reads "do this, then that"
 /// from a tool as a possible injection, and asks before keeping on the user's behalf.

@@ -1,6 +1,6 @@
 ---
 name: geniuz
-version: {{GENIUZ_VERSION}}
+version: "{{GENIUZ_VERSION}}"
 description: Memory that lasts beyond a chat, kept on this computer. Use it to keep decisions, progress and context worth coming back to, and to recall them later by meaning, by exact words, or by address (FOLDER:MEMORY). If `geniuz --version` is newer than this skill's version, run `geniuz skill` to see the current one.
 ---
 
@@ -29,6 +29,10 @@ Most people like to be asked, once, whether notes should be kept in Geniuz: deci
 Every keep names its folder (`--in`) and its gist (`-g`).
 
 ```bash
+# A fresh install has one folder, "My memory". These examples keep in a folder
+# called Work, made once with:
+geniuz folder create Work -d "Fixes, decisions and progress on the code."
+
 # Save what you learned — pipe in for depth, inline for quick notes
 echo "Token validation was running before refresh in auth.rs.
 Swapped lines 42-47. Root cause: middleware ordering assumed
@@ -105,7 +109,7 @@ geniuz recall --all "deploy"           # every folder; each result shows its add
 geniuz recall 13625F6B:3487B9B0        # open an address, whichever folder it's in
 ```
 
-A wrong name is an error, never a different folder. A `.geniuz-folder` file holding a folder's name or ID decides what a plain `geniuz recall` reads in that directory; a keep still names its folder.
+A wrong name is an error, never a different folder. A `.geniuz-folder` file holding a folder's name or ID decides what a plain `geniuz recall` reads in that directory (unless `GENIUZ_DB` is set, which wins); a keep still names its folder.
 
 Multiple agents can use the same folder. What one agent learns, every agent finds. That also makes a folder a way to leave each other messages: thread your reply to theirs with `-p`.
 
