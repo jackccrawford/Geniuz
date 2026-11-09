@@ -251,7 +251,7 @@ fn remember_memory(
         None => None,
     };
     let gist_trimmed = gist.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty());
-    db.keep(content.trim(), gist_trimmed, parent.as_deref(), None)
+    db.keep(content.trim(), gist_trimmed, parent.as_deref())
         .map(|r| r.uuid)
 }
 
@@ -1309,8 +1309,8 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::env::set_var("GENIUZ_HOME", &dir);
         let db = open_db().unwrap();
-        db.keep("Roundup\nCubic reviewed the PR; see 13625F6B:D824ADA7.\nDevin filed issues.", Some("reviews"), None, None).unwrap();
-        db.keep("Asked Devin to retest.", Some("follow-up"), None, None).unwrap();
+        db.keep("Roundup\nCubic reviewed the PR; see 13625F6B:D824ADA7.\nDevin filed issues.", Some("reviews"), None).unwrap();
+        db.keep("Asked Devin to retest.", Some("follow-up"), None).unwrap();
 
         let r = find("Devin".into(), "exact".into(), Some("24h".into()), None, None).unwrap();
         let lines: Vec<&str> = r.lines.iter().map(|l| l.line.as_str()).collect();
