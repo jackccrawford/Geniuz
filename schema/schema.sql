@@ -14,6 +14,27 @@ CREATE INDEX IF NOT EXISTS idx_memories_chronological ON memories(created_at DES
 CREATE INDEX IF NOT EXISTS idx_memories_uuid_prefix ON memories(substr(memory_uuid, 1, 8));
 CREATE INDEX IF NOT EXISTS idx_memories_parent ON memories(parent_uuid);
 
+-- Convenience views for anyone reading a folder with SQL, in any language, without
+-- parsing the JSON payload (relay had signal_full and signal_gist). A thread's root
+-- is stored as its own parent; here it reads as NULL, plainly "no parent". seq is the
+-- write order, which is the order memories were kept.
+CREATE VIEW IF NOT EXISTS memory_full AS
+SELECT memory_uuid,
+    CASE WHEN parent_uuid = memory_uuid THEN NULL ELSE parent_uuid END AS parent_uuid,
+    created_at,
+    json_extract(payload, '$.gist') AS gist,
+    json_extract(payload, '$.content') AS content,
+    rowid AS seq
+FROM memories;
+
+CREATE VIEW IF NOT EXISTS memory_gist AS
+SELECT memory_uuid,
+    CASE WHEN parent_uuid = memory_uuid THEN NULL ELSE parent_uuid END AS parent_uuid,
+    created_at,
+    json_extract(payload, '$.gist') AS gist,
+    rowid AS seq
+FROM memories;
+
 CREATE VIEW IF NOT EXISTS memory_chains AS
 WITH RECURSIVE chain(memory_uuid, parent_uuid, gist, created_at, level, root_uuid) AS (
     SELECT memory_uuid,

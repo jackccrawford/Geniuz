@@ -1337,6 +1337,25 @@ mod tests {
         assert_eq!(entry.gist, "note: trimmed", "stored trimmed");
     }
 
+    #[test]
+    fn the_convenience_views_read_without_json_and_roots_have_no_parent() {
+        let (db, _dir) = fresh_db();
+        let root = insert(&db, "the question", Some("question"), None);
+        let reply = insert(&db, "the answer", Some("answer"), Some(&root));
+        let conn = db.conn().unwrap();
+        let rows: Vec<(String, Option<String>, String, String, i64)> = conn
+            .prepare("SELECT memory_uuid, parent_uuid, gist, content, seq FROM memory_full ORDER BY seq").unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))).unwrap()
+            .map(|r| r.unwrap()).collect();
+        assert_eq!(rows.len(), 2);
+        assert!(rows[0].0.starts_with(&root) && rows[0].1.is_none(), "a root reads as no parent: {:?}", rows[0]);
+        assert!(rows[1].0.starts_with(&reply) && rows[1].1.as_deref().is_some_and(|p| p.starts_with(&root)));
+        assert_eq!((rows[0].2.as_str(), rows[0].3.as_str()), ("question", "the question"));
+        assert!(rows[0].4 < rows[1].4, "seq is write order");
+        let gists: i64 = conn.query_row("SELECT count(*) FROM memory_gist WHERE gist IN ('question','answer')", [], |r| r.get(0)).unwrap();
+        assert_eq!(gists, 2);
+    }
+
     /// Shortcut: keep a memory with the mock backend and return its short UUID. With
     /// no gist given, the content stands in for one.
     fn insert(db: &DatabaseManager, content: &str, gist: Option<&str>, parent: Option<&str>) -> String {
