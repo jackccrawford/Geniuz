@@ -380,6 +380,7 @@ impl App {
         }
         if gist.is_empty() {
             self.status = "add a gist: one line saying what this memory is".into();
+            self.compose_focus = ComposeFocus::Gist;
             return Ok(());
         }
         let result = self

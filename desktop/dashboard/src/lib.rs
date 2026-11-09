@@ -224,9 +224,9 @@ mod update_tests {
     }
 }
 
-/// Persist a new memory. `gist` is optional — if blank/None, the chassis
-/// auto-derives one from the first 200 chars of content. Returns the short
-/// (8-char) UUID prefix of the new memory.
+/// Persist a new memory. `gist` is required: the library refuses one that is
+/// missing or blank, and stores it trimmed. Returns the short (8-char) UUID
+/// prefix of the new memory.
 #[tauri::command]
 fn remember_memory(
     gist: Option<String>,

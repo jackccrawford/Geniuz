@@ -859,6 +859,18 @@ mod tests {
     }
 
     #[test]
+    fn keep_needs_a_gist_and_spaces_alone_dont_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path());
+        reg.ensure_default().unwrap();
+        for args in [json!({ "folder": "My memory", "content": "x" }), json!({ "folder": "My memory", "content": "x", "gist": "   " })] {
+            let (out, is_error) = call_tool(&reg, None, "keep", &args);
+            assert!(is_error && out.contains("gist"), "{out}");
+        }
+        assert_eq!(reg.find("My memory").unwrap().stats().unwrap().0, 0, "nothing kept");
+    }
+
+    #[test]
     fn the_listed_tools_are_keep_recall_and_folders() {
         let defs = tool_definitions();
         let names: Vec<_> = defs["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();

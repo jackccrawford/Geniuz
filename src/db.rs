@@ -1404,17 +1404,6 @@ mod tests {
     }
 
     #[test]
-    fn keep_auto_derives_gist_from_short_content() {
-        let (db, _dir) = fresh_db();
-        let short = insert(&db, "remembered something small", None, None);
-        let entries = db.recent(10).unwrap();
-        let entry = entries.iter().find(|e| e.memory_uuid.starts_with(&short)).expect("inserted entry");
-        assert_eq!(entry.gist, "remembered something small");
-    }
-
-
-
-    #[test]
     fn keep_reports_embedded_status_from_backend_outcome() {
         let (db, _dir) = fresh_db();
         let ok = db.keep_with_backend("embeds fine", "embeds fine", None, Some(&MockBackend))
