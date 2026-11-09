@@ -1,4 +1,4 @@
-//! "Update available", for the Windows and Linux tray.
+//! "Update available", for the Windows and Linux tray (the dashboard).
 //!
 //! The Mac menu bar asks GitHub for the latest release and writes the answer to
 //! `update.json` in the data directory; the dashboard reads that file, so every

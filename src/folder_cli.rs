@@ -14,7 +14,7 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
         FolderCommand::Show { name, json } => show(&reg, name.as_deref(), json),
         FolderCommand::Create { name, description, at } => {
             let f = reg.create(&name, &description, at.as_deref())?;
-            Ok(format!("Created {} ({})\nUse it with: geniuz folder use \"{}\"", f.name, f.short_id(), f.name))
+            Ok(format!("Created {} ({})\nKeep a memory in it with: geniuz keep -f \"{}\" -g \"...\"", f.name, f.short_id(), f.name))
         }
         FolderCommand::Add { path } => {
             let found = reg.add(&path)?;
@@ -26,14 +26,9 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
             reg.remove(&path)?;
             Ok(format!("Geniuz no longer looks in {}. Its files weren't touched.", path.display()))
         }
-        FolderCommand::Use { name, none } => {
-            if none {
-                reg.clear_default()?;
-                return Ok("No default folder now: a command that names no folder will ask for one.".to_string());
-            }
-            let f = reg.use_folder(name.as_deref().unwrap_or_default())?;
-            Ok(format!("Now using {}.", f.name))
-        }
+        // 5.1 has no default folder. The command stays so whoever learned it is told
+        // the new way; it changes nothing, and exits with an error so a script notices.
+        FolderCommand::Use { .. } => Err(geniuz::folders::NO_DEFAULT_FOLDER.to_string()),
         FolderCommand::Rename { name, new_name } => {
             let f = reg.rename(&name, &new_name)?;
             Ok(format!("Renamed to {}. Its ID is still {}.", f.name, f.short_id()))

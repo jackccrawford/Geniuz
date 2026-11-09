@@ -20,22 +20,21 @@ fn names(reg: &Registry) -> Vec<String> {
 }
 
 #[test]
-fn no_default_asks_instead_of_guessing() {
+fn a_memory_naming_no_folder_goes_to_my_memory_and_an_old_current_file_is_ignored() {
     let tmp = tempfile::tempdir().unwrap();
     let reg = Registry::new(tmp.path());
-    reg.create("Work", "", None).unwrap();
-    reg.use_folder("Work").unwrap();
-    assert!(reg.resolve(None, None, None).unwrap().to_string_lossy().contains(&reg.find("Work").unwrap().uuid));
-    reg.clear_default().unwrap();
-    assert!(reg.no_default());
-    assert_eq!(reg.current(), None);
-    let err = reg.resolve(None, None, None).unwrap_err();
-    assert!(err.contains("No default folder"), "{err}");
-    // Naming a folder still works, and choosing a default again ends it.
-    assert!(reg.resolve(Some("Work"), None, None).is_ok());
-    reg.use_folder("Work").unwrap();
-    assert!(!reg.no_default());
-    assert!(reg.resolve(None, None, None).is_ok());
+    let work = reg.create("Work", "", None).unwrap();
+    let first = reg.resolve(None, None, None).unwrap();
+    assert_eq!(first, reg.home.join(DB_FILE));
+    assert_eq!(reg.find(DEFAULT_NAME).unwrap().db_path, first);
+    // A `current` file from before 5.1, naming a folder or "none", is not read and not touched.
+    for old in [format!("{}\n", work.uuid), "none\n".to_string()] {
+        std::fs::write(reg.home.join("current"), &old).unwrap();
+        assert_eq!(reg.resolve(None, None, None).unwrap(), first);
+        assert_eq!(std::fs::read_to_string(reg.home.join("current")).unwrap(), old);
+    }
+    // Naming a folder still works.
+    assert_eq!(reg.resolve(Some("Work"), None, None).unwrap(), work.db_path);
 }
 
 #[test]
@@ -310,7 +309,6 @@ fn relocate_keeps_every_uuid_and_memory() {
     let (tmp, reg) = setup();
     let f = reg.create("Work", "", None).unwrap();
     add_memory(&f.db_path, M1);
-    reg.use_folder("Work").unwrap();
     let dest = tmp.path().join("elsewhere");
 
     let moved = reg.relocate("Work", &dest).unwrap();
@@ -320,7 +318,7 @@ fn relocate_keeps_every_uuid_and_memory() {
     assert_eq!(moved.folder.stats().unwrap().0, 1);
     assert_eq!(reg.added(), vec![canonical(&dest)]);
     assert!(reg.scan().blocked.is_empty());
-    assert_eq!(canonical(&reg.resolve(None, None, None).unwrap()), canonical(&moved.folder.db_path));
+    assert_eq!(canonical(&reg.resolve(Some(&f.uuid), None, None).unwrap()), canonical(&moved.folder.db_path));
 }
 
 #[test]
@@ -563,11 +561,10 @@ fn review3_a_registry_failure_leaves_the_folder_findable() {
 fn review4_a_new_copy_never_takes_over_from_the_original() {
     let (_tmp, reg) = setup();
     let f = reg.create("Work", "", None).unwrap();
-    reg.use_folder("Work").unwrap();
     copy_dir(f.db_path.parent().unwrap(), &reg.home.join("000-copy"));
     add_memory(&f.db_path, M1);
 
-    match reg.resolve(None, None, None) {
+    match reg.resolve(Some(&f.uuid), None, None) {
         Ok(path) => assert_eq!(canonical(&path), canonical(&f.db_path), "the older copy was selected"),
         Err(e) => assert!(e.contains("copy") || e.contains("copies"), "{}", e),
     }
@@ -625,9 +622,8 @@ fn review7_simultaneous_additions_are_all_kept() {
 fn review8_a_name_cannot_shadow_a_uuid() {
     let (_tmp, reg) = setup();
     let f = reg.create("Work", "", None).unwrap();
-    reg.use_folder("Work").unwrap();
     let _ = reg.create(&f.uuid, "", None);
-    assert_eq!(canonical(&reg.resolve(None, None, None).unwrap()), canonical(&f.db_path));
+    assert_eq!(canonical(&reg.resolve(Some(&f.uuid), None, None).unwrap()), canonical(&f.db_path));
     assert!(validate_name(&f.uuid).is_err());
 }
 
@@ -906,11 +902,10 @@ fn an_unreachable_added_directory_is_reported_and_nothing_else_breaks() {
 }
 
 #[test]
-fn resolve_order_is_flag_env_dotfile_current_first() {
+fn resolve_order_is_flag_env_dotfile_then_my_memory() {
     let (tmp, reg) = setup();
     let work = reg.create("Work", "", None).unwrap();
     let home = reg.create("Home", "", None).unwrap();
-    let cur = reg.create("Current", "", None).unwrap();
     let project = tmp.path().join("project").join("deep");
     std::fs::create_dir_all(&project).unwrap();
 
@@ -918,8 +913,7 @@ fn resolve_order_is_flag_env_dotfile_current_first() {
     assert_eq!(first.file_name().unwrap(), DB_FILE);
     assert_eq!(first.parent().unwrap(), reg.home);
 
-    reg.use_folder("Current").unwrap();
-    assert_eq!(reg.resolve(None, None, Some(&project)).unwrap(), cur.db_path);
+    assert_eq!(reg.resolve(None, None, Some(&project)).unwrap(), first, "no dotfile: My memory");
 
     std::fs::write(tmp.path().join("project").join(DOTFILE), "Home\n").unwrap();
     assert_eq!(reg.resolve(None, None, Some(&project)).unwrap(), home.db_path);
@@ -940,15 +934,6 @@ fn a_wrong_name_errors_and_never_falls_back() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join(DOTFILE), "typo").unwrap();
     assert!(reg.resolve(None, None, Some(&dir)).unwrap_err().contains(DOTFILE));
-}
-
-#[test]
-fn current_survives_a_rename() {
-    let (_tmp, reg) = setup();
-    let f = reg.create("Work", "", None).unwrap();
-    reg.use_folder("Work").unwrap();
-    reg.rename("Work", "Clients").unwrap();
-    assert_eq!(reg.resolve(None, None, None).unwrap(), f.db_path);
 }
 
 #[test]
@@ -977,22 +962,6 @@ fn archive_moves_without_deleting_and_the_folder_stays_hidden() {
     assert!(moved.join(DB_FILE).is_file());
     assert!(!f.db_path.exists());
     assert!(reg.find("Scratch").is_err());
-}
-
-#[test]
-fn the_default_folder_is_not_archived_until_another_is_chosen() {
-    let (_tmp, reg) = setup();
-    let f = reg.create("Scratch", "", None).unwrap();
-    reg.use_folder("Scratch").unwrap();
-
-    let err = reg.archive("Scratch").unwrap_err();
-    assert!(err.contains("default folder"), "{err}");
-    assert!(f.db_path.exists(), "nothing moved");
-    assert!(reg.current().unwrap().eq_ignore_ascii_case(&f.uuid), "the default is unchanged");
-
-    reg.ensure_default().unwrap();
-    reg.use_folder(DEFAULT_NAME).unwrap();
-    assert!(reg.archive("Scratch").is_ok());
 }
 
 #[test]

@@ -6,12 +6,9 @@
 //! "Claude" and Dell Optimizer shows up as "Dell Optimizer" while other
 //! apps show up as "something.exe".
 //!
-//! We set a shared identity for all three Geniuz binaries
-//! (geniuz.exe, geniuz-embed.exe, geniuz-tray.exe) because users mostly
-//! see geniuz-tray.exe in Task Manager (long-running, ambient) and it
-//! should read "Geniuz." Per-binary distinctions (CLI / Embedding
-//! Server / Tray) are possible but require separate crates; today,
-//! one identity is enough.
+//! We set one identity for both binaries built here (geniuz.exe and
+//! geniuz-embed.exe), so Task Manager reads "Geniuz". The tray on Windows is
+//! the dashboard (desktop/dashboard), which has its own.
 //!
 //! This build script is a no-op on non-Windows targets.
 

@@ -21,7 +21,7 @@ COPY . .
 # ORT (ONNX Runtime) ships compiled C++ objects; the final link must pull in the
 # C++ standard library or it fails with `undefined reference to __cxa_call_terminate`.
 ENV RUSTFLAGS="-Clink-arg=-lstdc++"
-# Only the core `geniuz` binary — not the tray feature or desktop/Tauri app.
+# Only the core `geniuz` binary, not the desktop app.
 # Stage the binary plus any shared lib `ort` copied beside it (copy-dylibs);
 # the `|| true` keeps the build green if ORT linked statically (no .so).
 RUN cargo build --release --bin geniuz \

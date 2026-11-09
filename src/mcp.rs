@@ -5,8 +5,8 @@
 //! conversation.
 //!
 //! The folder is resolved on every call, never held from startup: a long-lived
-//! server must follow `folder use`, and must not keep writing to a path a folder
-//! has moved away from, since opening that path would create an empty store.
+//! server must not keep writing to a path a folder has moved away from, since
+//! opening that path would create an empty store.
 //! `remember` and `recall_recent` still answer for older configurations, but
 //! aren't listed.
 
@@ -80,7 +80,7 @@ fn tool_definitions() -> Value {
     let mut tools = base_tool_definitions();
     let folder = json!({
         "type": "string",
-        "description": "Which folder to use, by name or 8-character ID. Choose one with the folders tool. Left out, this uses the default folder; if none is set, name one. An unknown name is an error, never a different folder."
+        "description": "Which folder to use, by name or 8-character ID. Choose one with the folders tool. Left out, this uses My memory. An unknown name is an error, never a different folder."
     });
     for tool in tools["tools"].as_array_mut().into_iter().flatten() {
         if tool["name"] != "folders" {
@@ -360,7 +360,7 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
     let scan = reg.scan();
     let current = crate::resolve_db_path().ok();
     // Many folders (hundreds, where many agents share a machine) would cost every agent
-    // thousands of tokens per call. Past SHORTLIST_FROM, list the folder in use,
+    // thousands of tokens per call. Past SHORTLIST_FROM, list the folder memories go to,
     // the pinned ones and the week's newest, and say how to find the rest.
     const SHORTLIST_FROM: usize = 20;
     const RECENT: usize = 10;
@@ -428,9 +428,6 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
     if let Some(t) = tail {
         lines.push(t);
     }
-    if current.is_none() && reg.no_default() {
-        lines.push("No default folder is set here: name a folder on every keep and recall.".to_string());
-    }
     if !scan.blocked.is_empty() {
         lines.push(format!("{} blocked as copies of each other, until one is moved.", scan.blocked.len()));
     }
@@ -443,7 +440,7 @@ fn in_agents_tree(db_path: &std::path::Path) -> bool {
         .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("agents"))
 }
 
-/// The store for this call: the named folder, or the one in use right now.
+/// The store for this call: the named folder, or My memory.
 fn open_for_call(reg: &Registry, params: &Value) -> Result<DatabaseManager, String> {
     let named = params.get("folder").and_then(|f| f.as_str()).map(str::trim).filter(|f| !f.is_empty());
     match named {
@@ -1396,11 +1393,6 @@ pub fn status() -> Result<String, String> {
 
     // The folder a memory goes to when it names none: the one resolve picks.
     match crate::resolve_db_path() {
-        // Only the no-default refusal reads as "no default"; any other reason (a
-        // .geniuz-folder naming a missing folder, say) is shown as it is.
-        Err(e) if e == geniuz::folders::NO_DEFAULT_MESSAGE => {
-            lines.push("Folder: no default; each memory names its folder".to_string());
-        }
         Err(e) => lines.push(format!("Folder: {}", e)),
         Ok(path) if !path.exists() => {
             lines.push("Folder: not created yet (will be created on first keep)".to_string());

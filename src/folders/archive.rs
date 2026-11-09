@@ -20,14 +20,6 @@ impl Registry {
             return Err("Your first folder can't be archived, because other folders live beside it.".into());
         }
         refuse_symlink(&dir)?;
-        // The default folder is a setting someone chose; archiving it would quietly
-        // send memories somewhere else. Ask for the setting to change first.
-        if self.current().map(|c| c.eq_ignore_ascii_case(&folder.uuid)).unwrap_or(false) {
-            return Err(format!(
-                "\"{}\" is the default folder. Choose another default first (Settings, or `geniuz folder use <folder>`), then archive it.",
-                folder.name
-            ));
-        }
         if self.added().iter().any(|d| canonical(d) == canonical(&dir)) {
             return Err(format!(
                 "{} was added directly. Take it off the list with `geniuz folder remove`.",

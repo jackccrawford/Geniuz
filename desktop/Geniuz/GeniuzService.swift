@@ -169,7 +169,7 @@ class GeniuzService: ObservableObject {
     var onStateChange: (() -> Void)?
 
     /// Tooltip text shown on hover of the menu-bar icon.
-    /// Matches the Windows tray.rs format: identity + count, then the
+    /// Identity + count, then the
     /// most-recent gist on a second line if any. Connection status is
     /// intentionally excluded — it lives in the popover.
     func tooltipText() -> String {
