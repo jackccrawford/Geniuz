@@ -147,7 +147,7 @@ On Windows and Linux, use Ctrl in place of ⌘.
 
 ## Where your data lives
 
-Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory per folder you made, `archive/`, `models/`, `settings.json` and `bin/`. A few small files hold your choices: `added-folders`, `pinned-folders` and `shortcuts.json`. A `current` file from before 5.1 is no longer read.
+Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory per folder you made, `archive/`, `models/`, `settings.json` and `bin/`. A few small files hold your choices: `added-folders`, `pinned-folders` and `shortcuts.json`. A `current` file from before 5.0.8 is no longer read.
 
 **To back up**, use Export under Data & Export in the dashboard, which saves the folder on screen as one complete file. Time Machine and similar tools are fine too. A backup is a file to keep, not a folder to use: it holds the same permanent IDs, so Geniuz refuses it while the original is present.
 

@@ -2,7 +2,7 @@
 
 Your AI starts every conversation from zero. Geniuz keeps what matters, the calls you made and the reasons behind them, on your own computer, where any AI you use can find it. It is free and MIT licensed, and it has no account or cloud.
 
-This wiki describes version 5.0.5. It lives in the repo beside the code.
+This wiki describes version 5.0.8. It lives in the repo beside the code.
 
 ## Where to go next
 

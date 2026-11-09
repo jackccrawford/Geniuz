@@ -26,7 +26,7 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
             reg.remove(&path)?;
             Ok(format!("Geniuz no longer looks in {}. Its files weren't touched.", path.display()))
         }
-        // 5.1 has no default folder. The command stays so whoever learned it is told
+        // 5.0.8 has no default folder. The command stays so whoever learned it is told
         // the new way; it changes nothing, and exits with an error so a script notices.
         FolderCommand::Use { .. } => Err(geniuz::folders::NO_DEFAULT_FOLDER.to_string()),
         FolderCommand::Rename { name, new_name } => {

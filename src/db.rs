@@ -394,7 +394,7 @@ impl DatabaseManager {
     /// Where a memory sits in the order memories were written, (created_at, rowid):
     /// the cursor `watch` keeps. The rowid decides. A time can't be a cursor: memories
     /// written in the same second share it, and a memory copied in with its original
-    /// date (from relay, or a file made before 5.1) is dated before memories written earlier, so "after" by
+    /// date (from relay, or a file made before 5.0.8) is dated before memories written earlier, so "after" by
     /// time would never show it. Memories are never deleted, so each new row's rowid is
     /// higher than every earlier one's. Takes a UUID, a prefix, or an address FOLDER:MEMORY.
     pub fn position_of(&self, id: &str) -> Result<Option<(String, i64)>, String> {

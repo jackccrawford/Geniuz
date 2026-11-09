@@ -30,7 +30,7 @@ If a copy turns up anyway, every copy stops working until one is moved. Nothing 
 
 Every keep names its folder. Nothing chooses one for you: no default setting, no fallback, no file in the project. Geniuz is first of all a way for agents to remember, and an agent finds its folder by searching (the folders tool), then keeps with its ID. People keep the same way, usually by asking their AI to save something.
 
-Until 5.1 a memory that named no folder went to a default you could change; it caused more confusion than it saved, because where a memory went depended on a setting somewhere else. A memory can never be moved, so the moment of writing is the only chance to put it in the right place, and the one who knows the right place is the writer.
+Until 5.0.8 a memory that named no folder went to a default you could change; it caused more confusion than it saved, because where a memory went depended on a setting somewhere else. A memory can never be moved, so the moment of writing is the only chance to put it in the right place, and the one who knows the right place is the writer.
 
 The cost is naming the folder every time. In return, nothing you look at, and no setting you forgot, can send a week of memories somewhere you didn't expect.
 
