@@ -378,10 +378,14 @@ impl App {
             self.compose_cancel_state();
             return Ok(());
         }
-        let gist_opt = if gist.is_empty() { None } else { Some(gist.as_str()) };
+        if gist.is_empty() {
+            self.status = "add a gist: one line saying what this memory is".into();
+            self.compose_focus = ComposeFocus::Gist;
+            return Ok(());
+        }
         let result = self
             .db
-            .keep(&content, gist_opt, None)
+            .keep(&content, &gist, None)
             .map_err(|e| anyhow::anyhow!(e))?;
         self.total = self.db.count().map_err(|e| anyhow::anyhow!(e))?;
         self.load_recent(24)?;

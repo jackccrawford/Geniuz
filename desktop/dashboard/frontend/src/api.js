@@ -89,8 +89,7 @@ export function getRecentMemories(limit = 24, offset = 0, oldestFirst = false) {
 }
 
 /**
- * Save a new memory. `gist` is optional — null/empty means the chassis
- * auto-derives one from the first 200 chars of content. Returns the short
+ * Save a new memory. `gist` is required (one line; spaces alone don't count). Returns the short
  * (8-char) UUID prefix of the new memory.
  */
 export function rememberMemory(gist, content, folder, parent = null) {

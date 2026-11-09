@@ -199,7 +199,10 @@ fn execute_keep(
         Some(c) => c,
         None => return ("Error: content is required".to_string(), true),
     };
-    let gist = params.get("gist").and_then(|g| g.as_str());
+    let gist = match params.get("gist").and_then(|g| g.as_str()) {
+        Some(g) => g,
+        None => return ("Error: gist is required: one line saying what this memory is".to_string(), true),
+    };
     let thread = params.get("thread").and_then(|t| t.as_str());
     // A memory's time is when it was kept, never a time the caller gives (Jack, 8 Nov):
     // something about the past is said in the gist and content.
@@ -800,8 +803,8 @@ mod tests {
     fn an_answer_ends_with_its_harvest_then_its_scope() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        db.keep("Review notes\nThe PR went to Devin, see 00000000:87C1FADC.", Some("reviews"), None).unwrap();
-        db.keep("More review\nAsked Devin again.", Some("reviews again"), None).unwrap();
+        db.keep("Review notes\nThe PR went to Devin, see 00000000:87C1FADC.", "reviews", None).unwrap();
+        db.keep("More review\nAsked Devin again.", "reviews again", None).unwrap();
         let (out, _) = execute_recall_recent(&db, &json!({}));
         let lines: Vec<&str> = out.lines().collect();
         let n = lines.len();
@@ -814,9 +817,9 @@ mod tests {
     fn a_pointer_to_a_memory_here_is_offered_as_live() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        let first = db.keep("the original", Some("first"), None).unwrap().uuid;
+        let first = db.keep("the original", "first", None).unwrap().uuid;
         let id = first[..8].to_uppercase();
-        db.keep(&format!("see {id}"), Some("second"), None).unwrap();
+        db.keep(&format!("see {id}"), "second", None).unwrap();
         let (out, _) = execute_recall(&db, &json!({ "query": "second", "limit": 1 }));
         assert!(!out.contains("not found here"), "{out}");
     }
@@ -826,7 +829,7 @@ mod tests {
     fn recall_with_grep_returns_the_matching_lines() {
         let dir = tempfile::tempdir().unwrap();
         let db = DatabaseManager::new(dir.path().join("memory.db").to_str().unwrap()).unwrap();
-        db.keep("Roundup\nCubic reviewed the PR.\nDevin filed issues.", Some("reviews"), None).unwrap();
+        db.keep("Roundup\nCubic reviewed the PR.\nDevin filed issues.", "reviews", None).unwrap();
         let (out, is_err) = execute_recall(&db, &json!({"grep": "cubic"}));
         assert!(!is_err, "{out}");
         assert!(out.contains(" · Cubic reviewed the PR."), "{out}");
@@ -853,6 +856,18 @@ mod tests {
         assert!(out.ends_with(&format!("searched: thread {reply} · root {root} · 2 memories · all time · oldest first")), "{out}");
         let (out, is_err) = execute_recall(&db, &json!({}));
         assert!(!is_err && out.contains("elsewhere"), "no query means recent: {out}");
+    }
+
+    #[test]
+    fn keep_needs_a_gist_and_spaces_alone_dont_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path());
+        reg.ensure_default().unwrap();
+        for args in [json!({ "folder": "My memory", "content": "x" }), json!({ "folder": "My memory", "content": "x", "gist": "   " })] {
+            let (out, is_error) = call_tool(&reg, None, "keep", &args);
+            assert!(is_error && out.contains("gist"), "{out}");
+        }
+        assert_eq!(reg.find("My memory").unwrap().stats().unwrap().0, 0, "nothing kept");
     }
 
     #[test]
@@ -924,7 +939,7 @@ mod tests {
         let reg = Registry::new(&home);
         let work = reg.create("Work", "", None).unwrap();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        db.keep("the whole body", Some("the gist"), None).unwrap();
+        db.keep("the whole body", "the gist", None).unwrap();
         let (out, _) = call_tool(&reg, None, "recall", &json!({ "all": true, "full": true }));
         assert!(out.contains("the gist") && out.contains("the whole body"), "{out}");
         let (out, _) = call_tool(&reg, None, "recall", &json!({ "all": true }));
@@ -960,7 +975,7 @@ mod tests {
         let reg = Registry::new(&home);
         let work = reg.create("Work", "", None).unwrap();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        let id = db.keep("the whole body", Some("the gist"), None).unwrap().uuid;
+        let id = db.keep("the whole body", "the gist", None).unwrap().uuid;
         let address = format!("{}:{}", work.short_id(), &id[..8]);
 
         let (out, is_err) = call_tool(&reg, None, "recall", &json!({ "query": address }));
@@ -997,7 +1012,7 @@ mod tests {
     fn grep_across_folders_searches_and_shows_addresses() {
         let (_tmp, reg, work) = registry_with_work();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        let id = db.keep("first line\nThe Cubic review passed.", Some("g"), None).unwrap().uuid;
+        let id = db.keep("first line\nThe Cubic review passed.", "g", None).unwrap().uuid;
 
         let (text, is_err) = call_tool(&reg, None, "recall", &json!({ "all": true, "grep": "cubic" }));
         assert!(!is_err, "{text}");
@@ -1013,7 +1028,7 @@ mod tests {
     fn an_address_opens_even_when_all_is_set() {
         let (_tmp, reg, work) = registry_with_work();
         let db = DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap();
-        let id = db.keep("the whole body", Some("g"), None).unwrap().uuid;
+        let id = db.keep("the whole body", "g", None).unwrap().uuid;
         let address = format!("{}:{}", work.short_id(), &id[..8]);
         let (text, _) = call_tool(&reg, None, "recall", &json!({ "query": address, "all": true }));
         assert!(text.contains("the whole body"), "{text}");
@@ -1023,7 +1038,7 @@ mod tests {
     fn an_empty_folder_says_where_the_memories_are() {
         let (_tmp, reg, work) = registry_with_work();
         let empty = reg.create("Empty", "", None).unwrap();
-        DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap().keep("x", Some("g"), None).unwrap();
+        DatabaseManager::new(&work.db_path.to_string_lossy()).unwrap().keep("x", "g", None).unwrap();
         let (text, _) = call_tool(&reg, None, "recall", &json!({ "folder": empty.name }));
         assert!(text.contains("Work (1)"), "{text}");
     }

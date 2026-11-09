@@ -838,9 +838,9 @@ fn searching_across_labels_each_hit_and_merges_newest_first() {
     let a = reg.create("Alpha", "", None).unwrap();
     let b = reg.create("Beta", "", None).unwrap();
     let open = |f: &Folder| crate::db::DatabaseManager::new(&f.db_path.to_string_lossy()).unwrap();
-    open(&a).keep_at_for_tests("the older note", Some("older"), None, Some("2026-01-01 00:00:00"), None).unwrap();
-    open(&b).keep_at_for_tests("the newer note", Some("newer"), None, Some("2026-02-01 00:00:00"), None).unwrap();
-    open(&b).keep_at_for_tests("unrelated", Some("other"), None, Some("2026-03-01 00:00:00"), None).unwrap();
+    open(&a).keep_at_for_tests("the older note", "older", None, Some("2026-01-01 00:00:00"), None).unwrap();
+    open(&b).keep_at_for_tests("the newer note", "newer", None, Some("2026-02-01 00:00:00"), None).unwrap();
+    open(&b).keep_at_for_tests("unrelated", "other", None, Some("2026-03-01 00:00:00"), None).unwrap();
 
     let window = Window::parse(None, None).unwrap();
     let found = search_across(&reg, &Search::Keyword("note"), &window, 10);
