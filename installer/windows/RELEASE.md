@@ -31,7 +31,9 @@ scp $WIN:C:/build/geniuz-X.Y.Z/installer/windows/output/Geniuz-Setup.exe release
 Running a build straight from its folder as another Windows user (built as
 `orbit`, run as `jackc`): `DirectML.dll` there is a link into the builder's own
 profile, which the other user can't read, so the app quits without a word. Copy
-the real file over the link first. The installer is unaffected; it packs the file.
+the real file over the link first. The installer doesn't ship the file and doesn't
+need to: with none beside the exe, Windows uses its own copy in System32. A link
+it can't read is what stops the app, not a missing file.
 
 Testing a download the way a user would: `Invoke-WebRequest` sets no
 Mark-of-the-Web, so SmartScreen is not exercised. Set `ZoneId=3` on the file
