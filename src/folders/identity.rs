@@ -54,6 +54,15 @@ pub(super) fn replace_meta(db: &Path, key: &str, value: &str) -> Result<(), Stri
     tx.commit().map_err(|e| format!("Couldn't save {}: {}", key, e))
 }
 
+/// Read a yes/no value stored as text, the one way Geniuz does it (Jack, 8 Nov: "it
+/// can be an actual json boolean or text. and null if text can be any mix of case").
+/// True only for `true` in any case, with spaces trimmed, or a JSON `true`. Everything
+/// else is false: false, null, empty, missing, "yes", "1", junk. Never "any non-empty
+/// string". Geniuz itself writes only lowercase "true" or "false".
+pub fn read_flag(raw: Option<&str>) -> bool {
+    raw.is_some_and(|s| s.trim().eq_ignore_ascii_case("true"))
+}
+
 /// The folder whose database is at `db`, read without changing anything on disk.
 pub fn identity_at(db: &Path) -> Option<Folder> {
     read_identity(db)
@@ -70,6 +79,7 @@ pub(super) fn identity_from(conn: &Connection, db: &Path) -> Option<Folder> {
         name: get_meta(conn, KEY_NAME).unwrap_or_else(|| uuid.chars().take(SHORT_ID).collect()),
         description: get_meta(conn, KEY_DESCRIPTION).unwrap_or_default(),
         created: get_meta(conn, KEY_CREATED).unwrap_or_default(),
+        agent: read_flag(get_meta(conn, KEY_AGENT).as_deref()),
         uuid,
         db_path: db.to_path_buf(),
     })

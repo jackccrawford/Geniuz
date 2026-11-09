@@ -58,6 +58,8 @@ const KEY_UUID: &str = "folder_uuid";
 const KEY_NAME: &str = "folder_name";
 const KEY_DESCRIPTION: &str = "folder_description";
 const KEY_CREATED: &str = "folder_created";
+/// Whether the folder is an agent's own. Read only through `read_flag`.
+const KEY_AGENT: &str = "folder_agent";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Folder {
@@ -66,6 +68,8 @@ pub struct Folder {
     pub description: String,
     pub created: String,
     pub db_path: PathBuf,
+    /// An agent's own folder (set with the Agent tickbox or `geniuz folder agent`).
+    pub agent: bool,
 }
 
 impl Folder {
@@ -535,6 +539,36 @@ impl Registry {
         self.find(&folder.uuid)
     }
 
+    /// Mark a folder as an agent's own, or not. Stored as lowercase "true" or
+    /// "false"; the earlier value is kept, like every edit.
+    pub fn set_agent(&self, query: &str, agent: bool) -> Result<Folder, String> {
+        let folder = self.find(query)?;
+        replace_meta(&folder.db_path, KEY_AGENT, if agent { "true" } else { "false" })?;
+        self.find(&folder.uuid)
+    }
+
+    /// Mark every folder that sits in a directory named `agents`, and has never
+    /// been marked either way, as an agent's own. Run on purpose (Jack, 8 Nov),
+    /// never automatically; a folder already marked true or false is left alone.
+    pub fn mark_agents_dirs(&self) -> Result<Vec<Folder>, String> {
+        self.with_registry_lock(|| {
+            let mut marked = Vec::new();
+            for f in self.scan().folders {
+                let in_agents = f.db_path.parent().and_then(|d| d.parent()).and_then(|p| p.file_name())
+                    .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("agents"));
+                if !in_agents {
+                    continue;
+                }
+                let unset = open_read_only(&f.db_path).map(|c| get_meta(&c, KEY_AGENT).is_none()).unwrap_or(false);
+                if unset {
+                    replace_meta(&f.db_path, KEY_AGENT, "true")?;
+                    marked.push(f);
+                }
+            }
+            Ok(marked)
+        })
+    }
+
     fn check_name_free(&self, name: &str, except_uuid: Option<&str>) -> Result<(), String> {
         let lower = name_key(name);
         let taken = self.scan().folders.iter().any(|f| {
@@ -742,7 +776,7 @@ mod identity;
 mod moving;
 
 pub use across::*;
-pub use identity::identity_at;
+pub use identity::{identity_at, read_flag};
 pub use moving::backup_to;
 use identity::*;
 use moving::*;

@@ -12,8 +12,11 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
         FolderCommand::List { archived: true, json } => list_archived(&reg, json),
         FolderCommand::List { archived: false, json } => list(&reg, json),
         FolderCommand::Show { name, json } => show(&reg, name.as_deref(), json),
-        FolderCommand::Create { name, description, at } => {
-            let f = reg.create(&name, &description, at.as_deref())?;
+        FolderCommand::Create { name, description, at, agent } => {
+            let mut f = reg.create(&name, &description, at.as_deref())?;
+            if agent {
+                f = reg.set_agent(&f.uuid, true)?;
+            }
             Ok(format!("Created {} ({})\nKeep a memory in it with: geniuz keep -f \"{}\" -g \"...\"", f.name, f.short_id(), f.name))
         }
         FolderCommand::Add { path } => {
@@ -29,6 +32,23 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
         // 5.1 has no default folder. The command stays so whoever learned it is told
         // the new way; it changes nothing, and exits with an error so a script notices.
         FolderCommand::Use { .. } => Err(geniuz::folders::NO_DEFAULT_FOLDER.to_string()),
+        FolderCommand::Agent { name, value, mark_agents_dirs } => {
+            if mark_agents_dirs {
+                let marked = reg.mark_agents_dirs()?;
+                return Ok(match marked.len() {
+                    0 => "Nothing to mark: every folder in an agents directory is already marked.".to_string(),
+                    n => format!("Marked {} as agents' folders.", plural(n)),
+                });
+            }
+            // People type this, so it's strict: yes/no (or true/false), anything else asks again.
+            let on = match value.as_deref().map(|v| v.trim().to_lowercase()).as_deref() {
+                Some("yes" | "true") => true,
+                Some("no" | "false") => false,
+                _ => return Err("Say yes or no: geniuz folder agent <folder> yes".to_string()),
+            };
+            let f = reg.set_agent(name.as_deref().unwrap_or_default(), on)?;
+            Ok(format!("{} is {}.", f.name, if f.agent { "an agent's folder" } else { "not an agent's folder" }))
+        }
         FolderCommand::Rename { name, new_name } => {
             let f = reg.rename(&name, &new_name)?;
             Ok(format!("Renamed to {}. Its ID is still {}.", f.name, f.short_id()))
@@ -182,6 +202,8 @@ fn folder_json(f: &Folder, using: bool) -> serde_json::Value {
         "last_written": last,
         "path": f.db_path,
         "in_use": using,
+        // A JSON boolean, always present: never a string, null or missing.
+        "agent": f.agent,
     })
 }
 
@@ -215,6 +237,7 @@ fn show(reg: &Registry, name: Option<&str>, json: bool) -> Result<String, String
         format!("Memories: {}", count),
         format!("Last written: {}", last.map(|t| crate::shorten_ts(&t)).unwrap_or_else(|| "never".to_string())),
         format!("Location: {}", display_dir(&folder)),
+        format!("Agent: {}", if folder.agent { "yes" } else { "no" }),
     ];
     if !folder.description.is_empty() {
         lines.push(String::new());

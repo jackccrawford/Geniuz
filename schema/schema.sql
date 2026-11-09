@@ -1,4 +1,9 @@
 -- Geniuz Memory Schema v1.0
+-- _meta holds the folder's identity: folder_uuid, folder_name, folder_description,
+-- folder_created, and folder_agent. An earlier value is kept as key@time (key@time#2
+-- within the same second). folder_agent is lowercase text 'true' or 'false', written
+-- only by Geniuz; compare exactly. Geniuz reads it leniently (true in any case is
+-- true; anything else, or no row, is false) and reports it as a JSON boolean.
 CREATE TABLE IF NOT EXISTS _meta (key TEXT PRIMARY KEY, value TEXT);
 INSERT OR IGNORE INTO _meta VALUES ('version', '1.0');
 INSERT OR IGNORE INTO _meta VALUES ('product', 'geniuz');

@@ -35,12 +35,13 @@ export function viewFolder(uuid) {
   return invoke('view_folder', { uuid });
 }
 
-export function createFolder(name, description) {
-  return invoke('create_folder', { name, description });
+/** `agent`: an agent's own folder (the Agent tickbox), a real boolean. */
+export function createFolder(name, description, agent) {
+  return invoke('create_folder', { name, description, agent: agent === true });
 }
 
-export function updateFolder(uuid, name, description) {
-  return invoke('update_folder', { uuid, name, description });
+export function updateFolder(uuid, name, description, agent) {
+  return invoke('update_folder', { uuid, name, description, agent: agent === true });
 }
 
 export function addFolders(path) {

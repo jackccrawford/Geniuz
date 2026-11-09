@@ -3,7 +3,7 @@
 | Term | Meaning |
 |---|---|
 | Address | Two short IDs that open one memory from anywhere: `13625F6B:3487B9B0`, folder then memory. `keep` answers with one. |
-| Agents, Shared | The two groups in the sidebar. A folder in a directory named `agents` is an agent's own; the rest are shared. |
+| Agents, Shared | The two groups in the sidebar. A folder marked Agent is an agent's own; the rest are shared. |
 | Allow list | The directories you added, where Geniuz looks for folders besides its own data directory. |
 | Archive | Hiding a folder by moving it into `archive/`. Nothing is deleted, and it can be restored. |
 | Backfill | Embedding memories that do not have one yet. |

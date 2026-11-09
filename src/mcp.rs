@@ -396,7 +396,7 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
         for i in in_use.chain(pinned).chain(recent.into_iter().take(RECENT)) {
             if !picked.contains(&i) { picked.push(i); }
         }
-        let homes = scan.folders.iter().filter(|f| in_agents_tree(&f.db_path)).count();
+        let homes = scan.folders.iter().filter(|f| f.agent).count();
         let rest = scan.folders.len() - picked.len();
         if rest > 0 { tail = Some(format!(
             "{} more folders not shown ({} total{}). Pass filter with a word from a name or description to find one, e.g. filter: \"work\".",
@@ -416,8 +416,8 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
         let mark = if current.as_ref() == Some(&f.db_path) { "* " } else { "" };
         let noun = if count == 1 { "memory" } else { "memories" };
         let mut line = format!(
-            "{}{} | {} | {} {} · {}",
-            mark, f.short_id(), f.name, count, noun,
+            "{}{} | {}{} | {} {} · {}",
+            mark, f.short_id(), f.name, if f.agent { " (agent)" } else { "" }, count, noun,
             last.as_deref().map(crate::shorten_ts).unwrap_or_else(|| "never".to_string())
         );
         if !summary.is_empty() {
@@ -432,12 +432,6 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
         lines.push(format!("{} blocked as copies of each other, until one is moved.", scan.blocked.len()));
     }
     (lines.join("\n"), false)
-}
-
-/// A folder whose directory sits in one named `agents` is an agent's home.
-fn in_agents_tree(db_path: &std::path::Path) -> bool {
-    db_path.parent().and_then(|d| d.parent()).and_then(|p| p.file_name())
-        .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("agents"))
 }
 
 /// The store for this call: the named folder, or My memory.

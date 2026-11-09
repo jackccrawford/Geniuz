@@ -38,6 +38,11 @@ export function openFolderDialog(folder = null) {
       <span class="remember-field__label">Name</span>
       <input class="remember-field__input" name="name" maxlength="60" autocomplete="off" value="${su.esc(folder?.name || '')}">
     </label>
+    <label class="folder-form__agent">
+      <input type="checkbox" name="agent" ${folder?.agent === true ? 'checked' : ''}>
+      <span>Agent</span>
+      <span class="remember-field__hint">An agent's own folder. Agent folders are named in capitals, like LIMEN.</span>
+    </label>
     <label class="remember-field">
       <span class="remember-field__label">Description</span>
       <textarea class="remember-field__textarea folder-form__description" name="description" rows="5" placeholder="${PROMPT}">${su.esc(folder?.description || '')}</textarea>
@@ -62,13 +67,30 @@ export function openFolderDialog(folder = null) {
 
   form.querySelectorAll('[data-action="close"]').forEach((b) => b.addEventListener('click', () => d.close()));
 
+  // Agent folders are named in capitals (Jack, 8 Nov). Ticking the box turns the name
+  // to capitals, and keeps it so while typing; it's a nudge, so the name stays editable.
+  const nameInput = form.elements.name;
+  const agentBox = form.elements.agent;
+  const toCaps = () => {
+    if (!agentBox.checked) return;
+    const { selectionStart: a, selectionEnd: b } = nameInput;
+    const upper = nameInput.value.toUpperCase();
+    if (upper !== nameInput.value) {
+      nameInput.value = upper;
+      nameInput.setSelectionRange(a, b);
+    }
+  };
+  agentBox.addEventListener('change', toCaps);
+  nameInput.addEventListener('input', toCaps);
+
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const name = form.elements.name.value;
     const description = form.elements.description.value;
+    const agent = agentBox.checked;
     try {
-      if (folder) await api.updateFolder(folder.uuid, name, description);
-      else await api.createFolder(name, description);
+      if (folder) await api.updateFolder(folder.uuid, name, description, agent);
+      else await api.createFolder(name, description, agent);
       location.reload();
     } catch (e) { fail(e); }
   });
