@@ -1348,7 +1348,7 @@ mod tests {
         assert_eq!(r.lines.len(), 1);
         assert_eq!(r.pointers, ["13625F6B:D824ADA7"]);
         assert!(find("x".into(), "exact".into(), Some("someday".into()), None, None).is_err());
-        std::fs::remove_dir_all(&dir).ok();
         export_takes_the_folder_picked(&dir);
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -126,8 +126,9 @@ export async function mount(container) {
   // Both cards describe the folder chosen above. The size is asked for separately;
   // a folder that changes while it's being asked for keeps only the newest answer.
   let asked = 0;
+  let exporting = false; // the button stays disabled while an export runs, whatever is picked
   const show = async () => {
-    exportResult.textContent = '';
+    if (!exporting) exportResult.textContent = '';
     if (!chosen) {
       locPath.textContent = '(no folder)';
       locStats.textContent = '';
@@ -139,7 +140,7 @@ export async function mount(container) {
     locPath.textContent = chosen.location;
     exportName.innerHTML = `<strong>${escapeHtml(chosen.name)}</strong>`;
     exportBtn.textContent = `Export ${chosen.name}…`;
-    exportBtn.disabled = false;
+    exportBtn.disabled = exporting;
     const parts = (bytes) => [
       `${chosen.name}`,
       `${fmt.number(chosen.memories)} ${chosen.memories === 1 ? 'memory' : 'memories'}`,
@@ -161,8 +162,9 @@ export async function mount(container) {
 
   exportBtn.addEventListener('click', async () => {
     if (!chosen) return;
+    if (exporting) return;
     const folder = chosen;
-    const suggested = defaultExportPath(folder);
+    const suggested = await defaultExportPath(folder);
 
     // Native save dialog via tauri-plugin-dialog. window.prompt() is
     // unavailable in WKWebView, so we ask the OS for a Save As panel.
@@ -188,6 +190,7 @@ export async function mount(container) {
       return;
     }
 
+    exporting = true;
     exportBtn.disabled = true;
     exportResult.style.cssText = 'margin-top:var(--s-3);font-size:var(--fs-micro);color:var(--ink-3);';
     exportResult.textContent = `Exporting ${folder.name}…`;
@@ -201,7 +204,8 @@ export async function mount(container) {
       exportResult.style.cssText = `margin-top:var(--s-3);font-size:var(--fs-micro);color:var(--status-bad);`;
       exportResult.textContent = `Export failed: ${e?.message || String(e)}`;
     } finally {
-      exportBtn.disabled = false;
+      exporting = false;
+      exportBtn.disabled = !chosen;
     }
   });
 
@@ -223,13 +227,12 @@ function flashFeedback(el, msg, isError = false) {
   }, 2400);
 }
 
-// Suggest ~/Desktop/geniuz-<NAME>-<ID>-<stamp>.db, so the file says which folder
-// is inside. The home directory is taken from the folder's own location when it
-// sits under /Users/<name> or /home/<name> (or C:\Users\<name>).
-function defaultExportPath(folder) {
-  const loc = folder.location || '';
-  const sep = loc.includes('\\') && !loc.includes('/') ? '\\' : '/';
-  const home = (loc.match(/^(.*?[\\/](?:Users|home)[\\/][^\\/]+)/) || [])[1];
+// Suggest <Desktop>/geniuz-<NAME>-<ID>-<stamp>.db, so the file says which folder
+// is inside. The Desktop comes from the system (Tauri's path API), wherever the
+// folder itself lives; without it, the save panel opens on the file name alone.
+async function defaultExportPath(folder) {
+  let desktop = null;
+  try { desktop = await window.__TAURI__?.path?.desktopDir?.(); } catch { desktop = null; }
 
   const now = new Date();
   const pad = (n) => String(n).padStart(2, '0');
@@ -240,7 +243,8 @@ function defaultExportPath(folder) {
   const safe = (folder.name || 'folder').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'folder';
   const file = `geniuz-${safe}-${folder.id}-${stamp}.db`;
 
-  return home ? `${home}${sep}Desktop${sep}${file}` : file;
+  if (!desktop) return file;
+  try { return await window.__TAURI__.path.join(desktop, file); } catch { return file; }
 }
 
 function escapeHtml(s) {
