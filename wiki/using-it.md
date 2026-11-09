@@ -91,6 +91,8 @@ geniuz folder list --archived
 geniuz folder show Work
 geniuz folder create Work -d "Client projects. No passwords here."
 geniuz folder create Notes --at ~/notes
+geniuz folder create PEN --agent
+geniuz folder agent PEN yes
 geniuz folder rename Work Clients
 geniuz folder describe Clients "Client projects, and who owns them."
 geniuz folder add /some/directory
@@ -104,7 +106,7 @@ geniuz folder unpin Clients
 
 **A name or an ID, either one.** Wherever a command takes a folder, you can give its name or the first 8 characters of its ID, in any case: `Work`, `work` and `95e6e59c` all open the same folder, and so does the full ID. A typo is an error, never a near match. If two folders share a name, use the ID; if two IDs share their first 8 characters (very unlikely), use the name or the full ID.
 
-In the dashboard, folders are in the sidebar and in the Folders menu. Click the pin beside a name to keep it at the top of every list. Keep has a pulldown for choosing a folder, and Find can search any selection of them. A folder that sits in a directory named `agents` is listed under **Agents**, and the rest under **Shared**, so each agent's own folder is easy to tell from the ones it shares.
+In the dashboard, folders are in the sidebar and in the Folders menu. Click the pin beside a name to keep it at the top of every list. Keep has a pulldown for choosing a folder, and Find can search any selection of them. A folder marked **Agent** (the tickbox in New and Edit folder, or `geniuz folder agent`) is listed under **Agents**, and the rest under **Shared**, so each agent's own folder is easy to tell from the ones it shares. Agent folders are named in capitals, like LIMEN; ticking the box does that for you. Folders made before 5.1 inside a directory named `agents` can be marked all at once with `geniuz folder agent --mark-agents-dirs`.
 
 To give a project its own folder, put the folder's name or ID in a `.geniuz-folder` file in the project. Commands run there, and agents working there, use that folder.
 

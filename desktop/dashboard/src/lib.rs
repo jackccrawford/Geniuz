@@ -553,9 +553,9 @@ struct FolderRow {
     /// The first folder lives beside the others, so it stays where it is.
     fixed: bool,
     pinned: bool,
-    /// "agents" when the folder sits in a directory named agents (each agent's
-    /// own home), "folders" otherwise. Where a folder lives says what it is;
-    /// nothing in it is read to decide.
+    /// An agent's own folder (the Agent tickbox; stored as folder_agent).
+    agent: bool,
+    /// "agents" for an agent's own folder, "folders" otherwise: the sidebar's groups.
     tree: &'static str,
 }
 
@@ -582,14 +582,9 @@ fn folder_row(f: &Folder, current: Option<&str>, pinned: bool) -> FolderRow {
         current: current.is_some_and(|c| c.eq_ignore_ascii_case(&f.uuid)),
         fixed: canonical(dir) == canonical(&geniuz::data_dir()),
         pinned,
-        tree: tree_of(dir),
+        agent: f.agent,
+        tree: if f.agent { "agents" } else { "folders" },
     }
-}
-
-/// Which tree a folder's directory belongs to (see FolderRow::tree).
-fn tree_of(dir: &std::path::Path) -> &'static str {
-    let parent = dir.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().to_lowercase());
-    if parent.as_deref() == Some("agents") { "agents" } else { "folders" }
 }
 
 #[tauri::command]
@@ -662,15 +657,18 @@ fn view_folder(uuid: String) -> Result<(), String> {
 
 /// A new folder opens in this window.
 #[tauri::command]
-fn create_folder(name: String, description: String) -> Result<(), String> {
+fn create_folder(name: String, description: String, agent: bool) -> Result<(), String> {
     let reg = Registry::from_env();
-    let f = reg.create(&name, &description, None)?;
+    let mut f = reg.create(&name, &description, None)?;
+    if agent {
+        f = reg.set_agent(&f.uuid, true)?;
+    }
     *VIEW.lock().map_err(|_| "The app is in a bad state.".to_string())? = Some(f.uuid);
     Ok(())
 }
 
 #[tauri::command]
-fn update_folder(uuid: String, name: String, description: String) -> Result<(), String> {
+fn update_folder(uuid: String, name: String, description: String, agent: bool) -> Result<(), String> {
     let reg = Registry::from_env();
     let f = reg.find(&uuid)?;
     if f.name != name.trim() {
@@ -678,6 +676,9 @@ fn update_folder(uuid: String, name: String, description: String) -> Result<(), 
     }
     if f.description != description.trim() {
         reg.describe(&uuid, &description)?;
+    }
+    if f.agent != agent {
+        reg.set_agent(&uuid, agent)?;
     }
     Ok(())
 }

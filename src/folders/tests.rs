@@ -1058,3 +1058,44 @@ fn identity_is_invisible_to_memory_counts_and_old_versions() {
         .unwrap();
     assert_eq!(product, "geniuz");
 }
+
+#[test]
+fn a_flag_is_true_only_for_true_in_any_case() {
+    for t in ["true", "TRUE", "True", " true ", "tRuE\n"] {
+        assert!(read_flag(Some(t)), "{t:?} should be true");
+    }
+    for f in [None, Some(""), Some("false"), Some("False"), Some("FALSE"), Some("null"), Some("NULL"),
+              Some("Null"), Some("yes"), Some("1"), Some("t"), Some("truee"), Some("not true"), Some("junk")] {
+        assert!(!read_flag(f), "{f:?} should be false");
+    }
+}
+
+#[test]
+fn agent_is_false_until_set_and_keeps_the_old_value() {
+    let (_tmp, reg) = setup();
+    let f = reg.create("LIMEN", "", None).unwrap();
+    assert!(!f.agent, "missing means false");
+    assert!(reg.set_agent("LIMEN", true).unwrap().agent);
+    assert!(!reg.set_agent("LIMEN", false).unwrap().agent);
+    let conn = open_read_only(&f.db_path).unwrap();
+    let kept: Vec<String> = conn.prepare("SELECT value FROM _meta WHERE key LIKE 'folder_agent@%'").unwrap()
+        .query_map([], |r| r.get(0)).unwrap().map(|v| v.unwrap()).collect();
+    assert_eq!(kept, vec!["true".to_string()], "the value replaced is kept");
+    assert_eq!(get_meta(&conn, KEY_AGENT).as_deref(), Some("false"), "written lowercase");
+}
+
+#[test]
+fn marking_agents_dirs_touches_only_unmarked_folders_in_an_agents_directory() {
+    let (tmp, reg) = setup();
+    let agents = tmp.path().join("agents");
+    let a = reg.create("PEN", "", Some(&agents)).unwrap();
+    let b = reg.create("FIRN", "", Some(&agents)).unwrap();
+    reg.set_agent("FIRN", false).unwrap();
+    let shared = reg.create("Team", "", None).unwrap();
+    let marked = reg.mark_agents_dirs().unwrap();
+    assert_eq!(marked.iter().map(|f| f.uuid.clone()).collect::<Vec<_>>(), vec![a.uuid.clone()]);
+    assert!(reg.find(&a.uuid).unwrap().agent);
+    assert!(!reg.find(&b.uuid).unwrap().agent, "an explicit false is left alone");
+    assert!(!reg.find(&shared.uuid).unwrap().agent);
+    assert!(reg.mark_agents_dirs().unwrap().is_empty(), "a second run changes nothing");
+}

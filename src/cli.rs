@@ -277,6 +277,23 @@ pub enum FolderCommand {
         /// Directory to create it in, which is also added to your list
         #[arg(long, value_name = "DIR")]
         at: Option<PathBuf>,
+
+        /// An agent's own folder (named in capitals by convention, like LIMEN)
+        #[arg(long)]
+        agent: bool,
+    },
+
+    /// Mark a folder as an agent's own, or not: geniuz folder agent LIMEN yes
+    Agent {
+        /// Name or 8-character ID
+        #[arg(required_unless_present = "mark_agents_dirs")]
+        name: Option<String>,
+        /// yes or no
+        #[arg(required_unless_present = "mark_agents_dirs")]
+        value: Option<String>,
+        /// Mark every folder in a directory named `agents` that was never marked, once
+        #[arg(long, conflicts_with_all = ["name", "value"])]
+        mark_agents_dirs: bool,
     },
 
     /// Make Geniuz look in a directory for folders. Refuses duplicates

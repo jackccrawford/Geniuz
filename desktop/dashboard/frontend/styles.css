@@ -1480,3 +1480,8 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 }
 .status-row__link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
 
+
+/* The Agent tickbox in New/Edit folder: the box and its word on one line, the hint below. */
+.folder-form__agent { display: grid; grid-template-columns: auto 1fr; align-items: center; column-gap: 8px; row-gap: 2px; margin: 4px 0 12px; cursor: pointer; }
+.folder-form__agent input { margin: 0; }
+.folder-form__agent .remember-field__hint { grid-column: 2; margin: 0; padding: 0; }
