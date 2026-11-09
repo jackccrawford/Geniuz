@@ -50,7 +50,10 @@ impl BuiltinBackend {
         let model_path = models_dir.join("model.onnx");
         let tokenizer_path = models_dir.join("tokenizer.json");
 
-        if !model_path.exists() {
+        // Said once, the first time the model arrives; every later load is quiet, so a
+        // keep prints only what it kept.
+        let first_time = !model_path.exists();
+        if first_time {
             let url = format!("{}/{}", HF_BASE_URL, onnx_model_filename());
             eprintln!("[geniuz] Downloading model from {}...", url);
             download_file(&url, &model_path)?;
@@ -82,7 +85,9 @@ impl BuiltinBackend {
         tokenizer.with_truncation(Some(truncation))
             .map_err(|e| format!("Failed to set truncation: {}", e))?;
 
-        eprintln!("[geniuz] Semantic search ready ({})", onnx_model_filename());
+        if first_time {
+            eprintln!("[geniuz] ✨ Search by meaning is ready. From now on, memories are found by what they mean, not only by their words.");
+        }
 
         Ok(Self { session: Mutex::new(session), tokenizer })
     }

@@ -1,10 +1,16 @@
+---
+name: geniuz
+version: "{{GENIUZ_VERSION}}"
+description: Memory that lasts beyond a chat, kept on this computer. Use it to keep decisions, progress and context worth coming back to, and to recall them later by meaning, by exact words, or by address (FOLDER:MEMORY). If `geniuz --version` is newer than this skill's version, run `geniuz skill` to see the current one. A version still in double braces means this copy came from the source repository, and `geniuz skill` prints the stamped one.
+---
+
 # geniuz
 
 Your next session starts cold. No memory of what you built, what broke, what you decided. Every memory you write is a gift to that future session. The richer the memory, the less time re-learning.
 
 Works with any framework — Claude Code, Cursor, Windsurf, Aider, or anything with shell access.
 
-**You** (the agent reading this) use the CLI commands below. `geniuz keep` writes; `geniuz recall` reads. There's also a terminal UI (`geniuz tui`) and a graphical dashboard — those are for your human user to browse memories, not for you to call. The TUI refuses to launch from non-interactive callers and exits with code 2; calling it from a subprocess locks nothing up.
+AI tools use the CLI commands below: `geniuz keep` writes, `geniuz recall` reads. The terminal UI (`geniuz tui`) and the dashboard are for people to browse their memories. The TUI refuses to launch from non-interactive callers and exits with code 2, so calling it from a subprocess locks nothing up.
 
 ## Why this matters
 
@@ -14,28 +20,38 @@ A memory that says what broke, why it broke, and how you fixed it saves an hour.
 
 Memories compound. A single memory is a note. A folder of memories is institutional knowledge. Write for the version of you that knows nothing.
 
+## Asking first
+
+Most people like to be asked, once, whether notes should be kept in Geniuz: decisions, progress, what to pick up next time. When they agree, keeping as you go and mentioning what was kept works well. It helps in this chat and in the next. In a scheduled or unattended run, with no one to ask, keeping what the next run will need is what Geniuz is for.
+
 ## Commands
 
+Every keep names its folder (`--in`) and its gist (`-g`). A plain recall reads My memory (or the folder named in `.geniuz-folder`); add `--in Work` to read Work, or `--all` for every folder.
+
 ```bash
+# A fresh install has one folder, "My memory". These examples keep in a folder
+# called Work, made once with:
+geniuz folder create Work -d "Fixes, decisions and progress on the code."
+
 # Save what you learned — pipe in for depth, inline for quick notes
 echo "Token validation was running before refresh in auth.rs.
 Swapped lines 42-47. Root cause: middleware ordering assumed
 sync validation, but OAuth refresh is async. Three edge cases
 tested: expired token, revoked token, concurrent refresh." \
-  | geniuz keep -c - -g "fix: auth token refresh — async ordering in middleware"
+  | geniuz keep --in Work -c - -g "fix: auth token refresh — async ordering in middleware"
 
 # Quick memory when depth isn't needed
-geniuz keep -c "Upgraded rusqlite to 0.32" -g "dep: rusqlite 0.32"
+geniuz keep --in Work -c "Upgraded rusqlite to 0.32" -g "dep: rusqlite 0.32"
 
 # Keep from a file
-geniuz keep -c @session-notes.md -g "session: March 19 architecture review"
+geniuz keep --in Work -c @session-notes.md -g "session: March 19 architecture review"
 
 # Thread a follow-up
-geniuz keep -c "Same fix needed in staging compose" -g "fix: staging auth ordering" -p A1B2C3D4
+geniuz keep --in Work -c "Same fix needed in staging compose" -g "fix: staging auth ordering" -p A1B2C3D4
 
 # Search by meaning — not keywords
-geniuz recall "authentication middleware"
-geniuz recall "what broke in production" --since 7d
+geniuz recall --in Work "authentication middleware"
+geniuz recall --in Work "what broke in production" --since 7d
 
 # Proper names match exactly and come first (a Capitalized word after the
 # first, or anything in "quotes")
@@ -73,7 +89,15 @@ geniuz status
 
 ## Folders
 
-Memories live in folders, each with a name and a description. Choose the folder before you keep, because a memory can't be moved afterwards. Read its description first: it may say what belongs there, what must not go there, and how to use it. To make a new one, pass `create` to the `folders` tool, or run `geniuz folder create`.
+Memories live in folders, each with a name and a description. Choose the folder before you keep, because a memory can't be moved afterwards. Read its description first: it may say what belongs there, what must not go there, and how to use it.
+
+**Make a folder for anything you'll come back to:** a project, a topic, a long piece of work. In a short chat or a long one, keep what matters as you go. Don't count on the chat's history to hold it: a chat gets compacted, closed or forgotten, and a folder keeps what you put in it.
+
+```bash
+geniuz folder create "Website rebuild" -d "Decisions and progress on the new site."
+```
+
+The description is for whoever opens the folder next. Often that's you. Through MCP, pass `create` to the `folders` tool.
 
 ```bash
 geniuz folder list                     # all of them; * is the one in use
@@ -85,7 +109,7 @@ geniuz recall --all "deploy"           # every folder; each result shows its add
 geniuz recall 13625F6B:3487B9B0        # open an address, whichever folder it's in
 ```
 
-A wrong name is an error, never a different folder. To use one folder throughout a project, put its name in a `.geniuz-folder` file there.
+A wrong name is an error, never a different folder. A `.geniuz-folder` file holding a folder's name or ID decides what a plain `geniuz recall` reads in that directory (unless `GENIUZ_DB` is set, which wins); a keep still names its folder.
 
 Multiple agents can use the same folder. What one agent learns, every agent finds. That also makes a folder a way to leave each other messages: thread your reply to theirs with `-p`.
 
