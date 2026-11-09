@@ -1,3 +1,9 @@
+---
+name: geniuz
+version: {{GENIUZ_VERSION}}
+description: Memory that lasts beyond a chat, kept on this computer. Use it to keep decisions, progress and context worth coming back to, and to recall them later by meaning, by exact words, or by address (FOLDER:MEMORY). If `geniuz --version` is newer than this skill's version, run `geniuz skill` to see the current one.
+---
+
 # geniuz
 
 Your next session starts cold. No memory of what you built, what broke, what you decided. Every memory you write is a gift to that future session. The richer the memory, the less time re-learning.
