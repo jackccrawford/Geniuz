@@ -496,7 +496,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 if split {
                     let sections = adapter::split_sections(content);
                     let root_gist = format!("{}capture: {}", prefix, filename);
-                    let root_uuid = match db.keep_with_backend(content, Some(&root_gist), None, None, Some(backend.as_ref())) {
+                    let root_uuid = match db.keep_with_backend(content, Some(&root_gist), None, Some(backend.as_ref())) {
                         Ok(result) => {
                             created += 1;
                             result.uuid
@@ -512,7 +512,7 @@ fn run(cli: Cli) -> Result<String, String> {
                             Some(h) => format!("{}capture: {}: {}", prefix, filename, h),
                             None => format!("{}capture: {} (section {})", prefix, filename, i + 1),
                         };
-                        match db.keep_with_backend(&section.content, Some(&gist), Some(&root_uuid), None, Some(backend.as_ref())) {
+                        match db.keep_with_backend(&section.content, Some(&gist), Some(&root_uuid), Some(backend.as_ref())) {
                             Ok(_) => { created += 1; }
                             Err(e) => {
                                 eprintln!("[capture] Failed: {}", e);
@@ -522,7 +522,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     }
                 } else {
                     let gist = format!("{}capture: {}", prefix, filename);
-                    match db.keep_with_backend(content, Some(&gist), None, None, Some(backend.as_ref())) {
+                    match db.keep_with_backend(content, Some(&gist), None, Some(backend.as_ref())) {
                         Ok(_) => { created += 1; }
                         Err(e) => {
                             eprintln!("[capture] Failed: {}", e);
@@ -542,8 +542,7 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(lines.join("\n"))
         }
 
-        Command::Keep { content, gist, parent, at, json } => {
-            let at = at.as_deref().map(geniuz::window::moment).transpose()?;
+        Command::Keep { content, gist, parent, json } => {
             // Resolve content: @file or stdin
             let resolved = if content == "-" {
                 use std::io::{IsTerminal, Read};
@@ -572,7 +571,7 @@ fn run(cli: Cli) -> Result<String, String> {
             };
 
             let db = get_db()?;
-            let result = db.keep(&resolved, gist.as_deref(), parent.as_deref(), at.as_deref())?;
+            let result = db.keep(&resolved, gist.as_deref(), parent.as_deref())?;
 
             let address = db.address(&result.uuid);
             if json {

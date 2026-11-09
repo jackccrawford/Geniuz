@@ -45,7 +45,7 @@ geniuz keep -c "what happened" -g "category: short summary"
 geniuz keep -c @notes.md -g "session: review"
 echo "content" | geniuz keep -c - -g "piped: from a process"
 geniuz keep -c "follow-up" -g "update" -p 98672A90
-geniuz keep -c "what we decided" -g "decision: pricing" --at 2026-03-21
+geniuz keep -c "On 21 Mar we decided ..." -g "decision, 21 Mar: pricing"
 geniuz -f Work keep -c "for the Work folder" -g "note: client call"
 
 geniuz recall "topic"
@@ -77,7 +77,7 @@ geniuz settings list
 
 `keep` answers with the new memory's address, such as `Kept 13625F6B:F96D91B4`. Anyone can open it from any folder with `geniuz recall 13625F6B:F96D91B4`, so it's the thing to pass along.
 
-`--at` dates a memory to when it happened, for notes and records you bring in from somewhere else: a date (`2026-03-21`), a local time (`"2026-03-21 14:00"`) or RFC 3339. A future time is refused.
+A memory is dated when it's kept. To record something that happened earlier, say when in the gist or content, as above.
 
 Every command takes `-f <folder>` (or `--in <folder>`), anywhere on the line, to use that folder for one command. `watch --since` takes an address and shows only what came after it. Give it the last address you saw and it continues where you stopped, even after a restart. `--once` checks a single time and exits with 0 if there's something new, which suits a script.
 
