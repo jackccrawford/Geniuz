@@ -136,6 +136,23 @@ function folderTip(f) {
   return lines.join('\n');
 }
 
+// The orders a person can put the folder list in. Names compare the way a
+// person reads them: without regard to case, and "Finn 2" before "Finn 10".
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+const SORTS = {
+  az:     { label: 'A–Z',    says: 'by name, A to Z',                  by: byName },
+  za:     { label: 'Z–A',    says: 'by name, Z to A',                  by: (a, b) => byName(b, a) },
+  most:   { label: 'Most',   says: 'by memories, most first',          by: (a, b) => b.memories - a.memories || byName(a, b) },
+  fewest: { label: 'Fewest', says: 'by memories, fewest first',        by: (a, b) => a.memories - b.memories || byName(a, b) },
+};
+const SORT_KEY = 'geniuz.sidebar.sort';
+function readSort() {
+  try { const k = localStorage.getItem(SORT_KEY); return SORTS[k] ? k : 'az'; } catch { return 'az'; }
+}
+function writeSort(k) {
+  try { localStorage.setItem(SORT_KEY, k); } catch { /* the choice lasts this session */ }
+}
+
 // Folders replace the Memories row. Choosing one reloads the app, so nothing on
 // screen can still be showing the last folder's memories.
 function foldersSection(list, buttons) {
@@ -175,13 +192,38 @@ function foldersSection(list, buttons) {
   }
 
   // One list. The folders the person pinned come first, then a thin line,
-  // then every other folder with the most recently written first. Nothing
-  // here sorts folders into kinds; a folder's face says whose it is.
-  const pinned = all.filter((f) => f.pinned);
-  const rest = all
-    .filter((f) => !f.pinned)
-    .sort((a, b) => (b.last_written || '').localeCompare(a.last_written || ''));
-  for (const f of [...pinned, ...rest]) rows.appendChild(folderButton(f, buttons));
+  // then every other folder, both in the order the person chose: by name or by
+  // how many memories they hold, either way round. Nothing here sorts folders
+  // into kinds; a folder's face says whose it is.
+  const made = all.map((f) => ({ f, btn: folderButton(f, buttons) }));
+  const arrange = () => {
+    const by = SORTS[readSort()].by;
+    const pinnedFirst = (a, b) => (b.f.pinned ? 1 : 0) - (a.f.pinned ? 1 : 0);
+    // Moving a row that's already in the list re-places it, so nothing is rebuilt.
+    for (const { btn } of [...made].sort((a, b) => pinnedFirst(a, b) || by(a.f, b.f))) rows.appendChild(btn);
+  };
+  arrange();
+  // The order only matters once there are a few folders to order.
+  if (all.length > 2) {
+    const sort = document.createElement('button');
+    sort.type = 'button';
+    sort.className = 'sidebar-folders__sort';
+    const show = () => {
+      const s = SORTS[readSort()];
+      sort.textContent = s.label;
+      sort.title = `Sorted ${s.says}. Click to change`;
+      sort.setAttribute('aria-label', `Folders sorted ${s.says}. Change the order`);
+    };
+    sort.addEventListener('click', () => {
+      const keys = Object.keys(SORTS);
+      writeSort(keys[(keys.indexOf(readSort()) + 1) % keys.length]);
+      arrange();
+      show();
+      rows.scrollTop = 0;
+    });
+    show();
+    label.insertBefore(sort, add);
+  }
   sec.appendChild(rows);
   return finishFoldersSection(sec, list, buttons);
 }
