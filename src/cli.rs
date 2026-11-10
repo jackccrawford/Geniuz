@@ -47,7 +47,7 @@ pub enum ImageCommand {
     #[command(
         hide = true,
         arg_required_else_help = true,
-        after_help = "Kept means kept: a memory can't be changed, and neither can its image, by any agent or tool.\nThis is the one way through, for the person who owns the folder (or their administrator).\n\n  withdraw  Erases the image's bytes. Its place stays, marked withdrawn with the date,\n            so every memory that showed it says an image was withdrawn.\n  replace   Puts another image in its place, marked replaced with the date:\n            for example the same screenshot with a number blurred.\n\nBoth change every memory that shows the image, and an agent that looked at it\nbefore may still hold the old one in its context. Neither can be undone.\n\nWhat this can't reach: backups, exports, a copy of the folder moved earlier,\nand the transcript of any agent that already looked at the image.\n\nExamples:\n  geniuz image -f Work admin withdraw 1B2C3D4E\n  geniuz image -f Work admin replace 1B2C3D4E blurred.png\n\nYou are asked to type the image's ID to go ahead. In a script, give it with --confirm."
+        after_help = "Kept means kept: a memory can't be changed, and neither can its image. No MCP tool does either.\nThis is the one way through, for the person who owns the folder (or their administrator).\n\n  withdraw  Erases the image's bytes. Its place stays, marked withdrawn with the date,\n            so every memory that showed it says an image was withdrawn.\n  replace   Puts another image in its place, marked replaced with the date:\n            for example the same screenshot with a number blurred.\n\nBoth change every memory that shows the image, and an agent that looked at it\nbefore may still hold the old one in its context. Neither can be undone.\n\nIt needs a person at a terminal: it asks for the image's ID to be typed, and\ndoes nothing when run by a script or with its input piped. That keeps it out of\nan agent's ordinary reach. It is not a lock: whoever can run programs as you on\nthis computer can change your files, and Geniuz can't prevent that.\n\nWhat this can't reach: backups, exports, a copy of the folder moved earlier,\nand the transcript of any agent that already looked at the image.\n\nExamples:\n  geniuz image -f Work admin withdraw 1B2C3D4E\n  geniuz image -f Work admin replace 1B2C3D4E blurred.png"
     )]
     Admin {
         #[command(subcommand)]
@@ -61,19 +61,13 @@ pub enum ImageAdmin {
     Withdraw {
         /// The image's ID
         id: String,
-        /// The image's ID again, to go ahead without being asked
-        #[arg(long, value_name = "ID")]
-        confirm: Option<String>,
     },
     /// Put another image in its place, for every memory that shows it
     Replace {
         /// The image's ID
         id: String,
-        /// The new image: a file, or - to read one from a pipe
+        /// The new image, as a file
         file: String,
-        /// The image's ID again, to go ahead without being asked
-        #[arg(long, value_name = "ID")]
-        confirm: Option<String>,
     },
 }
 

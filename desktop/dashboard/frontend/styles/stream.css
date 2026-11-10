@@ -251,7 +251,7 @@ html.os-linux .sidebar {
   border: 1px dashed var(--line, rgba(127, 127, 127, 0.45));
   border-radius: 6px;
 }
-.memory-modal__image--withdrawn figcaption {
+.memory-modal__image.memory-modal__image--withdrawn figcaption {
   margin-top: 0;
   opacity: 0.85;
 }

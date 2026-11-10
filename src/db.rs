@@ -212,11 +212,24 @@ impl DatabaseManager {
         for a in attach {
             named.push(match a {
                 Attach::New(_) => None,
-                Attach::Existing(id) => Some(self.resolve_image(id)?.ok_or_else(|| format!(
-                    "No image {} in this folder. An image is shared between memories of one folder; \
-                     to use it in another, keep the image there.",
-                    id.trim().to_uppercase()
-                ))?),
+                Attach::Existing(id) => {
+                    let full = self.resolve_image(id)?.ok_or_else(|| format!(
+                        "No image {} in this folder. An image is shared between memories of one folder; \
+                         to use it in another, keep the image there.",
+                        id.trim().to_uppercase()
+                    ))?;
+                    // A withdrawn image has no bytes: a new memory would point at nothing.
+                    let withdrawn: Option<String> = self.conn()?
+                        .query_row("SELECT withdrawn_at FROM images WHERE image_uuid = ?1", [&full], |r| r.get(0))
+                        .map_err(|e| format!("Failed to read image: {}", e))?;
+                    if withdrawn.is_some() {
+                        return Err(format!(
+                            "Image {} was withdrawn by the folder's owner, so a new memory can't show it.",
+                            &full[..8]
+                        ));
+                    }
+                    Some(full)
+                }
             });
         }
         if content.trim().is_empty() {
@@ -1744,8 +1757,19 @@ mod tests {
         assert!(shown[0].withdrawn_at.is_some());
         let (info, data) = db.image(&a.images[0]).unwrap().unwrap();
         assert!(data.is_empty() && info.withdrawn_at.is_some());
-        // It stays withdrawn, and can't be shown by a new memory as if it were there.
+        // It stays withdrawn, and can't be shown by a new memory as if it were there:
+        // refused with the reason, and by the file itself if something gets past that.
         assert!(db.withdraw_image(&a.images[0]).unwrap_err().contains("was withdrawn"));
+        let err = db.keep_with_images("late", "late", None, &[Attach::Existing(a.images[0].clone())], Some(&MockBackend)).unwrap_err();
+        assert!(err.contains("was withdrawn"), "{err}");
+        assert_eq!(db.recent(10).unwrap().len(), 2, "the refused memory was not kept");
+        {
+            let conn = db.conn().unwrap();
+            let full = db.resolve_image(&a.images[0]).unwrap().unwrap();
+            conn.execute("INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, datetime('now'), ?1)",
+                rusqlite::params!["CCCCCCCC-0000-0000-0000-000000000001", r#"{"content":"x","gist":"x"}"#]).unwrap();
+            assert!(conn.execute("INSERT INTO memory_images VALUES ('CCCCCCCC-0000-0000-0000-000000000001', ?1, 0)", [&full]).is_err());
+        }
         assert!(db.replace_image(&a.images[0], &picture(12)).unwrap_err().contains("was withdrawn"));
         // The same bytes kept again are a new image: the hash went with the bytes.
         let again = db.keep_with_images("again", "again", None, &[Attach::New(p)], Some(&MockBackend)).unwrap();
