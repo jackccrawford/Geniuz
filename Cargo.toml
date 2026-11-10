@@ -58,6 +58,14 @@ ratatui = "0.29"
 crossterm = "0.28"
 anyhow = "1"
 
+# Images kept with memories: `image` reads what comes in and downscales it; `webp`
+# (Google's libwebp, compiled in as SQLite is) writes lossy WebP, which the
+# pure-Rust encoder can't. Measured 10 Nov 2026: about 1 MB added.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
+webp = { version = "0.3", default-features = false }
+sha2 = "0.10"
+base64 = "0.22"
+
 # Tray — feature-gated, Windows only ship. Tooltip + right-click menu only,
 # no GUI window, no webview. Keeps binary small (~3MB vs ~7MB with eframe).
 

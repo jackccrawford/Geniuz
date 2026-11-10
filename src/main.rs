@@ -148,6 +148,29 @@ pub fn resolve_db_path() -> Result<PathBuf, String> {
     geniuz::folders::Registry::from_env().resolve(flag, env_db.as_deref(), cwd.as_deref())
 }
 
+/// An image's bytes, from a file or (for `-`) the pipe. The file is only read.
+fn read_image(source: &str) -> Result<Vec<u8>, String> {
+    if source == "-" {
+        use std::io::{IsTerminal, Read};
+        if std::io::stdin().is_terminal() {
+            return Err("No image on the pipe.\n  Use one of:\n    --image path/to/shot.png\n    cat shot.png | geniuz keep -f <folder> -c \"...\" -g \"...\" --image -".to_string());
+        }
+        let mut buf = Vec::new();
+        std::io::stdin().read_to_end(&mut buf).map_err(|e| format!("Couldn't read the image from the pipe: {}", e))?;
+        return Ok(buf);
+    }
+    std::fs::read(source).map_err(|e| {
+        // macOS names screenshots with a narrow no-break space before AM/PM, which
+        // looks like a space and isn't one: a hand-typed name misses the file.
+        let hint = if e.kind() == std::io::ErrorKind::NotFound && (source.contains(" AM") || source.contains(" PM")) {
+            "\n  Mac screenshot names hold an unusual space before AM or PM: drag the file in, or use tab completion."
+        } else {
+            ""
+        };
+        format!("Couldn't read {}: {}{}", source, e, hint)
+    })
+}
+
 pub fn get_db() -> Result<db::DatabaseManager, String> {
     // An explicit file path may name a store to be created, as it always could.
     if explicit_db_env().is_some_and(|s| !s.is_empty()) && IN_FOLDER.get().and_then(|f| f.as_deref()).is_none() {
@@ -241,6 +264,7 @@ fn recall_thread(
             e.content = db.get_full_content(&e.memory_uuid).ok().flatten();
         }
     }
+    db.mark_images(&mut thread.entries);
     let label = format!("thread {} · root {}", id.trim().to_uppercase(), &thread.root[..8.min(thread.root.len())]);
     let shown = if thread.entries.len() < thread.total {
         format!("oldest {} shown", thread.entries.len())
@@ -254,6 +278,7 @@ fn recall_thread(
             let mut v = serde_json::json!({ "uuid": &e.memory_uuid[..8], "gist": e.gist, "created_at": e.created_at });
             if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8.min(p.len())]); }
             if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+            if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
             v
         }).collect();
         return Ok(serde_json::to_string_pretty(&serde_json::json!({
@@ -270,7 +295,7 @@ fn recall_thread(
     for e in &thread.entries {
         let parent = e.parent_uuid.as_deref()
             .map(|p| format!(" <- {}", &p[..8.min(p.len())])).unwrap_or_default();
-        lines.push(format!("{} | {} | {}{}", &e.memory_uuid[..8], shorten_ts(&e.created_at), e.gist, parent));
+        lines.push(format!("{} | {} | {}{}{}", &e.memory_uuid[..8], shorten_ts(&e.created_at), e.gist, parent, e.image_mark()));
         if let Some(ref content) = e.content {
             for line in content.lines() {
                 lines.push(format!("           {}", line));
@@ -333,6 +358,7 @@ fn recall_all(
                 "created_at": h.entry.created_at,
             });
             if let Some(s) = h.entry.score { v["score"] = serde_json::json!(format!("{:.3}", s)); }
+            if !h.entry.images.is_empty() { v["images"] = serde_json::json!(h.entry.images); }
             if let Some(c) = content(h) { v["content"] = serde_json::json!(c); }
             v
         }).collect();
@@ -346,7 +372,7 @@ fn recall_all(
     let mut lines = Vec::new();
     for h in &found.hits {
         let score = h.entry.score.map(|s| format!(" ({:.3})", s)).unwrap_or_default();
-        lines.push(format!("{} | {} | {} | {}{}", h.address(), h.folder.name, shorten_ts(&h.entry.created_at), h.entry.gist, score));
+        lines.push(format!("{} | {} | {} | {}{}{}", h.address(), h.folder.name, shorten_ts(&h.entry.created_at), h.entry.gist, score, h.entry.image_mark()));
         if let Some(c) = content(h) {
             lines.extend(c.lines().map(|l| format!("           {}", l)));
             lines.push(String::new());
@@ -594,7 +620,12 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(lines.join("\n"))
         }
 
-        Command::Keep { content, gist, parent, json } => {
+        Command::Keep { content, gist, parent, image, image_id, json } => {
+            // One pipe can carry the words or one image, not both.
+            let piped = image.iter().filter(|i| i.as_str() == "-").count();
+            if piped > 1 || (piped == 1 && content == "-") {
+                return Err("Only one thing can come from the pipe: the content (-c -) or one image (--image -). Give the others as files.".to_string());
+            }
             // Resolve content: @file or stdin
             let resolved = if content == "-" {
                 use std::io::{IsTerminal, Read};
@@ -623,7 +654,19 @@ fn run(cli: Cli) -> Result<String, String> {
             };
 
             let db = get_db_to_keep()?;
-            let result = db.keep(&resolved, &gist, parent.as_deref())?;
+            // Every image is read and prepared before anything is kept, so a file
+            // that can't be read keeps nothing.
+            let mut attach: Vec<db::Attach> = Vec::new();
+            for source in &image {
+                attach.push(db::Attach::New(geniuz::pictures::prepare(&read_image(source)?)
+                    .map_err(|e| if source == "-" { e } else { format!("{}: {}", source, e) })?));
+            }
+            attach.extend(image_id.iter().map(|id| db::Attach::Existing(id.clone())));
+            let result = if attach.is_empty() {
+                db.keep(&resolved, &gist, parent.as_deref())?
+            } else {
+                db.keep_with_images(&resolved, &gist, parent.as_deref(), &attach, None)?
+            };
 
             let address = db.address(&result.uuid);
             if json {
@@ -631,19 +674,88 @@ fn run(cli: Cli) -> Result<String, String> {
                     "ok": true, "action": "remember", "uuid": result.uuid, "address": address,
                     "embedded": result.embedded,
                 });
+                if !result.images.is_empty() {
+                    out["images"] = serde_json::json!(result.images);
+                }
                 // Said in the JSON too, so a script knows the fix; absent when there's none.
                 if !result.embedded {
                     out["note"] = "Found by keywords only for now: run 'geniuz backfill' later to make it searchable by meaning.".into();
                 }
                 Ok(serde_json::to_string_pretty(&out).unwrap())
-            } else if result.embedded {
-                Ok(format!("✅ Kept {}", address))
             } else {
-                Ok(format!(
-                    "✅ Kept {} (found by keywords only for now: run 'geniuz backfill' later)",
-                    address
-                ))
+                let with = match result.images.len() {
+                    0 => String::new(),
+                    1 => format!(", with image {}", result.images[0]),
+                    n => format!(", with {} images: {}", n, result.images.join(" ")),
+                };
+                if result.embedded {
+                    Ok(format!("✅ Kept {}{}", address, with))
+                } else {
+                    Ok(format!(
+                        "✅ Kept {}{} (found by keywords only for now: run 'geniuz backfill' later)",
+                        address, with
+                    ))
+                }
             }
+        }
+
+        Command::Image { id, out, base64, json } => {
+            let db = get_db()?;
+            let kb = |b: u64| if b < 1024 { format!("{} bytes", b) } else { format!("{} KB", (b + 512) / 1024) };
+            let Some(id) = id else {
+                let all = db.images()?;
+                if json {
+                    return Ok(serde_json::to_string_pretty(&serde_json::json!({ "images": all })).unwrap());
+                }
+                if all.is_empty() {
+                    return Ok("No images in this folder yet.\n  To keep one: geniuz keep -f <folder> -c \"what it shows\" -g \"...\" --image <file>".to_string());
+                }
+                let mut lines = Vec::new();
+                for i in &all {
+                    lines.push(format!(
+                        "{}  {} x {}  {}  {}  in {} {}",
+                        &i.image_uuid[..8], i.width, i.height, kb(i.bytes), shorten_ts(&i.created_at),
+                        i.used_by, if i.used_by == 1 { "memory" } else { "memories" }
+                    ));
+                }
+                return Ok(lines.join("\n"));
+            };
+            let Some((info, data)) = db.image(&id)? else {
+                return Err(format!("No image {} in this folder. `geniuz image -f <folder>` lists them.", id.to_uppercase()));
+            };
+            let shown_in = db.memories_showing(&info.image_uuid)?;
+            if base64 {
+                use base64::Engine;
+                return Ok(serde_json::json!({
+                    "type": "image",
+                    "source": { "type": "base64", "media_type": info.media_type, "data": base64::engine::general_purpose::STANDARD.encode(&data) }
+                }).to_string());
+            }
+            if let Some(out) = out {
+                if out == "-" {
+                    use std::io::{IsTerminal, Write};
+                    if std::io::stdout().is_terminal() {
+                        return Err("An image's bytes would fill the terminal. Send them somewhere: `-o shot.webp`, or `-o - > shot.webp`.".to_string());
+                    }
+                    std::io::stdout().write_all(&data).map_err(|e| format!("Couldn't write the image: {}", e))?;
+                    return Ok(String::new());
+                }
+                if std::path::Path::new(&out).exists() {
+                    return Err(format!("{} already exists, and Geniuz won't write over it. Choose another name.", out));
+                }
+                std::fs::write(&out, &data).map_err(|e| format!("Couldn't write {}: {}", out, e))?;
+                return Ok(format!("Wrote {} ({} x {}, {})", out, info.width, info.height, kb(info.bytes)));
+            }
+            if json {
+                let mut v = serde_json::to_value(&info).unwrap();
+                v["memories"] = serde_json::json!(shown_in);
+                return Ok(serde_json::to_string_pretty(&v).unwrap());
+            }
+            Ok(format!(
+                "Image {}\n  {} x {}, {}, {}\n  A model spends about {} tokens to look at it.\n  Kept {}\n  Shown in: {}\n  To take it out: geniuz image {} -o <file>.webp",
+                &info.image_uuid[..8], info.width, info.height, kb(info.bytes), info.media_type, info.tokens,
+                shorten_ts(&info.created_at), shown_in.join(" "), &info.image_uuid[..8]
+            ))
         }
 
         Command::Recall { query, all, thread, grep, random, keyword, full, limit, since, until, json } => {
@@ -745,6 +857,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     db.semantic_search_in(q, &window, limit)?
                 }
             };
+            db.mark_images(&mut entries);
 
             if full {
                 for entry in &mut entries {
@@ -762,6 +875,7 @@ fn run(cli: Cli) -> Result<String, String> {
                         "created_at": e.created_at,
                     });
                     if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8]); }
+                    if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
                     if let Some(s) = e.score { v["score"] = serde_json::json!(format!("{:.3}", s)); }
                     if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
                     v
@@ -795,7 +909,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 if let Some(s) = e.score {
                     suffix.push_str(&format!(" ({:.3})", s));
                 }
-                lines.push(format!("{} | {} | {}{}", uuid_short, ts, e.gist, suffix));
+                lines.push(format!("{} | {} | {}{}{}", uuid_short, ts, e.gist, suffix, e.image_mark()));
                 if let Some(ref content) = e.content {
                     for line in content.lines() {
                         lines.push(format!("           {}", line));
@@ -823,6 +937,7 @@ fn run(cli: Cli) -> Result<String, String> {
             let window = geniuz::window::Window::parse(since.as_deref(), until.as_deref())?;
             let db = get_db()?;
             let mut entries = db.recent_in(&window, limit)?;
+            db.mark_images(&mut entries);
 
             if full {
                 for entry in &mut entries {
@@ -840,6 +955,7 @@ fn run(cli: Cli) -> Result<String, String> {
                         "created_at": e.created_at,
                     });
                     if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8]); }
+                    if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
                     if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
                     v
                 }).collect();
@@ -866,7 +982,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 if let Some(ref p) = e.parent_uuid {
                     suffix.push_str(&format!(" <- {}", &p[..8.min(p.len())]));
                 }
-                lines.push(format!("{} | {} | {}{}", uuid_short, ts, e.gist, suffix));
+                lines.push(format!("{} | {} | {}{}{}", uuid_short, ts, e.gist, suffix, e.image_mark()));
                 if let Some(ref content) = e.content {
                     for line in content.lines() {
                         lines.push(format!("           {}", line));
@@ -933,7 +1049,8 @@ fn run(cli: Cli) -> Result<String, String> {
                     cursor = pos.clone();
                     last_seen = Some(e.memory_uuid.clone());
                 }
-                let entries: Vec<_> = found.into_iter().map(|(_, e)| e).collect();
+                let mut entries: Vec<_> = found.into_iter().map(|(_, e)| e).collect();
+                db.mark_images(&mut entries);
 
                 if !entries.is_empty() {
                     for e in &entries {
@@ -962,6 +1079,7 @@ fn run(cli: Cli) -> Result<String, String> {
                                 "created_at": &e.created_at,
                             });
                             if let Some(p) = parent_short { v["parent"] = serde_json::json!(p); }
+                            if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
                             if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
                             println!("{}", serde_json::to_string(&v).unwrap());
                         } else {
@@ -971,7 +1089,7 @@ fn run(cli: Cli) -> Result<String, String> {
                             if let Some(ref p) = e.parent_uuid {
                                 suffix.push_str(&format!(" <- {}", &p[..8.min(p.len())]));
                             }
-                            println!("+ {} | {} | {}{}", uuid_short, ts, e.gist, suffix);
+                            println!("+ {} | {} | {}{}{}", uuid_short, ts, e.gist, suffix, e.image_mark());
                         }
                     }
                 }
@@ -1122,6 +1240,7 @@ mod watch_exec_tests {
             parent_uuid: None,
             content: Some(content.into()),
             score: None,
+            images: Vec::new(),
         };
         let (cmd, vars) = watch_exec_command(template, &e);
         let out = std::process::Command::new("sh").arg("-c").arg(&cmd).envs(vars).output().unwrap();

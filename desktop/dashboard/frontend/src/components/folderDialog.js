@@ -36,11 +36,11 @@ export function openFolderDialog(folder = null) {
     <h2 class="folder-form__title">${folder ? 'Edit folder' : 'New folder'}</h2>
     <label class="remember-field">
       <span class="remember-field__label">Name</span>
-      <input class="remember-field__input" name="name" maxlength="60" autocomplete="off" value="${su.esc(folder?.name || '')}">
+      <input class="remember-field__input" name="name" maxlength="60" autocomplete="off" autocorrect="off" value="${su.esc(folder?.name || '')}">
     </label>
     <label class="remember-field">
       <span class="remember-field__label">Description</span>
-      <textarea class="remember-field__textarea folder-form__description" name="description" rows="5" placeholder="${PROMPT}">${su.esc(folder?.description || '')}</textarea>
+      <textarea class="remember-field__textarea folder-form__description" name="description" autocorrect="off" rows="5" placeholder="${PROMPT}">${su.esc(folder?.description || '')}</textarea>
     </label>
     ${folder ? `<p class="folder-form__where">Location: <code>${su.esc(folder.location)}</code></p>` : ''}
     <div class="remember-status" aria-live="polite"></div>

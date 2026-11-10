@@ -76,6 +76,11 @@ export async function openMemory(uuid, { onClose, folder = null } = {}) {
       </div>
     </header>
     <div class="memory-modal__text">${text ? su.renderText(text) : ''}</div>
+    ${(m.images || []).length ? `<div class="memory-modal__images">${m.images.map((i) => `
+      <figure class="memory-modal__image">
+        <img data-image="${su.esc(i.id)}" width="${Number(i.width) || 0}" height="${Number(i.height) || 0}" alt="Image ${su.esc(i.id)}, kept with this memory">
+        <figcaption>image ${su.esc(i.id)} · ${Number(i.width) || 0} × ${Number(i.height) || 0}</figcaption>
+      </figure>`).join('')}</div>` : ''}
     <footer class="memory-modal__foot">
       <span>${su.esc(su.timeFull(m.created_at))}</span>
       <span class="memory-modal__actions">
@@ -85,6 +90,16 @@ export async function openMemory(uuid, { onClose, folder = null } = {}) {
     </footer>
   `);
   wire();
+  // Each image is fetched on its own, so the words show at once and one that
+  // fails says so without hiding the rest.
+  d.querySelectorAll('img[data-image]').forEach(async (img) => {
+    try {
+      img.src = await api.getImage(img.dataset.image, folder || folderId || null);
+    } catch (e) {
+      img.closest('figure').querySelector('figcaption').textContent = `image ${img.dataset.image} couldn't be shown. ${e?.message || e}`;
+      img.remove();
+    }
+  });
   d.querySelector('.memory-modal__reply').addEventListener('click', () => {
     closeDialog();
     replyTo({ uuid: m.uuid, folder: folderId, gist: m.gist });

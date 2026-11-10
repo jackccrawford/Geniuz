@@ -92,8 +92,8 @@ export function getRecentMemories(limit = 24, offset = 0, oldestFirst = false) {
  * Save a new memory. `gist` is required (one line; spaces alone don't count). Returns the short
  * (8-char) UUID prefix of the new memory.
  */
-export function rememberMemory(gist, content, folder, parent = null) {
-  return invoke('remember_memory', { gist: gist || null, content, folder: folder || null, parent: parent || null });
+export function rememberMemory(gist, content, folder, parent = null, images = []) {
+  return invoke('remember_memory', { gist: gist || null, content, folder: folder || null, parent: parent || null, images });
 }
 
 export function getActivity(days = 14) {
@@ -133,6 +133,10 @@ export function openPath(path) {
  * Fetch full details for a single memory by UUID.
  * Returns: { uuid, gist, content, created_at, parent_uuid } | null
  */
+export function getImage(id, folder = null) {
+  return invoke('get_image', { id, folder });
+}
+
 export function getMemoryDetail(uuid, folder = null) {
   return invoke('get_memory_detail', { uuid, folder });
 }

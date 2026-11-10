@@ -937,6 +937,7 @@ mod tests {
             parent_uuid: parent.map(Into::into),
             content: None,
             score: None,
+            images: Vec::new(),
         }
     }
 

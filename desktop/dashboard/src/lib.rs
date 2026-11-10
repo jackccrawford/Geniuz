@@ -86,6 +86,8 @@ struct RecentMemory {
     /// Which folder it came from, when a search covered more than the one on screen.
     folder: Option<String>,
     folder_name: Option<String>,
+    /// How many images it shows, so a list can say so without fetching them.
+    images: usize,
 }
 
 /// One matching line from an Exact search.
@@ -132,6 +134,16 @@ struct MemoryDetail {
     content: Option<String>,
     created_at: String,
     parent_uuid: Option<String>,
+    /// The images it shows, in order. Their bytes are asked for one at a time.
+    images: Vec<ImageRef>,
+}
+
+#[derive(Serialize)]
+struct ImageRef {
+    id: String,
+    width: u32,
+    height: u32,
+    bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -229,12 +241,17 @@ mod update_tests {
 /// Persist a new memory. `gist` is required: the library refuses one that is
 /// missing or blank, and stores it trimmed. Returns the short (8-char) UUID
 /// prefix of the new memory.
-#[tauri::command]
+///
+/// Off the main thread (`async`): keeping embeds the words and prepares any
+/// images, which takes long enough to freeze the window if it ran there, so the
+/// Keep button could never show that it had been pressed.
+#[tauri::command(async)]
 fn remember_memory(
     gist: Option<String>,
     content: String,
     folder: Option<String>,
     parent: Option<String>,
+    images: Option<Vec<String>>,
 ) -> Result<String, String> {
     // The folder chosen on the page, or the one on screen.
     let db = match folder {
@@ -252,7 +269,16 @@ fn remember_memory(
         ),
         None => None,
     };
-    db.keep(content.trim(), gist.as_deref().unwrap_or(""), parent.as_deref())
+    // Pasted or dropped images arrive as `data:` addresses. Each is prepared by the
+    // same code the command line uses, before anything is kept.
+    let mut attach = Vec::new();
+    for (n, url) in images.unwrap_or_default().iter().enumerate() {
+        let picture = geniuz::pictures::from_data_url(url)
+            .and_then(|bytes| geniuz::pictures::prepare(&bytes))
+            .map_err(|e| format!("Image {}: {}", n + 1, e))?;
+        attach.push(geniuz::db::Attach::New(picture));
+    }
+    db.keep_with_images(content.trim(), gist.as_deref().unwrap_or(""), parent.as_deref(), &attach, None)
         .map(|r| r.uuid)
 }
 
@@ -292,6 +318,7 @@ fn get_recent_memories(
     for e in &mut entries {
         e.content = db.get_full_content(&e.memory_uuid).ok().flatten();
     }
+    db.mark_images(&mut entries);
     Ok(entries.into_iter().map(map_recent).collect())
 }
 
@@ -454,7 +481,27 @@ fn get_memory_detail(uuid: String, folder: Option<String>) -> Result<Option<Memo
         None => open_db()?,
     };
     let entry = db.get_by_uuid_prefix(&uuid)?;
-    Ok(entry.map(map_detail))
+    Ok(entry.map(|e| {
+        let images = db
+            .images_of(&e.memory_uuid)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|i| ImageRef { id: i.image_uuid[..8].to_string(), width: i.width, height: i.height, bytes: i.bytes })
+            .collect();
+        MemoryDetail { images, ..map_detail(e) }
+    }))
+}
+
+/// One image, as a `data:` address the page can show. The bytes never leave the
+/// folder's file except into the window.
+#[tauri::command]
+fn get_image(id: String, folder: Option<String>) -> Result<String, String> {
+    let db = match folder {
+        Some(f) => DatabaseManager::open_existing(&Registry::from_env().find(&f)?.db_path.to_string_lossy())?,
+        None => open_db()?,
+    };
+    let (info, data) = db.image(&id)?.ok_or_else(|| format!("No image {} in this folder.", id.to_uppercase()))?;
+    Ok(geniuz::pictures::data_url(&info.media_type, &data))
 }
 
 #[tauri::command]
@@ -466,6 +513,7 @@ fn get_thread_chain(uuid: String, limit: Option<u32>) -> Result<Vec<RecentMemory
     for e in &mut thread.entries {
         e.content = db.get_full_content(&e.memory_uuid).ok().flatten();
     }
+    db.mark_images(&mut thread.entries);
     Ok(thread.entries.into_iter().map(map_recent).collect())
 }
 
@@ -921,6 +969,7 @@ fn map_recent(e: MemoryEntry) -> RecentMemory {
         parent_uuid: e.parent_uuid,
         folder: None,
         folder_name: None,
+        images: e.images.len(),
     }
 }
 
@@ -931,6 +980,7 @@ fn map_detail(e: MemoryEntry) -> MemoryDetail {
         content: e.content,
         created_at: e.created_at,
         parent_uuid: e.parent_uuid,
+        images: Vec::new(),
     }
 }
 
@@ -1123,6 +1173,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_link,
             open_update,
+            get_image,
             get_app_version,
             get_update,
             view_folder,

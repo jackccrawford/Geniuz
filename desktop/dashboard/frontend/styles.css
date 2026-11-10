@@ -1087,6 +1087,82 @@ html.os-linux {
 html.os-linux .reply-chosen,
 html.os-linux .reply-results { background: rgba(255, 255, 255, 0.92); }
 
+.remember-images__pick {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.remember-images__pick:focus-visible,
+.remember-image__remove:focus-visible {
+  outline: 2px solid var(--accent, currentColor);
+  outline-offset: 2px;
+}
+.remember-images__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.remember-images__list:empty {
+  display: none;
+}
+.remember-image {
+  position: relative;
+}
+.remember-image img {
+  display: block;
+  height: 96px;
+  width: auto;
+  max-width: 220px;
+  object-fit: cover;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+}
+.remember-image__remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--rule);
+  background: var(--s-paper, #fbf9f3);
+  color: var(--ink-1);
+  cursor: pointer;
+}
+.remember-images__pick:disabled {
+  text-decoration: none;
+  opacity: 0.55;
+  cursor: default;
+}
+.remember-images__msg {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--rule);
+  background: var(--bg-elevated);
+  color: var(--ink-1);
+  font-size: var(--fs-meta);
+}
+.remember-images__note {
+  margin: 0;
+  font-size: var(--fs-meta);
+  color: var(--ink-2);
+}
+.remember-form.is-dropping .remember-images {
+  outline: 2px dashed var(--accent, currentColor);
+  outline-offset: 6px;
+  border-radius: 6px;
+}
+
 .remember-actions {
   display: flex;
   justify-content: flex-end;
@@ -1527,3 +1603,20 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 /* An emoji stands on its own, with no tile behind it, and fills the space a mosaic takes. */
 .sidebar-face.is-emoji, .sidebar-item.is-active .sidebar-face.is-emoji { background: none; overflow: visible; font-size: 16px; }
 .is-collapsed .sidebar-face.is-emoji { font-size: 18px; }
+
+/* Every button answers a press. The buttons are flat by design, so without this
+   nothing shows between pressing one and its result (Jack, 10 Nov 2026). Dimming
+   reads on filled and text-only buttons alike; the small shrink is dropped for
+   anyone who asks for less motion. */
+button:active:not(:disabled),
+[role="button"]:active {
+  filter: brightness(0.7) contrast(1.15);
+  transform: scale(0.94);
+  transition-duration: 0ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  button:active:not(:disabled),
+  [role="button"]:active {
+    transform: none;
+  }
+}

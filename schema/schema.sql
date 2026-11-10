@@ -95,3 +95,84 @@ CREATE TABLE IF NOT EXISTS embedding_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Images kept with memories (5.1). One row per distinct image, already downscaled
+-- and stored as WebP, in the folder's own file: no loose files. `data` is last on
+-- purpose: SQLite reads a row left to right, so listing sizes and dimensions never
+-- touches the bytes. `sha256` is of the stored bytes; the same bytes kept twice
+-- are stored once.
+CREATE TABLE IF NOT EXISTS images (
+    image_uuid  TEXT PRIMARY KEY NOT NULL CHECK(length(image_uuid) = 36),
+    sha256      TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
+    media_type  TEXT NOT NULL,
+    width       INTEGER NOT NULL CHECK(width > 0),
+    height      INTEGER NOT NULL CHECK(height > 0),
+    created_at  TEXT NOT NULL DEFAULT(strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    data        BLOB NOT NULL CHECK(length(data) >= 1)
+);
+
+-- Which memories show which images, and in what order. One image can serve many
+-- memories; one memory can carry many images. (parent_uuid stays what it is: a
+-- reply to a memory.)
+CREATE TABLE IF NOT EXISTS memory_images (
+    memory_uuid TEXT NOT NULL CHECK(length(memory_uuid) = 36),
+    image_uuid  TEXT NOT NULL CHECK(length(image_uuid) = 36),
+    position    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (memory_uuid, image_uuid)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS idx_images_uuid_prefix ON images(substr(image_uuid, 1, 8));
+CREATE INDEX IF NOT EXISTS idx_memory_images_image ON memory_images(image_uuid);
+
+-- Kept means kept, for images as for memories.
+CREATE TRIGGER IF NOT EXISTS prevent_image_update BEFORE UPDATE ON images
+BEGIN
+    SELECT RAISE(ABORT, 'Images are immutable, update is not permitted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_image_delete BEFORE DELETE ON images
+BEGIN
+    SELECT RAISE(ABORT, 'Images are immutable, delete is not permitted');
+END;
+
+-- As prevent_memory_replace: INSERT OR REPLACE deletes without firing DELETE triggers.
+CREATE TRIGGER IF NOT EXISTS prevent_image_replace BEFORE INSERT ON images
+WHEN EXISTS(SELECT 1 FROM images WHERE image_uuid = NEW.image_uuid OR sha256 = NEW.sha256)
+BEGIN
+    SELECT RAISE(ABORT, 'Images are immutable, replacing an existing image is not permitted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_memory_image_update BEFORE UPDATE ON memory_images
+BEGIN
+    SELECT RAISE(ABORT, 'Images are immutable, update is not permitted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_memory_image_delete BEFORE DELETE ON memory_images
+BEGIN
+    SELECT RAISE(ABORT, 'Images are immutable, delete is not permitted');
+END;
+
+-- A link joins a memory and an image that are both in this folder, once.
+CREATE TRIGGER IF NOT EXISTS memory_image_must_exist BEFORE INSERT ON memory_images
+WHEN NOT EXISTS (SELECT 1 FROM memories WHERE memory_uuid = NEW.memory_uuid)
+  OR NOT EXISTS (SELECT 1 FROM images WHERE image_uuid = NEW.image_uuid)
+  OR EXISTS (SELECT 1 FROM memory_images WHERE memory_uuid = NEW.memory_uuid AND image_uuid = NEW.image_uuid)
+BEGIN
+    SELECT RAISE(ABORT, 'That memory or image is not in this folder, or they are already joined');
+END;
+
+-- Everything about an image except its bytes. `tokens` is what a Claude model
+-- spends to look at it: one per 28 x 28 pixel patch.
+CREATE VIEW IF NOT EXISTS image_info AS
+SELECT i.image_uuid, i.media_type, i.width, i.height,
+    length(i.data) AS bytes,
+    ((i.width + 27) / 28) * ((i.height + 27) / 28) AS tokens,
+    i.created_at,
+    (SELECT count(*) FROM memory_images mi WHERE mi.image_uuid = i.image_uuid) AS used_by
+FROM images i;
+
+-- One row per memory-and-image pair, with no bytes. Order by position to show them.
+CREATE VIEW IF NOT EXISTS memory_image AS
+SELECT mi.memory_uuid, mi.position, i.image_uuid, i.media_type, i.width, i.height,
+    length(i.data) AS bytes
+FROM memory_images mi JOIN images i ON i.image_uuid = mi.image_uuid;

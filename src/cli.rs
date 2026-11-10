@@ -44,7 +44,7 @@ pub enum Command {
     #[command(
         alias = "remember",
         arg_required_else_help = true,
-        after_help = "Examples:\n  geniuz keep -f Work -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz keep -f LIMEN -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz keep -f Work -c - -g \"piped: from process\"\n\nThe folder and the gist are required: name where it goes, and write the gist for whoever finds it next. `geniuz folder list` lists the folders."
+        after_help = "Examples:\n  geniuz keep -f Work -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz keep -f LIMEN -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz keep -f Work -c - -g \"piped: from process\"\n  geniuz keep -f Work -c \"The error after the upgrade\" -g \"bug: login screen\" --image shot.png\n\nThe folder and the gist are required: name where it goes, and write the gist for whoever finds it next. `geniuz folder list` lists the folders."
     )]
     Keep {
         /// Content to save
@@ -58,6 +58,36 @@ pub enum Command {
         /// Thread to a parent memory (UUID prefix)
         #[arg(short, long)]
         parent: Option<String>,
+
+        /// An image to keep with it: a file, or - to read one from a pipe. Repeat for more, up to 5.
+        /// It is stored in the folder, downscaled; the file itself is left as it is
+        #[arg(short, long, value_name = "FILE")]
+        image: Vec<String>,
+
+        /// An image this folder already holds, by its ID, so this memory shows it too
+        #[arg(long, value_name = "ID")]
+        image_id: Vec<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// See the images kept in a folder, or take one out as a file
+    #[command(
+        after_help = "Examples:\n  geniuz image -f Work                     Every image in the folder\n  geniuz image -f Work 1B2C3D4E            One image: its size, and the memories that show it\n  geniuz image -f Work 1B2C3D4E -o shot.webp   Write it to a file\n  geniuz image -f Work 1B2C3D4E --base64   The block a model is handed\n\nTo keep an image: geniuz keep -f Work -c \"what it shows\" -g \"...\" --image shot.png\nThe words are how it's found later: say what the image shows."
+    )]
+    Image {
+        /// The image's ID (8 characters or more). Leave it out to list the folder's images
+        id: Option<String>,
+
+        /// Write the image to this file, or - for a pipe
+        #[arg(short, long, value_name = "FILE")]
+        out: Option<String>,
+
+        /// Print it as the Base64 block a model is handed
+        #[arg(long, conflicts_with = "out")]
+        base64: bool,
 
         /// Output as JSON
         #[arg(long)]
