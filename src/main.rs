@@ -700,43 +700,58 @@ fn run(cli: Cli) -> Result<String, String> {
         }
 
         Command::Image { admin: Some(cli::ImageCommand::Admin { action }), .. } => {
-            // Named with -f only, as keeping is: this changes a folder for good.
-            let db = get_db_to_keep().map_err(|_| "Name the folder with -f <folder>: `geniuz image -f <folder> admin ...`.".to_string())?;
-            let (id, file, confirm) = match &action {
-                cli::ImageAdmin::Withdraw { id, confirm } => (id, None, confirm),
-                cli::ImageAdmin::Replace { id, file, confirm } => (id, Some(file), confirm),
+            // Named with -f only, as keeping is: this changes a folder for good. With
+            // no -f, say that; with one, whatever went wrong finding it is the answer.
+            let db = if IN_FOLDER.get().and_then(|f| f.as_deref()).is_none() {
+                return Err("Name the folder with -f <folder>: `geniuz image -f <folder> admin ...`.".to_string());
+            } else {
+                get_db_to_keep()?
+            };
+            let (id, file) = match &action {
+                cli::ImageAdmin::Withdraw { id } => (id, None),
+                cli::ImageAdmin::Replace { id, file } => (id, Some(file)),
             };
             let Some((info, _)) = db.image(id)? else {
                 return Err(format!("No image {} in this folder. `geniuz image -f <folder>` lists them.", id.to_uppercase()));
             };
             let short = info.image_uuid[..8].to_string();
+            // Already withdrawn: say so now, before asking anyone to type anything.
+            if let Some(at) = &info.withdrawn_at {
+                return Err(format!(
+                    "Image {short} was withdrawn on {}. Its bytes are gone and it stays that way: keep a new image in a reply instead.",
+                    shorten_ts(at)
+                ));
+            }
+            // A person at a terminal, or nothing. No flag stands in for them: the ID
+            // is listed by `geniuz image`, so a flag would let any script do this.
+            {
+                use std::io::IsTerminal;
+                if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+                    return Err("This needs a person at a terminal: it asks you to type the image's ID. Nothing was changed.".to_string());
+                }
+            }
             // Read and prepare the new image first, so a file that can't be read changes nothing.
             let with = match file {
-                Some(f) => Some(geniuz::pictures::prepare(&read_image(f)?).map_err(|e| if f == "-" { e } else { format!("{}: {}", f, e) })?),
+                Some(f) if f == "-" => return Err("Give the new image as a file: the terminal is needed for your answer.".to_string()),
+                Some(f) => Some(geniuz::pictures::prepare(&read_image(f)?).map_err(|e| format!("{}: {}", f, e))?),
                 None => None,
             };
             let shown_in = db.memories_showing(&info.image_uuid)?;
             let doing = if with.is_some() { "replace" } else { "withdraw" };
-            let go = match confirm {
-                Some(c) => c.trim().eq_ignore_ascii_case(&short),
-                None => {
-                    use std::io::{IsTerminal, Write};
-                    if !std::io::stdin().is_terminal() || file.is_some_and(|f| f == "-") {
-                        return Err(format!("Nobody is here to ask, so say it in the command: add --confirm {short}"));
-                    }
-                    eprintln!(
-                        "This will {doing} image {short} ({} x {}), shown in {} {}: {}",
-                        info.width, info.height, shown_in.len(),
-                        if shown_in.len() == 1 { "memory" } else { "memories" }, shown_in.join(" ")
-                    );
-                    eprintln!("  Every one of them changes. An agent that looked at it before may still hold the old image.");
-                    eprintln!("  It can't be undone, and it doesn't reach backups, exports or agents' transcripts.");
-                    eprint!("Type the image's ID to go ahead: ");
-                    let _ = std::io::stderr().flush();
-                    let mut line = String::new();
-                    std::io::stdin().read_line(&mut line).map_err(|e| format!("Couldn't read your answer: {}", e))?;
-                    line.trim().eq_ignore_ascii_case(&short)
-                }
+            let go = {
+                use std::io::Write;
+                eprintln!(
+                    "This will {doing} image {short} ({} x {}), shown in {} {}: {}",
+                    info.width, info.height, shown_in.len(),
+                    if shown_in.len() == 1 { "memory" } else { "memories" }, shown_in.join(" ")
+                );
+                eprintln!("  Every one of them changes. An agent that looked at it before may still hold the old image.");
+                eprintln!("  It can't be undone, and it doesn't reach backups, exports or agents' transcripts.");
+                eprint!("Type the image's ID to go ahead: ");
+                let _ = std::io::stderr().flush();
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line).map_err(|e| format!("Couldn't read your answer: {}", e))?;
+                line.trim().eq_ignore_ascii_case(&short)
             };
             if !go {
                 return Err(format!("That isn't {short}, so nothing was changed."));

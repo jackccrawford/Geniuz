@@ -169,10 +169,11 @@ BEGIN
     SELECT RAISE(ABORT, 'Images are immutable, delete is not permitted');
 END;
 
--- A link joins a memory and an image that are both in this folder, once.
+-- A link joins a memory and an image that are both in this folder, once. Not an
+-- image that was withdrawn: it has no bytes, so a new memory can't show it.
 CREATE TRIGGER IF NOT EXISTS memory_image_must_exist BEFORE INSERT ON memory_images
 WHEN NOT EXISTS (SELECT 1 FROM memories WHERE memory_uuid = NEW.memory_uuid)
-  OR NOT EXISTS (SELECT 1 FROM images WHERE image_uuid = NEW.image_uuid)
+  OR NOT EXISTS (SELECT 1 FROM images WHERE image_uuid = NEW.image_uuid AND withdrawn_at IS NULL)
   OR EXISTS (SELECT 1 FROM memory_images WHERE memory_uuid = NEW.memory_uuid AND image_uuid = NEW.image_uuid)
 BEGIN
     SELECT RAISE(ABORT, 'That memory or image is not in this folder, or they are already joined');
