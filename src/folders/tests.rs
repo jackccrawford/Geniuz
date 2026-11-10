@@ -1058,3 +1058,34 @@ fn identity_is_invisible_to_memory_counts_and_old_versions() {
         .unwrap();
     assert_eq!(product, "geniuz");
 }
+
+#[test]
+fn a_face_is_chosen_changed_and_cleared_and_earlier_faces_are_kept() {
+    let (_tmp, reg) = setup();
+    let work = reg.create("Work", "", None).unwrap();
+    assert_eq!(work.face, "", "a new folder has no face");
+    assert_eq!(reg.set_face("Work", " 🍋 ").unwrap().face, "🍋");
+    assert_eq!(reg.set_face("Work", "🎃").unwrap().face, "🎃");
+    assert_eq!(reg.find("Work").unwrap().face, "🎃", "it is read back from the folder itself");
+    assert_eq!(reg.set_face("Work", "").unwrap().face, "", "an empty face clears it");
+    // Both earlier faces are still in the folder, dated, like earlier names.
+    let conn = open_read_only(&work.db_path).unwrap();
+    let kept: i64 = conn
+        .query_row("SELECT COUNT(*) FROM _meta WHERE key LIKE 'folder_face@%' AND value IN ('🍋', '🎃')", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(kept, 2);
+}
+
+#[test]
+fn a_face_is_one_emoji_and_never_letters() {
+    for ok in ["🍋", "🇫🇷", "👨‍👩‍👧", "1️⃣", "👋🏽", "⛷️", "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}", ""] {
+        assert!(validate_face(ok).is_ok(), "{ok:?} should do");
+    }
+    for bad in ["L", "LJ", "é", "LIMEN", "Привет", "二人", "7", "a🍋", "!!!!", "🍋🎃🚪", "🍋 🎃", "line\nbreak"] {
+        assert!(validate_face(bad).is_err(), "{bad:?} should be refused");
+    }
+    let (_tmp, reg) = setup();
+    reg.create("Work", "", None).unwrap();
+    assert!(reg.set_face("Work", "W").is_err());
+    assert_eq!(reg.find("Work").unwrap().face, "", "a refused face changes nothing");
+}

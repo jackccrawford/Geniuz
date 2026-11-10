@@ -3,7 +3,7 @@
 | Term | Meaning |
 |---|---|
 | Address | Two short IDs that open one memory from anywhere: `13625F6B:3487B9B0`, folder then memory. `keep` answers with one. |
-| Agents, Shared | The two groups in the sidebar. A folder in a directory named `agents` is an agent's own; the rest are shared. |
+| Agents, Shared | The two groups in Find's list of folders. A folder in a directory named `agents` is an agent's own; the rest are shared. |
 | Allow list | The directories you added, where Geniuz looks for folders besides its own data directory. |
 | Archive | Hiding a folder by moving it into `archive/`. Nothing is deleted, and it can be restored. |
 | Backfill | Embedding memories that do not have one yet. |
@@ -11,6 +11,7 @@
 | Content | The full detail of a memory. |
 | Embed helper | `geniuz-embed`, which keeps the model loaded between calls. |
 | Embedding | Numbers representing a memory's meaning, used to search by meaning. |
+| Face | What the sidebar shows beside a folder's name: one emoji its writer chose, or else a small mosaic of nine tiles laid out from the folder's ID, so every folder has its own and it never changes. |
 | Folder | A directory holding one `memory.db`, with its own permanent UUID, name and description. |
 | Gist | The short line you find a memory by. |
 | Harvest | What a recall's results point onward to, read from those memories. |

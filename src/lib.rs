@@ -6,6 +6,7 @@ pub mod settings;
 pub mod update;
 pub mod window;
 pub mod dig;
+pub mod gist;
 
 use std::path::PathBuf;
 

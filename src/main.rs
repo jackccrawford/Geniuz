@@ -389,6 +389,37 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(skill_text())
         }
 
+        Command::Gist { text } => {
+            let text = if text.is_empty() || text == ["-"] {
+                // A terminal would be waited on forever; say what to do instead.
+                if std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+                    return Err("No note to read.\n  Use one of:\n    geniuz gist \"the note\"\n    echo \"the note\" | geniuz gist".to_string());
+                }
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut s).map_err(|e| format!("Couldn't read the note: {}", e))?;
+                s
+            } else {
+                text.join(" ")
+            };
+            // The model loads only if the note has sentences to choose between.
+            let backend = std::cell::OnceCell::new();
+            let picking = std::cell::Cell::new(std::time::Duration::ZERO);
+            let gist = geniuz::gist::pick(&text, |t| {
+                if backend.get().is_none() {
+                    let _ = backend.set(geniuz::embedding::create_backend()?);
+                }
+                // Timed without the one-off load of the model, which a window keeps loaded.
+                let started = std::time::Instant::now();
+                let meaning = backend.get().expect("just set").embed(t);
+                picking.set(picking.get() + started.elapsed());
+                meaning
+            })?;
+            if backend.get().is_some() {
+                eprintln!("[geniuz] picked in {} ms", picking.get().as_millis());
+            }
+            Ok(gist)
+        }
+
         Command::Folder(cmd) => folder_cli::run(cmd),
 
         Command::Tui => {

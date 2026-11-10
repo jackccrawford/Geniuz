@@ -114,11 +114,9 @@ const NAV_ITEMS = [
 ];
 
 const ICONS = {
-  pin:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 3h6l-1 7 3 4v2H7v-2l3-4z"/></svg>',
   archive:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9"/><path d="M10 13h4"/></svg>',
   panel:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="15" rx="3"/><path d="M9 4.5v15"/></svg>',
   plus:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
-  book:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
   search:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></svg>',
   check:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
   database: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v6c0 1.66 4 3 9 3s9-1.34 9-3V5"/><path d="M3 11v6c0 1.66 4 3 9 3s9-1.34 9-3v-6"/></svg>',
@@ -169,8 +167,7 @@ function foldersSection(list, buttons) {
     filter.setAttribute('aria-label', 'Filter folders');
     filter.addEventListener('input', () => {
       const q = filter.value.trim().toLowerCase();
-      // While filtering, every group is open and empty folders count too; the
-      // Recent group steps aside so a match shows once.
+      // While filtering, every group is open and empty folders count too.
       rows.classList.toggle('is-filtering', !!q);
       for (const row of rows.querySelectorAll('.sidebar-folder')) {
         row.hidden = !!q && !row.dataset.tip?.toLowerCase().includes(q);
@@ -187,21 +184,19 @@ function foldersSection(list, buttons) {
     sec.appendChild(filter);
   }
 
-  // One flat list, as before, until there are agents' homes to set apart. Then:
-  // Recent (written in the last week), Agents, Folders. Empty folders wait
-  // behind a "Show N empty" line in their group.
-  const trees = new Set(all.map((f) => f.tree || 'folders'));
-  if (!trees.has('agents')) {
+  // One flat list while it's short. Past that: the folders the person pinned,
+  // then every other folder with the most recently written first. Nothing here
+  // sorts folders into kinds; a folder's face says whose it is. Empty folders
+  // wait behind a "Show N empty" line.
+  if (all.length <= FILTER_FROM) {
     for (const f of all) rows.appendChild(folderButton(f, buttons));
   } else {
-    const weekAgo = Date.now() - 7 * 86400_000;
-    const recent = all
-      .filter((f) => f.last_written && Date.parse(f.last_written.slice(0, 19).replace(' ', 'T') + 'Z') > weekAgo)
-      .sort((a, b) => (b.last_written || '').localeCompare(a.last_written || ''))
-      .slice(0, 12);
-    if (recent.length) rows.appendChild(folderGroup('recent', 'Recent', recent, buttons, { recent: true }));
-    rows.appendChild(folderGroup('agents', 'Agents', all.filter((f) => f.tree === 'agents'), buttons));
-    rows.appendChild(folderGroup('folders', 'Shared', all.filter((f) => f.tree !== 'agents'), buttons));
+    const pinned = all.filter((f) => f.pinned);
+    const rest = all
+      .filter((f) => !f.pinned)
+      .sort((a, b) => (b.last_written || '').localeCompare(a.last_written || ''));
+    if (pinned.length) rows.appendChild(folderGroup('pinned', 'Pinned', pinned, buttons, { pinned: true }));
+    rows.appendChild(folderGroup('folders', 'Recent first', rest, buttons));
     rows.classList.add('has-groups');
   }
   sec.appendChild(rows);
@@ -223,9 +218,11 @@ export function keepSidebarPlace(aside) {
     const saved = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || '{}');
     for (const b of boxes()) if (saved[keyOf(b)]) b.scrollTop = saved[keyOf(b)];
   } catch { /* a convenience */ }
-  // The one in its own section, not its Recent copy.
-  const current = aside.querySelector('.sidebar-folder.is-current:not(.is-mirror)');
-  if (current && current.offsetParent) current.scrollIntoView({ block: 'nearest' });
+  // The folder now showing is brought into view, except in the recent-first
+  // list: its top is the news, and scrolling down to an older folder would hide it.
+  const current = aside.querySelector('.sidebar-folder.is-current');
+  const inRecentFirst = !!current?.closest('.sidebar-group[data-key="folders"]');
+  if (current && current.offsetParent && !inRecentFirst) current.scrollIntoView({ block: 'nearest' });
   const save = () => {
     try {
       const out = {};
@@ -246,9 +243,9 @@ function setGroupOpen(key, open) {
 }
 
 /** A titled, collapsible run of folders. Empty ones wait behind "Show N empty". */
-function folderGroup(key, title, folders, buttons, { recent = false } = {}) {
+function folderGroup(key, title, folders, buttons, { pinned = false } = {}) {
   const group = document.createElement('div');
-  group.className = `sidebar-group${recent ? ' sidebar-group--recent' : ''}`;
+  group.className = `sidebar-group${pinned ? ' sidebar-group--pinned' : ''}`;
   group.dataset.key = key;
   group.classList.toggle('is-closed', !groupOpen(key));
   const head = document.createElement('button');
@@ -268,9 +265,9 @@ function folderGroup(key, title, folders, buttons, { recent = false } = {}) {
 
   const body = document.createElement('div');
   body.className = 'sidebar-group__body';
-  const empty = recent ? [] : folders.filter((f) => !f.memories && !f.current && !f.pinned);
+  const empty = folders.filter((f) => !f.memories && !f.current && !f.pinned);
   for (const f of folders) {
-    const btn = folderButton(f, buttons, { mirror: recent });
+    const btn = folderButton(f, buttons);
     if (empty.includes(f)) btn.classList.add('is-empty-folder');
     body.appendChild(btn);
   }
@@ -290,7 +287,110 @@ function folderGroup(key, title, folders, buttons, { recent = false } = {}) {
   return group;
 }
 
-function folderButton(f, buttons, { mirror = false } = {}) {
+/**
+ * The face a folder has before anyone chooses one: a small mosaic, nine tiles
+ * in the colours of the Geniuz mark, laid out from the folder's ID. Every
+ * folder gets its own, it never changes, and nobody had to pick it. Most
+ * tiles are teal and a few are light, as in the mark, so what the eye learns
+ * is where the light ones sit.
+ */
+const MOSAIC = ['#2F94A6', '#2F94A6', '#2F94A6', '#1A6E7C', '#1A6E7C', '#1A6E7C', '#F2EADA', '#F2EADA', '#E0A43B', '#CF5535'];
+function mosaic(uuid) {
+  // FNV-1a over the ID, then a fresh draw for each tile.
+  let h = 0x811c9dc5;
+  for (const ch of uuid) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193) >>> 0;
+  const draw = () => {
+    h ^= h << 13; h >>>= 0;
+    h ^= h >>> 17;
+    h ^= h << 5; h >>>= 0;
+    return h;
+  };
+  const tiles = Array.from({ length: 9 }, () => MOSAIC[draw() % MOSAIC.length]);
+  // A mosaic with no light tile reads as blank, so one is always lit.
+  if (!tiles.some((c) => c === '#F2EADA' || c === '#E0A43B' || c === '#CF5535')) tiles[draw() % 9] = '#F2EADA';
+  const cells = tiles
+    .map((fill, i) => `<rect x="${2 + (i % 3) * 5}" y="${2 + Math.floor(i / 3) * 5}" width="4" height="4" rx="1" fill="${fill}"/>`)
+    .join('');
+  return `<svg viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><rect width="18" height="18" rx="4" fill="#0E3540"/>${cells}</svg>`;
+}
+
+/**
+ * A folder's face: the emoji its writer chose, or else its mosaic.
+ */
+function folderFace(f) {
+  const face = document.createElement('span');
+  face.setAttribute('aria-hidden', 'true');
+  if (f.face) {
+    face.className = 'sidebar-item__icon sidebar-face is-emoji';
+    face.textContent = f.face;
+  } else {
+    face.className = 'sidebar-item__icon sidebar-face';
+    face.innerHTML = mosaic(f.uuid || f.name);
+  }
+  return face;
+}
+
+let openMenu = null;
+function closeFolderMenu() {
+  if (!openMenu) return;
+  openMenu.menu.remove();
+  openMenu.more.setAttribute('aria-expanded', 'false');
+  openMenu.more.closest('.sidebar-folder')?.classList.remove('has-menu');
+  openMenu = null;
+}
+document.addEventListener('click', (ev) => { if (openMenu && !openMenu.menu.contains(ev.target)) closeFolderMenu(); });
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape' || !openMenu) return;
+  const more = openMenu.more;
+  closeFolderMenu();
+  more.focus();
+});
+window.addEventListener('resize', closeFolderMenu);
+
+/** What can be done with a folder, from its row. */
+function openFolderMenu(f, more) {
+  closeFolderMenu();
+  const menu = document.createElement('div');
+  menu.className = 'folder-menu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', f.name);
+  const item = (label, detail, run) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.className = 'folder-menu__item';
+    const text = document.createElement('span');
+    text.textContent = label;
+    b.appendChild(text);
+    if (detail) {
+      const d = document.createElement('span');
+      d.className = 'folder-menu__detail';
+      d.textContent = detail;
+      b.appendChild(d);
+    }
+    b.addEventListener('click', async () => {
+      closeFolderMenu();
+      try { await run(); } catch (e) { console.error(`[geniuz] ${label} failed:`, e); }
+    });
+    menu.appendChild(b);
+  };
+  item(f.pinned ? 'Unpin' : 'Pin to the top', '', async () => {
+    await api.pinFolder(f.uuid, !f.pinned);
+    location.reload();
+  });
+  item('Edit…', '', () => openFolderDialog(f));
+  item('Copy ID', f.id, () => navigator.clipboard.writeText(f.id));
+  document.body.appendChild(menu);
+  const r = more.getBoundingClientRect();
+  menu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8))}px`;
+  menu.style.top = `${Math.max(8, Math.min(r.bottom + 4, window.innerHeight - menu.offsetHeight - 8))}px`;
+  more.setAttribute('aria-expanded', 'true');
+  more.closest('.sidebar-folder')?.classList.add('has-menu');
+  openMenu = { menu, more };
+  menu.querySelector('button')?.focus();
+}
+
+function folderButton(f, buttons) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = `sidebar-item sidebar-folder${f.current ? ' is-current' : ''}`;
@@ -301,34 +401,37 @@ function folderButton(f, buttons, { mirror = false } = {}) {
     const name = document.createElement('span');
     name.className = 'sidebar-item__label';
     name.textContent = f.name;
-    btn.innerHTML = `<span class="sidebar-item__icon">${ICONS.book}</span>`;
+    btn.appendChild(folderFace(f));
     btn.appendChild(name);
-    // The pin: shown on hover, and always once it's pinned. A span, because a
-    // button can't hold another button.
-    const pin = document.createElement('span');
-    pin.className = `sidebar-folder__pin${f.pinned ? ' is-on' : ''}`;
-    pin.setAttribute('role', 'button');
-    pin.setAttribute('aria-label', f.pinned ? `Unpin ${f.name}` : `Pin ${f.name} to the top`);
-    pin.title = f.pinned ? 'Unpin' : 'Pin to the top';
-    pin.innerHTML = ICONS.pin;
-    pin.addEventListener('click', async (ev) => {
+    // More: shown on hover. Pin, edit and copy the ID live behind it. A span,
+    // because a button can't hold another button.
+    const more = document.createElement('span');
+    more.className = 'sidebar-folder__more';
+    more.setAttribute('role', 'button');
+    more.setAttribute('aria-haspopup', 'menu');
+    more.setAttribute('aria-expanded', 'false');
+    more.setAttribute('aria-label', `More for ${f.name}`);
+    more.title = 'More';
+    more.textContent = '···';
+    more.tabIndex = 0;
+    const toggleMenu = (ev) => {
       ev.stopPropagation();
-      try {
-        await api.pinFolder(f.uuid, !f.pinned);
-        location.reload();
-      } catch (e) {
-        console.error('[geniuz] pinning failed:', e);
-      }
-    });
-    btn.appendChild(pin);
+      ev.preventDefault();
+      if (openMenu?.more === more) closeFolderMenu();
+      else openFolderMenu(f, more);
+    };
+    more.addEventListener('click', toggleMenu);
+    // A span doesn't answer Enter or Space on its own, and must not pass them
+    // to the row's button underneath.
+    more.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') toggleMenu(ev); });
+    more.addEventListener('keyup', (ev) => { if (ev.key === ' ') { ev.stopPropagation(); ev.preventDefault(); } });
+    btn.appendChild(more);
     const count = document.createElement('span');
     count.className = 'sidebar-item__count';
     count.textContent = f.memories;
     btn.appendChild(count);
     // So refreshFolderCounts can find this row when memories arrive.
     btn.dataset.folder = f.uuid;
-    // A Recent row repeats a folder listed in its own group below.
-    if (mirror) btn.classList.add('is-mirror');
     if (f.current) {
       btn.dataset.surface = 'recent';
       btn.addEventListener('click', () => navigate('recent'));

@@ -58,12 +58,15 @@ const KEY_UUID: &str = "folder_uuid";
 const KEY_NAME: &str = "folder_name";
 const KEY_DESCRIPTION: &str = "folder_description";
 const KEY_CREATED: &str = "folder_created";
+const KEY_FACE: &str = "folder_face";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Folder {
     pub uuid: String,
     pub name: String,
     pub description: String,
+    /// One emoji its writer chose to show beside its name. Empty when none was chosen.
+    pub face: String,
     pub created: String,
     pub db_path: PathBuf,
 }
@@ -535,6 +538,21 @@ impl Registry {
         self.find(&folder.uuid)
     }
 
+    /// Set the face shown beside a folder's name, or clear it with an empty one.
+    /// Earlier faces are kept, as earlier names and descriptions are.
+    pub fn set_face(&self, query: &str, face: &str) -> Result<Folder, String> {
+        let face = validate_face(face)?;
+        // Under the lock, so a move or an archive can't take the folder from
+        // under the write.
+        self.with_registry_lock(|| {
+            let folder = self.find(query)?;
+            if face != folder.face {
+                replace_meta(&folder.db_path, KEY_FACE, &face)?;
+            }
+            self.find(&folder.uuid)
+        })
+    }
+
     fn check_name_free(&self, name: &str, except_uuid: Option<&str>) -> Result<(), String> {
         let lower = name_key(name);
         let taken = self.scan().folders.iter().any(|f| {
@@ -595,6 +613,31 @@ fn name_key(name: &str) -> String {
 }
 
 /// A name is short, one line, and can't be mistaken for an address or a path.
+/// A face is one emoji. Letters are refused: a letter on a tile says nothing a
+/// name doesn't, and the name is the place for words.
+pub fn validate_face(face: &str) -> Result<String, String> {
+    const NOT_A_FACE: &str = "A face is one emoji, with no letters.";
+    let face = face.trim();
+    if face.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("A face is one emoji, with no spaces or line breaks.".into());
+    }
+    // A digit is part of an emoji only in a keycap (1️⃣); a letter never is.
+    let keycap = face.contains('\u{20E3}');
+    if face.chars().any(|c| c.is_alphabetic() || (c.is_numeric() && !keycap)) {
+        return Err(NOT_A_FACE.into());
+    }
+    // Two characters, or more only for what is visibly one thing built from
+    // several code points: an emoji joined, styled or toned (a family, a
+    // keycap, a skin tone, a flag made of tags).
+    let joined = face.chars().any(|c| {
+        matches!(c, '\u{200D}' | '\u{FE0F}' | '\u{20E3}' | '\u{1F3FB}'..='\u{1F3FF}' | '\u{E0020}'..='\u{E007F}')
+    });
+    if face.chars().count() > if joined { 12 } else { 2 } {
+        return Err(NOT_A_FACE.into());
+    }
+    Ok(face.to_string())
+}
+
 pub fn validate_name(name: &str) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() {

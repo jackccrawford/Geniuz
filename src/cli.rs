@@ -212,6 +212,14 @@ pub enum Command {
     /// Show usage guide for agents
     Skill,
 
+    /// Pick a gist from a note's own text: the sentence closest in meaning to the whole.
+    /// Hidden: a building block for the window, not yet a promise
+    #[command(hide = true)]
+    Gist {
+        /// The note. Leave it out, or give -, to read it from standard input
+        text: Vec<String>,
+    },
+
     /// Show stats for the folder in use
     Status,
 
@@ -303,6 +311,15 @@ pub enum FolderCommand {
         name: String,
         /// The new name
         new_name: String,
+    },
+
+    /// Choose the face shown beside a folder's name in the window: one emoji. Leave it out to clear it
+    #[command(after_help = "Example:\n  geniuz folder face Work 🧰\n\nA folder's own writer chooses its face. Without one, the window shows a small mosaic that is the folder's alone.")]
+    Face {
+        /// Name or 8-character ID
+        name: String,
+        /// One emoji
+        face: Option<String>,
     },
 
     /// Change what a folder says about itself. Earlier wording is kept
