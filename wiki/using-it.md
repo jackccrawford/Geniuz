@@ -136,6 +136,7 @@ In the dashboard. Change any of these under Settings, and the menu follows at on
 | Settings | ⌘, |
 | Show or hide the sidebar | ⌘B |
 | Status | ⇧⌘S |
+| Text: bigger, smaller, default size (the View menu; all text in the window) | ⌘=, ⌘−, ⇧⌘0 |
 | The first nine folders in the Folders menu, in the order it shows them (not changeable) | ⌘1 to ⌘9 |
 
 On Windows and Linux, use Ctrl in place of ⌘.
