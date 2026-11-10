@@ -1526,5 +1526,6 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .folder-menu__item:hover { background: #EADFC9; }
 .folder-menu__item:focus-visible { background: #EADFC9; outline: 2px solid #123E48; outline-offset: -2px; }
 .folder-menu__detail { font-size: 12px; color: #5C6B70; font-variant-numeric: tabular-nums; }
-.sidebar-face.is-emoji, .sidebar-item.is-active .sidebar-face.is-emoji { background: rgba(250, 244, 232, 0.94); font-size: 12.5px; }
-.is-collapsed .sidebar-face.is-emoji { font-size: 14px; }
+/* An emoji stands on its own, with no tile behind it, and fills the space a mosaic takes. */
+.sidebar-face.is-emoji, .sidebar-item.is-active .sidebar-face.is-emoji { background: none; overflow: visible; font-size: 16px; }
+.is-collapsed .sidebar-face.is-emoji { font-size: 18px; }
