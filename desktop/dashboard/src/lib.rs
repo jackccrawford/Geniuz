@@ -228,6 +228,38 @@ fn get_update() -> Option<UpdateStatus> {
     Some(UpdateStatus { checked_at, newer })
 }
 
+/// A page asked for from outside the window: the Mac menu bar app opens the
+/// dashboard with `geniuz://settings`. Kept until the page reads it, because on a
+/// cold start the link arrives before the page is listening.
+static PENDING_NAV: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+
+/// The page a `geniuz://` link names, as the id the page's navigation takes. Only
+/// these four: a link can't make the window do anything else.
+fn nav_for_link(url: &str) -> Option<&'static str> {
+    let rest = url.strip_prefix("geniuz://")?;
+    match rest.trim_end_matches('/').split(['?', '#']).next()? {
+        "settings" => Some("tray_settings"),
+        "status" => Some("tray_status"),
+        "find" => Some("tray_find"),
+        "memories" => Some("tray_recent"),
+        _ => None,
+    }
+}
+
+/// The page asked for before the window was ready, once.
+#[tauri::command]
+fn take_startup_nav() -> Option<&'static str> {
+    PENDING_NAV.lock().ok()?.take()
+}
+
+/// Ask now whether a newer Geniuz is out, whatever the schedule says, and report
+/// what the check found. Off the main thread: it waits on GitHub.
+#[tauri::command(async)]
+fn check_update_now() -> Result<Option<UpdateStatus>, String> {
+    geniuz::update::check()?;
+    Ok(get_update())
+}
+
 #[cfg(test)]
 mod update_tests {
     use super::version_newer;
@@ -1125,6 +1157,8 @@ fn build_menu(app: &tauri::AppHandle, shortcuts: bool) -> tauri::Result<Menu<tau
         "Help",
         true,
         &[
+            &MenuItem::with_id(app, "menu_shortcuts", "Keyboard Shortcuts", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "menu_about", "About Geniuz", true, None::<&str>)?,
             &MenuItem::with_id(app, "menu_website", "Visit geniuz.life", true, None::<&str>)?,
         ],
@@ -1182,6 +1216,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_link,
             open_update,
+            check_update_now,
+            take_startup_nav,
             get_image,
             get_app_version,
             get_update,
@@ -1219,6 +1255,28 @@ pub fn run() {
             let handle = app.handle();
             let menu = build_menu(handle, true)?;
             app.set_menu(menu)?;
+
+            // A link naming a page: go there, now if the page is up, else when it asks.
+            {
+                use tauri::{Emitter, Manager};
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let go = handle.clone();
+                let arrive = move |url: &str| {
+                    let Some(id) = nav_for_link(url) else { return };
+                    if let Ok(mut pending) = PENDING_NAV.lock() {
+                        *pending = Some(id);
+                    }
+                    if let Some(window) = go.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        let _ = window.emit("tray-nav", id);
+                    }
+                };
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    urls.iter().for_each(|u| arrive(u.as_str()));
+                }
+                app.deep_link().on_open_url(move |event| event.urls().iter().for_each(|u| arrive(u.as_str())));
+            }
 
             // The text size chosen last time.
             let size = saved_text_size();
@@ -1464,6 +1522,17 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_names_one_of_four_pages_and_nothing_else() {
+        assert_eq!(nav_for_link("geniuz://settings"), Some("tray_settings"));
+        assert_eq!(nav_for_link("geniuz://settings/"), Some("tray_settings"));
+        assert_eq!(nav_for_link("geniuz://status?x=1"), Some("tray_status"));
+        assert_eq!(nav_for_link("geniuz://memories"), Some("tray_recent"));
+        for other in ["geniuz://", "geniuz://delete", "geniuz://settings/../x", "https://settings", "settings"] {
+            assert_eq!(nav_for_link(other), None, "{other}");
+        }
+    }
 
     #[test]
     fn text_size_steps_up_and_down_and_stops_at_the_ends() {

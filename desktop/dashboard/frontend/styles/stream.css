@@ -243,12 +243,12 @@ html.os-linux .sidebar {
   display: block;
   max-width: 100%;
   height: auto;
-  border: 1px solid var(--line, rgba(127, 127, 127, 0.3));
+  border: 1px solid var(--s-line);
   border-radius: 6px;
 }
 .memory-modal__image--withdrawn {
   padding: 14px 16px;
-  border: 1px dashed var(--line, rgba(127, 127, 127, 0.45));
+  border: 1px dashed var(--s-line);
   border-radius: 6px;
 }
 .memory-modal__image--withdrawn figcaption {

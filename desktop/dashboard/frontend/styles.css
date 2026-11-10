@@ -1121,7 +1121,7 @@ html.os-linux .reply-results { background: rgba(255, 255, 255, 0.92); }
   width: auto;
   max-width: 220px;
   object-fit: cover;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--s-line, rgba(0, 0, 0, 0.18));
   border-radius: 6px;
 }
 .remember-image__remove {
@@ -1133,7 +1133,7 @@ html.os-linux .reply-results { background: rgba(255, 255, 255, 0.92); }
   width: 22px;
   height: 22px;
   border-radius: 50%;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--s-line, rgba(0, 0, 0, 0.18));
   background: var(--s-paper, #fbf9f3);
   color: var(--ink-1);
   cursor: pointer;
@@ -1147,7 +1147,7 @@ html.os-linux .reply-results { background: rgba(255, 255, 255, 0.92); }
   margin: 0;
   padding: 8px 10px;
   border-radius: 6px;
-  border: 1px solid var(--rule);
+  border: 1px solid var(--s-line, rgba(0, 0, 0, 0.18));
   background: var(--bg-elevated);
   color: var(--ink-1);
   font-size: var(--fs-meta);
@@ -1537,12 +1537,54 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 }
 .folder-welcome__title { font-size: 18px; font-weight: 600; color: var(--ink-1); }
 .folder-welcome__actions { display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; margin-top: 14px; }
-.shortcut-control { display: flex; align-items: center; gap: 8px; }
-.shortcut-keys { min-width: 96px; font-variant-numeric: tabular-nums; }
-.shortcut-keys.is-recording { outline: 2px solid #2F94A6; }
-.shortcut-reset { padding: 0; border: 0; background: none; font: inherit; font-size: 12px; cursor: pointer; color: var(--ink-3); text-decoration: underline; }
-.shortcut-note { padding: 8px 0 0; }
-.shortcut-status { min-height: 18px; font-size: 13px; color: var(--status-bad, #b3402a); padding-top: 4px; }
+/* Keyboard shortcuts panel: opens from Help and from Settings. */
+.shortcuts-dialog {
+  width: min(720px, calc(100vw - 48px));
+  max-height: calc(100vh - 72px);
+  padding: 0;
+  border: 1px solid var(--s-line, rgba(0, 0, 0, 0.18));
+  border-radius: 12px;
+  background: var(--s-paper, #FCFAF5);
+  color: var(--ink-1);
+  box-shadow: 0 24px 70px rgba(10, 30, 36, 0.32);
+}
+.shortcuts-dialog::backdrop { background: rgba(14, 40, 47, 0.38); }
+.shortcuts-dialog__panel { padding: 22px 26px 16px; overflow-y: auto; max-height: calc(100vh - 72px); }
+.shortcuts-dialog__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.shortcuts-dialog__head h2 { margin: 0; font-family: "Newsreader", Georgia, serif; font-size: 22px; font-weight: 600; }
+.shortcuts-dialog__close { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 6px; background: none; color: var(--ink-2); cursor: pointer; }
+.shortcuts-dialog__close:hover { background: var(--bg-elevated); }
+.shortcuts-dialog__hint { margin: 4px 0 14px; font-size: var(--fs-meta); color: var(--ink-2); }
+/* Two columns, read down then across, so twelve fit on one screen. */
+.shortcuts-dialog__list { columns: 2; column-gap: 36px; }
+.shortcut-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; break-inside: avoid; border-bottom: 1px solid var(--hairline-1); }
+.shortcut-row__label { font-size: var(--fs-body); }
+.shortcut-row__control { display: flex; align-items: center; gap: 8px; }
+/* A shortcut looks pressable at rest: it is a button, and it changes on click. */
+.shortcut-keys { display: inline-flex; align-items: center; gap: 4px; padding: 3px; border: 0; border-radius: 7px; background: none; font: inherit; color: inherit; cursor: pointer; }
+.shortcut-keys:hover .keycap { border-color: var(--ink-2); background: var(--s-paper, #fff); }
+.shortcut-keys.is-recording { padding: 4px 10px; outline: 2px solid #2F94A6; font-size: var(--fs-meta); }
+.keycap { display: inline-block; min-width: 24px; padding: 2px 7px; border: 1px solid var(--ink-4); border-bottom-width: 2px; border-radius: 5px; background: var(--s-paper-2, rgba(0, 0, 0, 0.04)); font: inherit; font-size: 13px; line-height: 1.4; text-align: center; font-variant-numeric: tabular-nums; }
+.keycap--none { color: var(--ink-2); border-style: dashed; }
+.shortcut-reset { padding: 0; border: 0; background: none; font: inherit; font-size: 12px; cursor: pointer; color: var(--ink-2); text-decoration: underline; }
+.shortcuts-dialog__note { margin: 14px 0 0; font-size: var(--fs-meta); color: var(--ink-2); }
+.shortcuts-dialog__status { min-height: 18px; margin: 4px 0 0; font-size: 13px; color: var(--status-bad, #b3402a); }
+.shortcut-keys:focus-visible, .shortcut-reset:focus-visible, .shortcuts-dialog__close:focus-visible { outline: 2px solid var(--accent, #2F94A6); outline-offset: 2px; }
+@media (max-width: 640px) { .shortcuts-dialog__list { columns: 1; } }
+
+/* A menu of choices shows that it opens: `.input` alone removes the arrow. */
+select.input {
+  padding-right: 28px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%23667' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 6.5 8 3.5l3 3M5 9.5l3 3 3-3'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px;
+}
+select.input:disabled { opacity: 0.5; }
+
+/* Settings > Updates: what "Check now" found sits beside its button. */
+.update-check { display: flex; align-items: center; gap: 12px; }
+.update-check__said { font-size: var(--fs-meta); color: var(--ink-2); }
 
 .sidebar-folder__pin {
   flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 4px;

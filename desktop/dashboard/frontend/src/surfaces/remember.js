@@ -80,9 +80,9 @@ export async function mount(container) {
       </select>
     </label>`
     : '';
-  // autocorrect is off on Gist and Content: what is typed is what is kept. With it
-  // on, the Mac rewrites the last word on the click meant for Keep and swallows
-  // that click, so Keep needed two (Jack, 10 Nov 2026). Spell checking stays.
+  // autocorrect is off on Gist and Content unless Settings turns it on: what is
+  // typed is what is kept. With it on, the Mac rewrites the last word on the click
+  // meant for Keep and swallows that click, so Keep needed two (Jack, 10 Nov 2026).
   form.innerHTML = `
     ${folderField}
     <div class="remember-field reply-field">
@@ -170,6 +170,11 @@ export async function mount(container) {
     submitBtn.disabled = !contentInput.value.trim() || !gistInput.value.trim();
   };
   contentInput.addEventListener('input', updateSubmitState);
+
+  // Autocorrect is off in the markup; a person can turn it on in Settings.
+  api.getSettings().then((s) => {
+    if (s?.autocorrect) [gistInput, contentInput].forEach((el) => el.setAttribute('autocorrect', 'on'));
+  }).catch(() => {});
 
   // ---- Images ------------------------------------------------------------
   // Each is shown before anything is kept, with a way to take it off: an image

@@ -67,6 +67,14 @@ export function resolveAddress(address) {
   return invoke('resolve_address', { address });
 }
 
+export function takeStartupNav() {
+  return invoke('take_startup_nav');
+}
+
+export function checkUpdateNow() {
+  return invoke('check_update_now');
+}
+
 export function getShortcuts() {
   return invoke('get_shortcuts');
 }

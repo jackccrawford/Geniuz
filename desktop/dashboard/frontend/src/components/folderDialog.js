@@ -56,6 +56,10 @@ export function openFolderDialog(folder = null) {
   </form>`;
 
   const form = d.querySelector('form');
+  // Autocorrect is off in the markup; a person can turn it on in Settings.
+  api.getSettings().then((s) => {
+    if (s?.autocorrect) form.querySelectorAll('[autocorrect]').forEach((el) => el.setAttribute('autocorrect', 'on'));
+  }).catch(() => {});
   const status = form.querySelector('.remember-status');
   const fail = (e) => { status.textContent = e?.message || String(e); };
   const action = (name) => form.querySelector(`[data-action="${name}"]`);

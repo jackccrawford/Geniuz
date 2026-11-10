@@ -12,6 +12,7 @@ import * as dataSurface from './surfaces/data.js';
 import * as placeholder from './surfaces/placeholder.js';
 import { subscribe, getState, setState, navigate } from './store.js';
 import { openMemory } from './components/memoryModal.js';
+import { openShortcuts } from './components/shortcutsDialog.js';
 
 // A file dropped anywhere must never replace the window: left alone, the web view
 // opens it like a browser would, with no way back. A surface that takes drops
@@ -156,6 +157,9 @@ async function wireMenuEvents() {
       case 'tray_settings':
         navigate('settings');
         break;
+      case 'menu_shortcuts':
+        openShortcuts();
+        break;
       case 'menu_export':
         navigate('data');
         break;
@@ -191,6 +195,8 @@ async function wireMenuEvents() {
 
   await listen('menu', (event) => handleNav(event.payload));
   await listen('tray-nav', (event) => handleNav(event.payload));
+  // A page asked for before this was listening (the Mac menu bar's Settings).
+  api.takeStartupNav().then((id) => { if (id) handleNav(id); }).catch(() => {});
 }
 
 // Memories arrive from agents and the command line while the window is open, so

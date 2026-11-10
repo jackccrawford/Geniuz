@@ -189,6 +189,10 @@ struct GeniuzMenu: View {
             }
             .buttonStyle(.plain)
             .help("Settings")
+            .contextMenu {
+                Button("Settings…") { service.openSettings() }
+                Button("About Geniuz") { service.openAbout() }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -382,24 +386,33 @@ struct GeniuzMenu: View {
     }
 }
 
-// MARK: - Settings window
+// MARK: - About window
 //
-// Opened via the gear icon in the GeniuzMenu header. Save-on-change UX
-// (Mac convention) — every Toggle/Picker/Stepper writes through to
-// settings.json on the spot, no Apply/Cancel buttons. The window is
-// reused across opens; closing just hides it.
+// Settings are in the dashboard, the one place for them on every platform; the
+// gear in the menu opens it there. This window is what remains here: what this
+// copy of Geniuz is, whether it is connected, and where its data is, with the
+// actions worth having when the dashboard itself won't open. Right-click the gear
+// to open it; it also comes up by itself if the dashboard can't be opened.
 
-struct GeniuzSettingsView: View {
+struct GeniuzAboutView: View {
     @ObservedObject var service: GeniuzService
 
     var body: some View {
         Form {
-            Section("General") {
-                Toggle("Launch at login", isOn: launchAtLoginBinding)
-                if let why = service.settingsSaveError {
-                    Text(why)
-                        .font(.caption2)
-                        .foregroundColor(.red)
+            Section("Geniuz") {
+                LabeledContent("Version") {
+                    Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")
+                        .font(.system(.caption, design: .monospaced))
+                }
+                HStack {
+                    Button("Check for a New Version") { service.checkForUpdate(userAsked: true) }
+                        .disabled(service.checkingForUpdate)
+                    if let update = service.availableUpdate {
+                        Button("Download \(update.version)") { service.openUpdate() }
+                    }
+                }
+                if let msg = service.updateCheckMessage {
+                    Text(msg).font(.caption2).foregroundColor(.secondary)
                 }
             }
 
@@ -435,17 +448,6 @@ struct GeniuzSettingsView: View {
                 }
             }
 
-            Section("Display") {
-                Stepper(
-                    "Recent memories shown: \(service.settings.recentMemoriesCount)",
-                    value: recentCountBinding,
-                    in: 0...20
-                )
-                Text("Set to 0 to hide the recent memories section in the menu.")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-            }
-
             Section("Storage") {
                 LabeledContent("Location") {
                     Text(service.dataDir)
@@ -458,69 +460,15 @@ struct GeniuzSettingsView: View {
                     .foregroundColor(.secondary)
             }
 
-            Section("Updates") {
-                Toggle("Check for updates automatically", isOn: autoupdateBinding)
-                if service.settings.autoupdateEnabled {
-                    Picker("How often", selection: frequencyBinding) {
-                        Text("Daily").tag("daily")
-                        Text("Weekly").tag("weekly")
-                        Text("Only when I ask").tag("manual")
-                    }
-                }
-                HStack {
-                    Button("Check Now") { service.checkForUpdate(userAsked: true) }
-                        .disabled(service.checkingForUpdate)
-                    if let update = service.availableUpdate {
-                        Button("Download \(update.version)") { service.openUpdate() }
-                    }
-                }
-                if let msg = service.updateCheckMessage {
-                    Text(msg).font(.caption2).foregroundColor(.secondary)
-                }
-                Text("A check asks GitHub for the latest Geniuz release. GitHub sees this Mac's internet address and the Geniuz version; none of your memories or folders are sent.")
+            Section {
+                Button("Open Settings in the Dashboard") { service.openSettings() }
+                Text("Launch at login, updates, and the rest are set there.")
                     .font(.caption2)
                     .foregroundColor(.secondary)
-            }
-
-            Section("About") {
-                LabeledContent("Version") {
-                    Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?")
-                        .font(.system(.caption, design: .monospaced))
-                }
             }
         }
         .formStyle(.grouped)
         .padding(0)
         .frame(minWidth: 380, minHeight: 320)
-    }
-
-    // MARK: - Save-on-change bindings
-
-    private var launchAtLoginBinding: Binding<Bool> {
-        Binding(
-            get: { service.settings.launchAtLogin },
-            set: { v in service.updateSettings { $0.launchAtLogin = v } }
-        )
-    }
-
-    private var autoupdateBinding: Binding<Bool> {
-        Binding(
-            get: { service.settings.autoupdateEnabled },
-            set: { v in service.updateSettings { $0.autoupdateEnabled = v } }
-        )
-    }
-
-    private var frequencyBinding: Binding<String> {
-        Binding(
-            get: { service.settings.updateCheckFrequency },
-            set: { v in service.updateSettings { $0.updateCheckFrequency = v } }
-        )
-    }
-
-    private var recentCountBinding: Binding<Int> {
-        Binding(
-            get: { service.settings.recentMemoriesCount },
-            set: { v in service.updateSettings { $0.recentMemoriesCount = v } }
-        )
     }
 }
