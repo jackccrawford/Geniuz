@@ -1485,7 +1485,10 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .sidebar-face, .sidebar-item.is-active .sidebar-face {
   width: 18px; height: 18px; border-radius: 5px; opacity: 1; color: #fff;
   display: grid; place-items: center; font-size: 10.5px; font-weight: 700; line-height: 1;
+  overflow: hidden; white-space: nowrap;
 }
+/* Two letters share the tile one letter had. */
+.sidebar-face.is-wide { font-size: 9px; letter-spacing: -0.3px; }
 .sidebar-folder .sidebar-face { margin-top: 0; }
 .is-collapsed .sidebar-face { width: 20px; height: 20px; font-size: 11.5px; }
 
@@ -1499,7 +1502,7 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
   opacity: 0; cursor: pointer; color: inherit; font-size: 13px; letter-spacing: 1px; line-height: 1;
 }
 .sidebar-folder:hover .sidebar-folder__more, .sidebar-folder.has-menu .sidebar-folder__more, .sidebar-folder__more:focus-visible { opacity: 0.75; }
-.sidebar-folder__more:focus-visible { opacity: 1; outline: 2px solid rgba(250, 244, 232, 0.7); outline-offset: 1px; }
+.sidebar-folder__more:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 1px; }
 .sidebar-folder__more:hover { opacity: 1; background: rgba(250, 244, 232, 0.14); }
 .sidebar-folder.has-menu { background: var(--bg-elevated); }
 .is-collapsed .sidebar-folder__more { display: none; }

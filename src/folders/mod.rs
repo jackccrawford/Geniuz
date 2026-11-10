@@ -541,12 +541,16 @@ impl Registry {
     /// Set the face shown beside a folder's name, or clear it with an empty one.
     /// Earlier faces are kept, as earlier names and descriptions are.
     pub fn set_face(&self, query: &str, face: &str) -> Result<Folder, String> {
-        let folder = self.find(query)?;
         let face = validate_face(face)?;
-        if face != folder.face {
-            replace_meta(&folder.db_path, KEY_FACE, &face)?;
-        }
-        self.find(&folder.uuid)
+        // Under the lock, so a move or an archive can't take the folder from
+        // under the write.
+        self.with_registry_lock(|| {
+            let folder = self.find(query)?;
+            if face != folder.face {
+                replace_meta(&folder.db_path, KEY_FACE, &face)?;
+            }
+            self.find(&folder.uuid)
+        })
     }
 
     fn check_name_free(&self, name: &str, except_uuid: Option<&str>) -> Result<(), String> {
@@ -617,10 +621,13 @@ pub fn validate_face(face: &str) -> Result<String, String> {
         return Err("A face is one emoji, with no spaces or line breaks.".into());
     }
     // An emoji can be several code points joined together (a flag, a family),
-    // so the limit is generous for those and strict for plain letters.
+    // so the limit is generous for those. Letters and digits, in any script,
+    // get two; with a mark or two beside them (an accent, a keycap) that is
+    // four code points at most.
     let count = face.chars().count();
-    let limit = if face.is_ascii() { 2 } else { 12 };
-    if count > limit {
+    let letters = face.chars().filter(|c| c.is_alphanumeric()).count();
+    let limit = if letters > 0 { 4 } else { 12 };
+    if letters > 2 || count > limit {
         return Err("A face is one emoji, or one or two characters.".into());
     }
     Ok(face.to_string())
