@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn list_shows_every_setting() {
         let out = Settings::default().list();
-        for key in ["launch_at_login", "autoupdate_enabled", "update_check_frequency", "recent_memories_count"] {
+        for key in ["launch_at_login", "autoupdate_enabled", "update_check_frequency", "recent_memories_count", "autocorrect"] {
             assert!(out.contains(key), "{key} missing from:\n{out}");
         }
     }
@@ -300,6 +300,13 @@ mod tests {
         assert_eq!(s.get("autoupdate_enabled").unwrap(), "false");
         s.set("update_check_frequency", "weekly").unwrap();
         assert_eq!(s.get("update_check_frequency").unwrap(), "weekly");
+        // Off unless asked for, and it goes both ways.
+        assert_eq!(s.get("autocorrect").unwrap(), "false");
+        s.set("autocorrect", "true").unwrap();
+        assert_eq!(s.get("autocorrect").unwrap(), "true");
+        s.set("autocorrect", "false").unwrap();
+        assert_eq!(s.get("autocorrect").unwrap(), "false");
+        assert!(s.set("autocorrect", "sometimes").is_err());
     }
 
     #[test]

@@ -28,7 +28,9 @@ async function pickDirectory(title) {
 }
 
 /** With no folder, makes a new one. */
-export function openFolderDialog(folder = null) {
+export async function openFolderDialog(folder = null) {
+  // Read before the form opens, so nobody types into it under the wrong setting.
+  const autocorrect = await api.getSettings().then((s) => !!s?.autocorrect).catch(() => false);
   const d = ensureDialog();
   d.setAttribute('aria-label', folder ? `Edit ${folder.name}` : 'New folder');
   d.innerHTML = `<form class="memory-modal__panel folder-form" method="dialog">
@@ -56,10 +58,10 @@ export function openFolderDialog(folder = null) {
   </form>`;
 
   const form = d.querySelector('form');
-  // Autocorrect is off in the markup; a person can turn it on in Settings.
-  api.getSettings().then((s) => {
-    if (s?.autocorrect) form.querySelectorAll('[autocorrect]').forEach((el) => el.setAttribute('autocorrect', 'on'));
-  }).catch(() => {});
+  // Autocorrect is off in the markup. A person can turn it on in Settings, and
+  // then it applies to the description only: a folder's name is how it is
+  // addressed, so it is never changed for them.
+  if (autocorrect) form.querySelector('textarea[name="description"]')?.setAttribute('autocorrect', 'on');
   const status = form.querySelector('.remember-status');
   const fail = (e) => { status.textContent = e?.message || String(e); };
   const action = (name) => form.querySelector(`[data-action="${name}"]`);

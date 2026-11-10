@@ -102,6 +102,9 @@ export async function openShortcuts() {
       </div>`).join('');
     list.querySelectorAll('[data-change]').forEach((b) => b.addEventListener('click', () => record(rows[Number(b.dataset.change)], b)));
     list.querySelectorAll('[data-reset]').forEach((b) => b.addEventListener('click', () => {
+      // Not while another shortcut is waiting for its keys: the next key press
+      // would land on that one and undo this.
+      if (stopRecording) return;
       const s = rows[Number(b.dataset.reset)];
       save(s, s.default_keys);
     }));
@@ -121,10 +124,21 @@ export async function openShortcuts() {
   // The menu would act on these keys first, so it goes without shortcuts meanwhile.
   const record = async (s, btn) => {
     if (stopRecording) return;
+    // Claimed before the wait below, so a second click or a Reset can't slip in.
+    let onKey = null;
+    const finish = () => { if (onKey) window.removeEventListener('keydown', onKey, true); stopRecording = null; };
+    stopRecording = finish;
     btn.textContent = 'Press keys…';
     btn.classList.add('is-recording');
+    list.querySelectorAll('[data-reset]').forEach((b) => { b.disabled = true; });
     await api.refreshMenu(false).catch(() => {});
-    const onKey = (e) => {
+    // Closed while the menu was being told: put its shortcuts back and stop here.
+    if (!d.open) {
+      finish();
+      api.refreshMenu(true).catch(() => {});
+      return;
+    }
+    onKey = (e) => {
       e.preventDefault();
       e.stopPropagation();
       if (e.key === 'Escape') { finish(); api.refreshMenu(true).catch(() => {}); draw(); return; }
@@ -132,8 +146,6 @@ export async function openShortcuts() {
       const keys = keysFromEvent(e);
       if (keys) { finish(); save(s, keys); }
     };
-    const finish = () => { window.removeEventListener('keydown', onKey, true); stopRecording = null; };
-    stopRecording = finish;
     window.addEventListener('keydown', onKey, true);
   };
 

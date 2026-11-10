@@ -233,11 +233,17 @@ fn get_update() -> Option<UpdateStatus> {
 /// cold start the link arrives before the page is listening.
 static PENDING_NAV: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
 
+/// Whether the page has started listening. Before that, a link is held for it;
+/// after, it is delivered and not kept, so a later reload of the page doesn't
+/// jump back to wherever the last link pointed.
+static PAGE_LISTENING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// The page a `geniuz://` link names, as the id the page's navigation takes. Only
 /// these four: a link can't make the window do anything else.
 fn nav_for_link(url: &str) -> Option<&'static str> {
     let rest = url.strip_prefix("geniuz://")?;
-    match rest.trim_end_matches('/').split(['?', '#']).next()? {
+    // Query and fragment off first, then the trailing slash: "settings/?x=1" is Settings.
+    match rest.split(['?', '#']).next()?.trim_end_matches('/') {
         "settings" => Some("tray_settings"),
         "status" => Some("tray_status"),
         "find" => Some("tray_find"),
@@ -246,9 +252,11 @@ fn nav_for_link(url: &str) -> Option<&'static str> {
     }
 }
 
-/// The page asked for before the window was ready, once.
+/// The page asked for before the window was ready, once. The page calls this
+/// when it has started listening, and from then on links reach it directly.
 #[tauri::command]
 fn take_startup_nav() -> Option<&'static str> {
+    PAGE_LISTENING.store(true, std::sync::atomic::Ordering::SeqCst);
     PENDING_NAV.lock().ok()?.take()
 }
 
@@ -1263,13 +1271,18 @@ pub fn run() {
                 let go = handle.clone();
                 let arrive = move |url: &str| {
                     let Some(id) = nav_for_link(url) else { return };
-                    if let Ok(mut pending) = PENDING_NAV.lock() {
-                        *pending = Some(id);
+                    let listening = PAGE_LISTENING.load(std::sync::atomic::Ordering::SeqCst);
+                    if !listening {
+                        if let Ok(mut pending) = PENDING_NAV.lock() {
+                            *pending = Some(id);
+                        }
                     }
                     if let Some(window) = go.get_webview_window("main") {
                         let _ = window.show();
                         let _ = window.set_focus();
-                        let _ = window.emit("tray-nav", id);
+                        if listening {
+                            let _ = window.emit("tray-nav", id);
+                        }
                     }
                 };
                 if let Ok(Some(urls)) = app.deep_link().get_current() {
@@ -1528,6 +1541,8 @@ mod tests {
         assert_eq!(nav_for_link("geniuz://settings"), Some("tray_settings"));
         assert_eq!(nav_for_link("geniuz://settings/"), Some("tray_settings"));
         assert_eq!(nav_for_link("geniuz://status?x=1"), Some("tray_status"));
+        assert_eq!(nav_for_link("geniuz://settings/?x=1"), Some("tray_settings"));
+        assert_eq!(nav_for_link("geniuz://find/#top"), Some("tray_find"));
         assert_eq!(nav_for_link("geniuz://memories"), Some("tray_recent"));
         for other in ["geniuz://", "geniuz://delete", "geniuz://settings/../x", "https://settings", "settings"] {
             assert_eq!(nav_for_link(other), None, "{other}");

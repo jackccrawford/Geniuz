@@ -90,10 +90,20 @@ xcrun notarytool submit "$APP_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
 xcrun stapler staple "$APP"
 
 echo "==> Step 10/10: Build DMG (custom layout) + sign + notarize + staple"
-# Another mounted "Geniuz" would push ours to "/Volumes/Geniuz 1", and the steps below would
-# write to the wrong disk.
-if [ -e /Volumes/Geniuz ]; then
-    echo "ERROR: /Volumes/Geniuz is already mounted. Eject it and run again." >&2
+# The volume is named with its version, "Geniuz 5.1.0": a disk image has no version
+# line in Finder's Get Info as a Windows installer has, so this is where a person
+# sees which one they opened (Jack, 10 Nov 2026). The file stays Geniuz.dmg, because
+# the "latest" download link depends on that name.
+VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")"
+if [ -z "$VERSION" ]; then
+    echo "ERROR: couldn't read the version from $APP." >&2
+    exit 1
+fi
+VOLNAME="Geniuz $VERSION"
+# Another mounted volume of the same name would push ours to "/Volumes/$VOLNAME 1", and the
+# steps below would write to the wrong disk.
+if [ -e "/Volumes/$VOLNAME" ]; then
+    echo "ERROR: /Volumes/$VOLNAME is already mounted. Eject it and run again." >&2
     exit 1
 fi
 rm -rf "$DMG_STAGING" "$DMG" "$DMG_RW"
@@ -105,21 +115,26 @@ cp "$DMG_BG" "$DMG_STAGING/.background/background.png"
 cp "$DMG_ICON" "$DMG_STAGING/.VolumeIcon.icns"
 
 # Build a read-write DMG so Finder can apply layout attributes, then convert to UDZO
-hdiutil create -volname "Geniuz" \
+hdiutil create -volname "$VOLNAME" \
     -srcfolder "$DMG_STAGING" \
     -ov -format UDRW \
     -fs HFS+ \
     "$DMG_RW"
 
+# The mount point is the third tab-separated field, and has a space in it now.
 MOUNT_POINT="$(hdiutil attach -readwrite -noverify -noautoopen "$DMG_RW" | \
-    grep -E '^/dev/' | tail -1 | awk '{print $3}')"
+    grep -E '^/dev/' | tail -1 | cut -f3-)"
+if [ ! -d "$MOUNT_POINT" ]; then
+    echo "ERROR: couldn't find where the disk image mounted (got '$MOUNT_POINT')." >&2
+    exit 1
+fi
 echo "    mounted at: $MOUNT_POINT"
 
 # Tell Finder to use the custom volume icon
 SetFile -a C "$MOUNT_POINT"
 
 # Give Finder time to register the new volume by name. Without this, the
-# AppleScript 'tell disk "Geniuz"' below fails with error -1728 because
+# AppleScript 'tell disk "$VOLNAME"' below fails with error -1728 because
 # Finder hasn't yet indexed the mount under that name.
 sleep 3
 
@@ -127,7 +142,7 @@ sleep 3
 osascript <<APPLESCRIPT
 delay 1
 tell application "Finder"
-    tell disk "Geniuz"
+    tell disk "$VOLNAME"
         open
         delay 1
         set current view of container window to icon view

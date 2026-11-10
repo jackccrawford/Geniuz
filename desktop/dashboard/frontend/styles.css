@@ -49,6 +49,9 @@
   --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
 
   --fs-micro: 11px;
+  /* Hints, notes and status lines. A dozen rules used this before anything
+     defined it, so they silently fell back to the size around them. */
+  --fs-meta:  12px;
   --fs-body:  13px;
   --fs-medium:14px;
   --fs-large: 17px;

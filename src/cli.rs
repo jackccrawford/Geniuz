@@ -452,7 +452,7 @@ pub enum SettingsCommand {
     },
 
     /// Set a single setting and save
-    #[command(after_help = "Examples:\n  geniuz settings set recent_memories_count 10\n\nValid keys:\n  launch_at_login          true | false\n  autoupdate_enabled       true | false\n  update_check_frequency   daily | weekly | manual\n  recent_memories_count    non-negative integer")]
+    #[command(after_help = "Examples:\n  geniuz settings set recent_memories_count 10\n\nValid keys:\n  launch_at_login          true | false\n  autoupdate_enabled       true | false\n  update_check_frequency   daily | weekly | manual\n  recent_memories_count    non-negative integer\n  autocorrect              true | false   (in the window: correct words as you type; off keeps a memory as typed)")]
     Set {
         /// Setting key
         key: String,

@@ -52,6 +52,7 @@ export function replyTo({ uuid, folder, gist }) {
 }
 
 export async function mount(container) {
+  const autocorrect = await api.getSettings().then((s) => !!s?.autocorrect).catch(() => false);
   const root = document.createElement('main');
   root.className = 'main';
 
@@ -171,10 +172,9 @@ export async function mount(container) {
   };
   contentInput.addEventListener('input', updateSubmitState);
 
-  // Autocorrect is off in the markup; a person can turn it on in Settings.
-  api.getSettings().then((s) => {
-    if (s?.autocorrect) [gistInput, contentInput].forEach((el) => el.setAttribute('autocorrect', 'on'));
-  }).catch(() => {});
+  // Autocorrect is off in the markup; a person can turn it on in Settings. The
+  // setting was read before the form was drawn, so nothing is typed under the wrong one.
+  if (autocorrect) [gistInput, contentInput].forEach((el) => el.setAttribute('autocorrect', 'on'));
 
   // ---- Images ------------------------------------------------------------
   // Each is shown before anything is kept, with a way to take it off: an image

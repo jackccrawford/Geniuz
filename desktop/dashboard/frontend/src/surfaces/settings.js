@@ -289,6 +289,8 @@ export async function mount(container) {
 
 // ---- inline helpers --------------------------------------------------------
 
+let rowIds = 0;
+
 function section(label, rows) {
   const sec = document.createElement('section');
   sec.className = 'settings-section';
@@ -309,6 +311,9 @@ function row({ title, help, control }) {
   const t = document.createElement('div');
   t.className = 'settings-row__title';
   t.textContent = title;
+  // The control is named by this title for anyone using a screen reader: a
+  // switch or a menu beside a line of text is otherwise an unnamed control.
+  t.id = `settings-row-${(rowIds += 1)}`;
   main.appendChild(t);
   if (help) {
     const h = document.createElement('div');
@@ -320,6 +325,13 @@ function row({ title, help, control }) {
 
   const ctl = document.createElement('div');
   ctl.className = 'settings-row__control';
+  // Switches, menus and number boxes say nothing of themselves; a button with
+  // words on it ("Check now") already has its name.
+  const unnamed = '[role="switch"], select, input';
+  const named = control.matches?.(unnamed) ? control : control.querySelector?.(unnamed);
+  if (named && !named.hasAttribute('aria-label') && !named.hasAttribute('aria-labelledby')) {
+    named.setAttribute('aria-labelledby', t.id);
+  }
   ctl.appendChild(control);
   r.appendChild(ctl);
 

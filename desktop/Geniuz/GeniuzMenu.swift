@@ -416,6 +416,23 @@ struct GeniuzAboutView: View {
                 }
             }
 
+            Section("Claude Desktop") {
+                if !service.claudeFound {
+                    Label("Claude Desktop isn't installed on this Mac", systemImage: "circle")
+                } else if service.claudeConfigUnreadable {
+                    Label("Claude Desktop's settings file can't be read", systemImage: "exclamationmark.circle.fill")
+                } else if service.mcpInstalled && service.restartRequired {
+                    Label("Restart Claude to finish connecting", systemImage: "exclamationmark.circle.fill")
+                } else if service.mcpInstalled {
+                    Label("Connected", systemImage: "checkmark.circle.fill")
+                } else {
+                    Label("Not connected", systemImage: "circle")
+                    Text("The dashboard's Status page connects it.")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+            }
+
             if service.claudeCodePresent {
                 Section("Claude Code") {
                     if service.claudeCodeConnected {
