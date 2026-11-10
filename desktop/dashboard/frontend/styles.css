@@ -1250,10 +1250,10 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 /* The list's order, said in a word; a click moves to the next one. */
 .sidebar-folders__sort {
   padding: 1px 6px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer;
-  font: inherit; letter-spacing: 0.04em; opacity: 0.8;
+  font: inherit; letter-spacing: 0.04em;
 }
-.sidebar-folders__sort:hover { opacity: 1; background: rgba(250, 244, 232, 0.12); }
-.sidebar-folders__sort:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 1px; }
+.sidebar-folders__sort:hover { background: rgba(250, 244, 232, 0.12); }
+.sidebar-folders__sort:focus-visible { outline: 2px solid currentColor; outline-offset: 1px; }
 .is-collapsed .sidebar-folders__sort { display: none; }
 .sidebar-folders__add {
   display: grid; place-items: center; width: 18px; height: 18px; padding: 0;
@@ -1387,7 +1387,7 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
   margin: 0 var(--s-2) 6px; color: inherit; background: rgba(250, 244, 232, 0.08);
   border: 1px solid rgba(250, 244, 232, 0.16);
 }
-.sidebar-folders__filter::placeholder { color: rgba(250, 244, 232, 0.5); }
+.sidebar-folders__filter::placeholder { color: rgba(250, 244, 232, 0.72); }
 .is-collapsed .sidebar-folders__filter { display: none; }
 .find-folders__filter { width: 140px; color: var(--ink-1); background: transparent; border: 1px solid var(--hairline-2); }
 .sidebar-folder[hidden], .find-folder[hidden] { display: none; }
