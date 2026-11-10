@@ -308,7 +308,12 @@ function closeFolderMenu() {
   openMenu = null;
 }
 document.addEventListener('click', (ev) => { if (openMenu && !openMenu.menu.contains(ev.target)) closeFolderMenu(); });
-document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeFolderMenu(); });
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape' || !openMenu) return;
+  const more = openMenu.more;
+  closeFolderMenu();
+  more.focus();
+});
 window.addEventListener('resize', closeFolderMenu);
 
 /** What can be done with a folder, from its row. */
@@ -377,11 +382,18 @@ function folderButton(f, buttons) {
     more.setAttribute('aria-label', `More for ${f.name}`);
     more.title = 'More';
     more.textContent = '···';
-    more.addEventListener('click', (ev) => {
+    more.tabIndex = 0;
+    const toggleMenu = (ev) => {
       ev.stopPropagation();
+      ev.preventDefault();
       if (openMenu?.more === more) closeFolderMenu();
       else openFolderMenu(f, more);
-    });
+    };
+    more.addEventListener('click', toggleMenu);
+    // A span doesn't answer Enter or Space on its own, and must not pass them
+    // to the row's button underneath.
+    more.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') toggleMenu(ev); });
+    more.addEventListener('keyup', (ev) => { if (ev.key === ' ') { ev.stopPropagation(); ev.preventDefault(); } });
     btn.appendChild(more);
     const count = document.createElement('span');
     count.className = 'sidebar-item__count';

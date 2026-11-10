@@ -25,7 +25,10 @@ pub fn sentences(text: &str) -> Vec<&str> {
             push(&mut out, &text[start..i]);
             start = i + ch.len_utf8();
         }
-        prev_ends = matches!(ch, '.' | '!' | '?' | '。' | '！' | '？');
+        // A closing quote or bracket after the full stop belongs to the sentence
+        // it closes: "It moved." (Really.) The next one starts after it.
+        let closes = matches!(ch, '"' | '\'' | ')' | ']' | '”' | '’' | '»' | '」' | '』');
+        prev_ends = matches!(ch, '.' | '!' | '?' | '。' | '！' | '？') || (prev_ends && closes);
     }
     push(&mut out, &text[start..]);
     out
@@ -38,17 +41,20 @@ fn push<'a>(out: &mut Vec<&'a str>, piece: &'a str) {
     }
 }
 
-/// The sentence of `text` closest in meaning to the whole of it. A text of one
-/// sentence, or none worth the name, comes back whole. `embed` turns a text
-/// into its meaning; the first sentence wins a tie.
+/// The sentence of `text` closest in meaning to the whole of it. A text with
+/// one real sentence gives that sentence, and one with none comes back whole;
+/// neither needs `embed`, which turns a text into its meaning. The first
+/// sentence wins a tie.
 pub fn pick<E>(text: &str, embed: E) -> Result<String, String>
 where
     E: Fn(&str) -> Result<Vec<f32>, String>,
 {
     let whole = text.trim();
     let all = sentences(whole);
-    if all.len() < 2 {
-        return Ok(whole.to_string());
+    match all.as_slice() {
+        [] => return Ok(whole.to_string()),
+        [only] => return Ok(only.to_string()),
+        _ => {}
     }
     let target = embed(whole)?;
     let mut best = (f32::MIN, all[0]);
@@ -77,6 +83,11 @@ mod tests {
         assert_eq!(got, vec!["The library moved last night!", "Old links won't open?", "Cornice has the new ones"]);
         assert_eq!(sentences("Version 5.0.9 shipped today."), vec!["Version 5.0.9 shipped today."], "a dot inside a number ends nothing");
         assert!(sentences("  \n ").is_empty());
+        assert_eq!(
+            sentences("She said \"the library moved.\" (It really did!) Then we left for lunch."),
+            vec!["She said \"the library moved.\"", "(It really did!)", "Then we left for lunch."],
+            "a closing quote or bracket stays with its sentence"
+        );
     }
 
     #[test]
@@ -90,6 +101,9 @@ mod tests {
         assert_eq!(pick("  The library moved.  ", counts).unwrap(), "The library moved.");
         assert_eq!(pick("ok", counts).unwrap(), "ok");
         assert_eq!(pick("", counts).unwrap(), "");
+        assert_eq!(pick("Hi. The library moved.", counts).unwrap(), "The library moved.", "a greeting is not part of the gist");
+        // None of these needed the model.
+        assert_eq!(pick("Hi. The library moved.", |_| Err("asked".to_string())).unwrap(), "The library moved.");
     }
 
     #[test]

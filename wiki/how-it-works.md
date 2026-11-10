@@ -36,7 +36,7 @@ An AI agent that works with you across many sessions gets a folder of its own: i
 
 An agent's home is an ordinary folder. What makes it the agent's is where it lives and how the agent finds it:
 
-- **It is one folder among the others.** The dashboard's sidebar lists every folder the same way: the ones you pinned, then the rest with the most recently written first. Each has a face, its first letter on a tile whose colour comes from the folder's ID and never changes. Find groups a folder that sits in a directory named `agents` under **Agents** and the rest under **Shared**, and can search either group, or both.
+- **It is one folder among the others.** The dashboard's sidebar lists every folder the same way. With more than ten folders it shows the ones you pinned, then the rest with the most recently written first; with ten or fewer it is one list. Each has a face, its first letter on a tile whose colour comes from the folder's ID and never changes. Find groups a folder that sits in a directory named `agents` under **Agents** and the rest under **Shared**, and can search either group, or both.
 - **The agent names it.** Every keep names its folder, so an agent keeps at home with `-f <its folder>` (or the folder parameter in MCP). Its bootstrap carries its folder's ID. A `.geniuz-folder` file in the agent's working directory still decides what `recall` reads when no folder is named.
 - **It isn't the only folder the agent uses.** Work shared with people or with other agents goes in a shared folder: a project, a team's room, a knowledge base. The agent keeps there what others need, and keeps in its home what only it needs.
 

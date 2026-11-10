@@ -135,7 +135,7 @@ In the dashboard. Change any of these under Settings, and the menu follows at on
 | Settings | ⌘, |
 | Show or hide the sidebar | ⌘B |
 | Status | ⇧⌘S |
-| Your first nine folders, pinned first and then by name, as in the Folders menu (not changeable) | ⌘1 to ⌘9 |
+| The first nine folders in the Folders menu, in the order it shows them (not changeable) | ⌘1 to ⌘9 |
 
 On Windows and Linux, use Ctrl in place of ⌘.
 
