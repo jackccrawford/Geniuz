@@ -38,6 +38,45 @@ impl Cli {
     }
 }
 
+/// What sits under `geniuz image` besides looking: only `admin`, and it is hidden.
+/// Taking an image back is the owner's act and a rare one, so the everyday help
+/// doesn't offer it; `geniuz image admin --help` explains it in full.
+#[derive(Subcommand)]
+pub enum ImageCommand {
+    /// For the folder's owner: take an image back, or put another in its place
+    #[command(
+        hide = true,
+        arg_required_else_help = true,
+        after_help = "Kept means kept: a memory can't be changed, and neither can its image, by any agent or tool.\nThis is the one way through, for the person who owns the folder (or their administrator).\n\n  withdraw  Erases the image's bytes. Its place stays, marked withdrawn with the date,\n            so every memory that showed it says an image was withdrawn.\n  replace   Puts another image in its place, marked replaced with the date:\n            for example the same screenshot with a number blurred.\n\nBoth change every memory that shows the image, and an agent that looked at it\nbefore may still hold the old one in its context. Neither can be undone.\n\nWhat this can't reach: backups, exports, a copy of the folder moved earlier,\nand the transcript of any agent that already looked at the image.\n\nExamples:\n  geniuz image -f Work admin withdraw 1B2C3D4E\n  geniuz image -f Work admin replace 1B2C3D4E blurred.png\n\nYou are asked to type the image's ID to go ahead. In a script, give it with --confirm."
+    )]
+    Admin {
+        #[command(subcommand)]
+        action: ImageAdmin,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ImageAdmin {
+    /// Erase an image's bytes for good; its place stays, marked withdrawn
+    Withdraw {
+        /// The image's ID
+        id: String,
+        /// The image's ID again, to go ahead without being asked
+        #[arg(long, value_name = "ID")]
+        confirm: Option<String>,
+    },
+    /// Put another image in its place, for every memory that shows it
+    Replace {
+        /// The image's ID
+        id: String,
+        /// The new image: a file, or - to read one from a pipe
+        file: String,
+        /// The image's ID again, to go ahead without being asked
+        #[arg(long, value_name = "ID")]
+        confirm: Option<String>,
+    },
+}
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Keep a memory: what you learned, decided, or discovered
@@ -80,6 +119,9 @@ pub enum Command {
     Image {
         /// The image's ID (8 characters or more). Leave it out to list the folder's images
         id: Option<String>,
+
+        #[command(subcommand)]
+        admin: Option<ImageCommand>,
 
         /// Write the image to this file, or - for a pipe
         #[arg(short, long, value_name = "FILE")]

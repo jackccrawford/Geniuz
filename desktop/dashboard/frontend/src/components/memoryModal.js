@@ -76,10 +76,13 @@ export async function openMemory(uuid, { onClose, folder = null } = {}) {
       </div>
     </header>
     <div class="memory-modal__text">${text ? su.renderText(text) : ''}</div>
-    ${(m.images || []).length ? `<div class="memory-modal__images">${m.images.map((i) => `
+    ${(m.images || []).length ? `<div class="memory-modal__images">${m.images.map((i) => i.withdrawn_at ? `
+      <figure class="memory-modal__image memory-modal__image--withdrawn">
+        <figcaption>image ${su.esc(i.id)} · withdrawn ${su.esc(su.timeFull(i.withdrawn_at))} by this folder's owner</figcaption>
+      </figure>` : `
       <figure class="memory-modal__image">
         <img data-image="${su.esc(i.id)}" width="${Number(i.width) || 0}" height="${Number(i.height) || 0}" alt="Image ${su.esc(i.id)}, kept with this memory">
-        <figcaption>image ${su.esc(i.id)} · ${Number(i.width) || 0} × ${Number(i.height) || 0}</figcaption>
+        <figcaption>image ${su.esc(i.id)} · ${Number(i.width) || 0} × ${Number(i.height) || 0}${i.replaced_at ? ` · replaced ${su.esc(su.timeFull(i.replaced_at))}` : ''}</figcaption>
       </figure>`).join('')}</div>` : ''}
     <footer class="memory-modal__foot">
       <span>${su.esc(su.timeFull(m.created_at))}</span>

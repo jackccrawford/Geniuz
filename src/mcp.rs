@@ -671,13 +671,26 @@ fn recall_image(reg: &Registry, args: &Value) -> Option<Value> {
         Err(e) => return refuse(format!("Error: {}", e)),
     };
     let shown_in = db.memories_showing(&info.image_uuid).unwrap_or_default();
+    // Withdrawn: there is nothing to look at, and that is worth knowing, not an error.
+    if let Some(at) = &info.withdrawn_at {
+        return Some(json!({
+            "content": [{ "type": "text", "text": format!(
+                "Image {} was withdrawn on {} by the folder's owner. Its bytes are gone; the notes that showed it remain: {}",
+                &info.image_uuid[..8], crate::shorten_ts(at), shown_in.join(" ")
+            ) }],
+            "isError": false
+        }));
+    }
+    let replaced = info.replaced_at.as_deref()
+        .map(|at| format!(" · replaced {} by the folder's owner, so it may differ from what an earlier reader saw", crate::shorten_ts(at)))
+        .unwrap_or_default();
     use base64::Engine;
     Some(json!({
         "content": [
             { "type": "text", "text": format!(
-                "Image {} · {} x {} · {} KB · kept {} · shown in: {}",
+                "Image {} · {} x {} · {} KB · kept {}{} · shown in: {}",
                 &info.image_uuid[..8], info.width, info.height, info.bytes.div_ceil(1024),
-                crate::shorten_ts(&info.created_at), shown_in.join(" ")
+                crate::shorten_ts(&info.created_at), replaced, shown_in.join(" ")
             ) },
             { "type": "image", "data": base64::engine::general_purpose::STANDARD.encode(&data), "mimeType": info.media_type }
         ],

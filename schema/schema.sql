@@ -101,14 +101,25 @@ CREATE TABLE IF NOT EXISTS embedding_meta (
 -- purpose: SQLite reads a row left to right, so listing sizes and dimensions never
 -- touches the bytes. `sha256` is of the stored bytes; the same bytes kept twice
 -- are stored once.
+--
+-- The folder's owner can take an image back (`geniuz image admin`): withdrawn, its
+-- bytes and hash are erased and the row stays, so every memory that showed it says
+-- so; replaced, the bytes change and the row says when. Both are a person's act,
+-- never an agent's tool.
 CREATE TABLE IF NOT EXISTS images (
-    image_uuid  TEXT PRIMARY KEY NOT NULL CHECK(length(image_uuid) = 36),
-    sha256      TEXT NOT NULL UNIQUE CHECK(length(sha256) = 64),
-    media_type  TEXT NOT NULL,
-    width       INTEGER NOT NULL CHECK(width > 0),
-    height      INTEGER NOT NULL CHECK(height > 0),
-    created_at  TEXT NOT NULL DEFAULT(strftime('%Y-%m-%d %H:%M:%S', 'now')),
-    data        BLOB NOT NULL CHECK(length(data) >= 1)
+    image_uuid   TEXT PRIMARY KEY NOT NULL CHECK(length(image_uuid) = 36),
+    sha256       TEXT UNIQUE CHECK(sha256 IS NULL OR length(sha256) = 64),
+    media_type   TEXT NOT NULL,
+    width        INTEGER NOT NULL CHECK(width > 0),
+    height       INTEGER NOT NULL CHECK(height > 0),
+    created_at   TEXT NOT NULL DEFAULT(strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    withdrawn_at TEXT,
+    replaced_at  TEXT,
+    data         BLOB,
+    -- Bytes and hash together, and absent only once withdrawn.
+    CHECK((data IS NULL) = (sha256 IS NULL)),
+    CHECK((data IS NULL) = (withdrawn_at IS NOT NULL)),
+    CHECK(data IS NULL OR length(data) >= 1)
 );
 
 -- Which memories show which images, and in what order. One image can serve many
@@ -124,8 +135,14 @@ CREATE TABLE IF NOT EXISTS memory_images (
 CREATE INDEX IF NOT EXISTS idx_images_uuid_prefix ON images(substr(image_uuid, 1, 8));
 CREATE INDEX IF NOT EXISTS idx_memory_images_image ON memory_images(image_uuid);
 
--- Kept means kept, for images as for memories.
+-- Kept means kept, for images as for memories. The one way through is the
+-- owner's: `geniuz image admin` names a single image in `_meta` for the length of
+-- its own transaction, changes it, and removes the name. Which image it is and
+-- when it was kept never change.
 CREATE TRIGGER IF NOT EXISTS prevent_image_update BEFORE UPDATE ON images
+WHEN NEW.image_uuid IS NOT OLD.image_uuid
+  OR NEW.created_at IS NOT OLD.created_at
+  OR NOT EXISTS (SELECT 1 FROM _meta WHERE key = 'image_change_allowed' AND value = OLD.image_uuid)
 BEGIN
     SELECT RAISE(ABORT, 'Images are immutable, update is not permitted');
 END;
@@ -165,14 +182,15 @@ END;
 -- spends to look at it: one per 28 x 28 pixel patch.
 CREATE VIEW IF NOT EXISTS image_info AS
 SELECT i.image_uuid, i.media_type, i.width, i.height,
-    length(i.data) AS bytes,
+    COALESCE(length(i.data), 0) AS bytes,
     ((i.width + 27) / 28) * ((i.height + 27) / 28) AS tokens,
     i.created_at,
-    (SELECT count(*) FROM memory_images mi WHERE mi.image_uuid = i.image_uuid) AS used_by
+    (SELECT count(*) FROM memory_images mi WHERE mi.image_uuid = i.image_uuid) AS used_by,
+    i.withdrawn_at, i.replaced_at
 FROM images i;
 
 -- One row per memory-and-image pair, with no bytes. Order by position to show them.
 CREATE VIEW IF NOT EXISTS memory_image AS
 SELECT mi.memory_uuid, mi.position, i.image_uuid, i.media_type, i.width, i.height,
-    length(i.data) AS bytes
+    COALESCE(length(i.data), 0) AS bytes, i.withdrawn_at, i.replaced_at
 FROM memory_images mi JOIN images i ON i.image_uuid = mi.image_uuid;

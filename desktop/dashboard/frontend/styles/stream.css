@@ -246,6 +246,15 @@ html.os-linux .sidebar {
   border: 1px solid var(--line, rgba(127, 127, 127, 0.3));
   border-radius: 6px;
 }
+.memory-modal__image--withdrawn {
+  padding: 14px 16px;
+  border: 1px dashed var(--line, rgba(127, 127, 127, 0.45));
+  border-radius: 6px;
+}
+.memory-modal__image--withdrawn figcaption {
+  margin-top: 0;
+  opacity: 0.85;
+}
 .memory-modal__image figcaption {
   margin-top: 4px;
   font-size: 12px;

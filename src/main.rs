@@ -699,7 +699,66 @@ fn run(cli: Cli) -> Result<String, String> {
             }
         }
 
-        Command::Image { id, out, base64, json } => {
+        Command::Image { admin: Some(cli::ImageCommand::Admin { action }), .. } => {
+            // Named with -f only, as keeping is: this changes a folder for good.
+            let db = get_db_to_keep().map_err(|_| "Name the folder with -f <folder>: `geniuz image -f <folder> admin ...`.".to_string())?;
+            let (id, file, confirm) = match &action {
+                cli::ImageAdmin::Withdraw { id, confirm } => (id, None, confirm),
+                cli::ImageAdmin::Replace { id, file, confirm } => (id, Some(file), confirm),
+            };
+            let Some((info, _)) = db.image(id)? else {
+                return Err(format!("No image {} in this folder. `geniuz image -f <folder>` lists them.", id.to_uppercase()));
+            };
+            let short = info.image_uuid[..8].to_string();
+            // Read and prepare the new image first, so a file that can't be read changes nothing.
+            let with = match file {
+                Some(f) => Some(geniuz::pictures::prepare(&read_image(f)?).map_err(|e| if f == "-" { e } else { format!("{}: {}", f, e) })?),
+                None => None,
+            };
+            let shown_in = db.memories_showing(&info.image_uuid)?;
+            let doing = if with.is_some() { "replace" } else { "withdraw" };
+            let go = match confirm {
+                Some(c) => c.trim().eq_ignore_ascii_case(&short),
+                None => {
+                    use std::io::{IsTerminal, Write};
+                    if !std::io::stdin().is_terminal() || file.is_some_and(|f| f == "-") {
+                        return Err(format!("Nobody is here to ask, so say it in the command: add --confirm {short}"));
+                    }
+                    eprintln!(
+                        "This will {doing} image {short} ({} x {}), shown in {} {}: {}",
+                        info.width, info.height, shown_in.len(),
+                        if shown_in.len() == 1 { "memory" } else { "memories" }, shown_in.join(" ")
+                    );
+                    eprintln!("  Every one of them changes. An agent that looked at it before may still hold the old image.");
+                    eprintln!("  It can't be undone, and it doesn't reach backups, exports or agents' transcripts.");
+                    eprint!("Type the image's ID to go ahead: ");
+                    let _ = std::io::stderr().flush();
+                    let mut line = String::new();
+                    std::io::stdin().read_line(&mut line).map_err(|e| format!("Couldn't read your answer: {}", e))?;
+                    line.trim().eq_ignore_ascii_case(&short)
+                }
+            };
+            if !go {
+                return Err(format!("That isn't {short}, so nothing was changed."));
+            }
+            let change = match &with {
+                Some(p) => db.replace_image(&info.image_uuid, p)?,
+                None => db.withdraw_image(&info.image_uuid)?,
+            };
+            let log = if change.erased_from_log {
+                ""
+            } else {
+                "\n  Another program had the folder open, so a copy of the old bytes may remain in its log until Geniuz is next closed and opened."
+            };
+            let n = change.memories.len();
+            let memories = if n == 1 { "memory" } else { "memories" };
+            Ok(match with {
+                Some(_) => format!("Replaced image {short}: {} x {}, in {n} {memories}.{log}", change.image.width, change.image.height),
+                None => format!("Withdrew image {short}: its bytes are erased from this folder. {n} {memories} now say an image was withdrawn.{log}"),
+            })
+        }
+
+        Command::Image { id, out, base64, json, .. } => {
             let db = get_db()?;
             let kb = |b: u64| if b < 1024 { format!("{} bytes", b) } else { format!("{} KB", (b + 512) / 1024) };
             let Some(id) = id else {
@@ -712,10 +771,15 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
                 let mut lines = Vec::new();
                 for i in &all {
+                    let state = match (&i.withdrawn_at, &i.replaced_at) {
+                        (Some(at), _) => format!("  withdrawn {}", shorten_ts(at)),
+                        (None, Some(at)) => format!("  replaced {}", shorten_ts(at)),
+                        _ => String::new(),
+                    };
                     lines.push(format!(
-                        "{}  {} x {}  {}  {}  in {} {}",
+                        "{}  {} x {}  {}  {}  in {} {}{}",
                         &i.image_uuid[..8], i.width, i.height, kb(i.bytes), shorten_ts(&i.created_at),
-                        i.used_by, if i.used_by == 1 { "memory" } else { "memories" }
+                        i.used_by, if i.used_by == 1 { "memory" } else { "memories" }, state
                     ));
                 }
                 return Ok(lines.join("\n"));
@@ -724,6 +788,19 @@ fn run(cli: Cli) -> Result<String, String> {
                 return Err(format!("No image {} in this folder. `geniuz image -f <folder>` lists them.", id.to_uppercase()));
             };
             let shown_in = db.memories_showing(&info.image_uuid)?;
+            if let Some(at) = &info.withdrawn_at {
+                // There are no bytes to give. Say what happened, in JSON too.
+                if json {
+                    let mut v = serde_json::to_value(&info).unwrap();
+                    v["memories"] = serde_json::json!(shown_in);
+                    return Ok(serde_json::to_string_pretty(&v).unwrap());
+                }
+                let said = format!(
+                    "Image {} was withdrawn on {} by the folder's owner. Its bytes are gone.\n  Shown in: {}",
+                    &info.image_uuid[..8], shorten_ts(at), shown_in.join(" ")
+                );
+                return if base64 || out.is_some() { Err(said) } else { Ok(said) };
+            }
             if base64 {
                 use base64::Engine;
                 return Ok(serde_json::json!({
@@ -751,10 +828,13 @@ fn run(cli: Cli) -> Result<String, String> {
                 v["memories"] = serde_json::json!(shown_in);
                 return Ok(serde_json::to_string_pretty(&v).unwrap());
             }
+            let replaced = info.replaced_at.as_deref()
+                .map(|at| format!("\n  Replaced {} by the folder's owner: it may differ from what an earlier reader saw.", shorten_ts(at)))
+                .unwrap_or_default();
             Ok(format!(
-                "Image {}\n  {} x {}, {}, {}\n  A model spends about {} tokens to look at it.\n  Kept {}\n  Shown in: {}\n  To take it out: geniuz image {} -o <file>.webp",
+                "Image {}\n  {} x {}, {}, {}\n  A model spends about {} tokens to look at it.\n  Kept {}{}\n  Shown in: {}\n  To take it out: geniuz image {} -o <file>.webp",
                 &info.image_uuid[..8], info.width, info.height, kb(info.bytes), info.media_type, info.tokens,
-                shorten_ts(&info.created_at), shown_in.join(" "), &info.image_uuid[..8]
+                shorten_ts(&info.created_at), replaced, shown_in.join(" "), &info.image_uuid[..8]
             ))
         }
 

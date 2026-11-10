@@ -1313,14 +1313,29 @@ pub struct ImageInfo {
     pub created_at: String,
     /// How many memories show it.
     pub used_by: u32,
+    /// When the folder's owner took it back, if they did: its bytes are gone.
+    pub withdrawn_at: Option<String>,
+    /// When the folder's owner last put another image in its place, if they did.
+    pub replaced_at: Option<String>,
 }
 
-const IMAGE_INFO_COLUMNS: &str = "image_uuid, media_type, width, height, bytes, tokens, created_at, used_by";
+/// What `geniuz image admin` asks before it acts, and reports after.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ImageChange {
+    pub image: ImageInfo,
+    /// Short IDs of the memories that show it, oldest first.
+    pub memories: Vec<String>,
+    /// Whether the old bytes were folded out of the write-ahead log as well as the file.
+    pub erased_from_log: bool,
+}
+
+const IMAGE_INFO_COLUMNS: &str = "image_uuid, media_type, width, height, bytes, tokens, created_at, used_by, withdrawn_at, replaced_at";
 
 fn image_info_row(r: &rusqlite::Row) -> rusqlite::Result<ImageInfo> {
     Ok(ImageInfo {
         image_uuid: r.get(0)?, media_type: r.get(1)?, width: r.get(2)?, height: r.get(3)?,
         bytes: r.get(4)?, tokens: r.get(5)?, created_at: r.get(6)?, used_by: r.get(7)?,
+        withdrawn_at: r.get(8)?, replaced_at: r.get(9)?,
     })
 }
 
@@ -1424,10 +1439,86 @@ impl DatabaseManager {
         let info = conn
             .query_row(&format!("SELECT {IMAGE_INFO_COLUMNS} FROM image_info WHERE image_uuid = ?1"), [&full], image_info_row)
             .map_err(|e| format!("Failed to read image: {}", e))?;
-        let data: Vec<u8> = conn
+        // A withdrawn image has no bytes: the caller reads `withdrawn_at` and says so.
+        let data: Option<Vec<u8>> = conn
             .query_row("SELECT data FROM images WHERE image_uuid = ?1", [&full], |r| r.get(0))
             .map_err(|e| format!("Failed to read image: {}", e))?;
-        Ok(Some((info, data)))
+        Ok(Some((info, data.unwrap_or_default())))
+    }
+
+    /// Take an image back: erase its bytes and keep the row, so every memory that
+    /// showed it says an image was withdrawn. For the folder's owner only.
+    pub fn withdraw_image(&self, id: &str) -> Result<ImageChange, String> {
+        self.change_image(id, None)
+    }
+
+    /// Put another image in an image's place, for every memory that shows it.
+    /// For the folder's owner only.
+    pub fn replace_image(&self, id: &str, with: &crate::pictures::Picture) -> Result<ImageChange, String> {
+        self.change_image(id, Some(with))
+    }
+
+    fn change_image(&self, id: &str, with: Option<&crate::pictures::Picture>) -> Result<ImageChange, String> {
+        let full = self.resolve_image(id)?
+            .ok_or_else(|| format!("No image {} in this folder.", id.trim().to_uppercase()))?;
+        let conn = self.conn()?;
+        let was = conn
+            .query_row(&format!("SELECT {IMAGE_INFO_COLUMNS} FROM image_info WHERE image_uuid = ?1"), [&full], image_info_row)
+            .map_err(|e| format!("Failed to read image: {}", e))?;
+        if was.withdrawn_at.is_some() {
+            return Err(format!(
+                "Image {} was withdrawn on {}. Its bytes are gone and it stays that way: keep a new image in a reply instead.",
+                &full[..8], was.withdrawn_at.as_deref().unwrap_or("")
+            ));
+        }
+        if let Some(p) = with {
+            let other: Option<String> = conn
+                .query_row("SELECT image_uuid FROM images WHERE sha256 = ?1", [&p.sha256], |r| r.get(0))
+                .optional()
+                .map_err(|e| format!("Failed to look up image: {}", e))?;
+            match other {
+                Some(o) if o == full => return Err("That is the same image: nothing to replace.".to_string()),
+                Some(o) => return Err(format!(
+                    "That image is already in this folder as {}. An image is stored once; withdraw this one instead.",
+                    &o[..8]
+                )),
+                None => {}
+            }
+        }
+        // Freed pages are overwritten with zeros, not left for a later write to
+        // cover: this is what makes the old bytes unrecoverable from the file.
+        conn.execute_batch("PRAGMA secure_delete = ON;")
+            .map_err(|e| format!("Couldn't prepare to erase: {}", e))?;
+        let tx = conn.unchecked_transaction().map_err(|e| format!("Failed to begin transaction: {}", e))?;
+        // The trigger lets one named image through, for this transaction only.
+        tx.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('image_change_allowed', ?1)", [&full])
+            .map_err(|e| format!("Couldn't change the image: {}", e))?;
+        match with {
+            None => tx.execute(
+                &format!("UPDATE images SET data = NULL, sha256 = NULL, withdrawn_at = {NOW_UTC} WHERE image_uuid = ?1"),
+                [&full],
+            ),
+            Some(p) => tx.execute(
+                &format!("UPDATE images SET data = ?2, sha256 = ?3, width = ?4, height = ?5, media_type = ?6, replaced_at = {NOW_UTC} WHERE image_uuid = ?1"),
+                rusqlite::params![&full, &p.data, &p.sha256, p.width, p.height, crate::pictures::MEDIA_TYPE],
+            ),
+        }
+        .map_err(|e| format!("Couldn't change the image: {}", e))?;
+        tx.execute("DELETE FROM _meta WHERE key = 'image_change_allowed'", [])
+            .map_err(|e| format!("Couldn't change the image: {}", e))?;
+        tx.commit().map_err(|e| format!("Failed to commit: {}", e))?;
+        // The old bytes may still sit in the write-ahead log from when the image
+        // was kept. Folding the log into the file and emptying it removes them. A
+        // reader holding the log open can prevent that; say so rather than claim it.
+        let erased_from_log = conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get::<_, i64>(0))
+            .map(|busy| busy == 0)
+            .unwrap_or(false);
+        let image = conn
+            .query_row(&format!("SELECT {IMAGE_INFO_COLUMNS} FROM image_info WHERE image_uuid = ?1"), [&full], image_info_row)
+            .map_err(|e| format!("Failed to read image: {}", e))?;
+        let memories = self.memories_showing(&full)?;
+        Ok(ImageChange { image, memories, erased_from_log })
     }
 
     /// The short IDs of the memories that show an image, oldest first.
@@ -1622,6 +1713,72 @@ mod tests {
             assert!(conn.execute(sql, []).is_err(), "should be refused: {sql}");
         }
         assert_eq!(db.images_of(&kept.uuid).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_owner_can_withdraw_an_image_and_its_bytes_leave_the_file() {
+        let (db, dir) = fresh_db();
+        let p = picture(11);
+        let a = db.keep_with_images("first", "first", None, &[Attach::New(p.clone())], Some(&MockBackend)).unwrap();
+        let b = db.keep_with_images("second", "second", None, &[Attach::Existing(a.images[0].clone())], Some(&MockBackend)).unwrap();
+        // Any 24 bytes from the middle of the image, to look for afterwards.
+        let needle = p.data[p.data.len() / 2..p.data.len() / 2 + 24].to_vec();
+        let holds = |bytes: &[u8]| bytes.windows(needle.len()).any(|w| w == needle.as_slice());
+        let on_disk = || {
+            let mut all = std::fs::read(dir.path().join("memory.db")).unwrap();
+            all.extend(std::fs::read(dir.path().join("memory.db-wal")).unwrap_or_default());
+            all
+        };
+        assert!(holds(&on_disk()), "the image is in the file before it is withdrawn");
+
+        let change = db.withdraw_image(&a.images[0]).unwrap();
+        assert!(change.image.withdrawn_at.is_some());
+        assert_eq!(change.image.bytes, 0);
+        assert_eq!(change.memories, vec![a.uuid.clone(), b.uuid.clone()]);
+        assert!(change.erased_from_log);
+        assert!(!holds(&on_disk()), "no trace of the bytes in the file or its log");
+
+        // The row and its links stay, so both memories still point at it, as withdrawn.
+        let shown = db.images_of(&b.uuid).unwrap();
+        assert_eq!(shown.len(), 1);
+        assert!(shown[0].withdrawn_at.is_some());
+        let (info, data) = db.image(&a.images[0]).unwrap().unwrap();
+        assert!(data.is_empty() && info.withdrawn_at.is_some());
+        // It stays withdrawn, and can't be shown by a new memory as if it were there.
+        assert!(db.withdraw_image(&a.images[0]).unwrap_err().contains("was withdrawn"));
+        assert!(db.replace_image(&a.images[0], &picture(12)).unwrap_err().contains("was withdrawn"));
+        // The same bytes kept again are a new image: the hash went with the bytes.
+        let again = db.keep_with_images("again", "again", None, &[Attach::New(p)], Some(&MockBackend)).unwrap();
+        assert_ne!(again.images[0], a.images[0]);
+        // And the door is shut behind the change.
+        let conn = db.conn().unwrap();
+        assert!(conn.execute("UPDATE images SET width = 1", []).is_err());
+        assert_eq!(conn.query_row("SELECT count(*) FROM _meta WHERE key = 'image_change_allowed'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn the_owner_can_replace_an_image_for_every_memory_that_shows_it() {
+        let (db, _dir) = fresh_db();
+        let a = db.keep_with_images("first", "first", None, &[Attach::New(picture(21))], Some(&MockBackend)).unwrap();
+        let b = db.keep_with_images("second", "second", None, &[Attach::Existing(a.images[0].clone())], Some(&MockBackend)).unwrap();
+        let other = db.keep_with_images("other", "other", None, &[Attach::New(picture(22))], Some(&MockBackend)).unwrap();
+        let new = picture(23);
+        let change = db.replace_image(&a.images[0], &new).unwrap();
+        assert!(change.image.replaced_at.is_some() && change.image.withdrawn_at.is_none());
+        assert_eq!(change.memories.len(), 2);
+        // Same ID, new bytes, for both memories.
+        assert_eq!(db.image(&a.images[0]).unwrap().unwrap().1, new.data);
+        assert_eq!(db.images_of(&b.uuid).unwrap()[0].image_uuid[..8], a.images[0]);
+        // The same image, or one the folder already holds, is refused with the reason.
+        assert!(db.replace_image(&a.images[0], &new).unwrap_err().contains("same image"));
+        let err = db.replace_image(&a.images[0], &picture(22)).unwrap_err();
+        assert!(err.contains(&other.images[0]), "{err}");
+        assert!(db.replace_image("FFFFFFFF", &new).unwrap_err().contains("No image FFFFFFFF"));
+        // The permission names one image: another can't ride along.
+        let conn = db.conn().unwrap();
+        conn.execute("INSERT INTO _meta (key, value) VALUES ('image_change_allowed', ?1)", [db.resolve_image(&a.images[0]).unwrap().unwrap()]).unwrap();
+        assert!(conn.execute("UPDATE images SET width = 9 WHERE image_uuid = ?1", [db.resolve_image(&other.images[0]).unwrap().unwrap()]).is_err());
+        assert!(conn.execute("UPDATE images SET created_at = '2000-01-01 00:00:00'", []).is_err(), "when it was kept never changes");
     }
 
     #[test]
