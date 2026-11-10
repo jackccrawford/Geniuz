@@ -69,6 +69,7 @@ pub(super) fn identity_from(conn: &Connection, db: &Path) -> Option<Folder> {
     Some(Folder {
         name: get_meta(conn, KEY_NAME).unwrap_or_else(|| uuid.chars().take(SHORT_ID).collect()),
         description: get_meta(conn, KEY_DESCRIPTION).unwrap_or_default(),
+        face: get_meta(conn, KEY_FACE).unwrap_or_default(),
         created: get_meta(conn, KEY_CREATED).unwrap_or_default(),
         uuid,
         db_path: db.to_path_buf(),

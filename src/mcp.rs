@@ -199,6 +199,10 @@ fn base_tool_definitions() -> Value {
                         "description": {
                             "type": "string",
                             "description": "Optional, with create. What belongs in the folder, for whoever comes here next."
+                        },
+                        "face": {
+                            "type": "string",
+                            "description": "Optional, with name or create. One emoji shown beside the folder's name in the Geniuz window. A folder's own writer chooses it; an empty value clears it."
                         }
                     }
                 }
@@ -347,18 +351,31 @@ fn execute_folders(reg: &Registry, params: &Value) -> (String, bool) {
     const CLIPPED: usize = 300;
     if let Some(name) = params.get("create").and_then(|n| n.as_str()) {
         let description = params.get("description").and_then(|d| d.as_str()).unwrap_or("");
-        return match reg.create(name, description, None) {
+        let face = params.get("face").and_then(|f| f.as_str());
+        // Checked first, so a face that won't do doesn't leave a folder behind.
+        if let Some(Err(e)) = face.map(geniuz::folders::validate_face) {
+            return (format!("Error: {}", e), true);
+        }
+        return match reg.create(name, description, None).and_then(|f| match face {
+            Some(face) => reg.set_face(&f.uuid, face),
+            None => Ok(f),
+        }) {
             Ok(f) => (format!("Created {} ({}). To keep a memory there, pass folder: \"{}\".", f.name, f.short_id(), f.name), false),
             Err(e) => (format!("Error: {}", e), true),
         };
     }
     if let Some(q) = params.get("name").and_then(|n| n.as_str()) {
-        return match reg.find(q) {
+        let found = match params.get("face").and_then(|f| f.as_str()) {
+            Some(face) => reg.set_face(q, face),
+            None => reg.find(q),
+        };
+        return match found {
             Ok(f) => {
                 let (count, last) = f.stats().unwrap_or((0, None));
                 (
                     format!(
-                        "{} ({})\n{} memories, last written {}\n\n{}",
+                        "{}{} ({})\n{} memories, last written {}\n\n{}",
+                        if f.face.is_empty() { String::new() } else { format!("{} ", f.face) },
                         f.name,
                         f.short_id(),
                         count,
@@ -970,6 +987,29 @@ mod tests {
         assert_eq!(reg.find("Work").unwrap().description, "Notes for work");
         let (out, is_err) = call_tool(&reg, None, "folders", &json!({ "create": "Work" }));
         assert!(is_err, "a second Work is refused: {out}");
+    }
+
+    /// A folder's writer chooses its face from a chat: at creation, or later by name.
+    #[test]
+    fn folders_can_choose_and_clear_a_face() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let home = tmp.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let reg = Registry::new(&home);
+        let (out, is_err) = call_tool(&reg, None, "folders", &json!({ "create": "Piste", "face": "⛷️" }));
+        assert!(!is_err, "{out}");
+        assert_eq!(reg.find("Piste").unwrap().face, "⛷️");
+        let (out, is_err) = call_tool(&reg, None, "folders", &json!({ "name": "Piste", "face": "🎿" }));
+        assert!(!is_err && out.starts_with("🎿 Piste ("), "{out}");
+        let (out, is_err) = call_tool(&reg, None, "folders", &json!({ "name": "Piste", "face": "a word" }));
+        assert!(is_err && out.contains("one emoji"), "{out}");
+        assert_eq!(reg.find("Piste").unwrap().face, "🎿", "a refused face changes nothing");
+        let (out, _) = call_tool(&reg, None, "folders", &json!({ "name": "Piste", "face": "" }));
+        assert!(out.starts_with("Piste ("), "{out}");
+        // A face that won't do stops the folder being made at all.
+        let (out, is_err) = call_tool(&reg, None, "folders", &json!({ "create": "Finn", "face": "not a face" }));
+        assert!(is_err, "{out}");
+        assert!(reg.find("Finn").is_err(), "no folder is left behind");
     }
 
     #[test]

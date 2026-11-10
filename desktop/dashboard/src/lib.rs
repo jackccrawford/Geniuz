@@ -557,6 +557,8 @@ struct FolderRow {
     uuid: String,
     name: String,
     description: String,
+    /// One emoji its writer chose, or empty.
+    face: String,
     memories: i64,
     last_written: Option<String>,
     location: String,
@@ -588,6 +590,7 @@ fn folder_row(f: &Folder, current: Option<&str>, pinned: bool) -> FolderRow {
         uuid: f.uuid.clone(),
         name: f.name.clone(),
         description: f.description.clone(),
+        face: f.face.clone(),
         memories,
         last_written,
         location: dir.to_string_lossy().into_owned(),

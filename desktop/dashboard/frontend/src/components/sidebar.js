@@ -288,10 +288,18 @@ function folderGroup(key, title, folders, buttons, { pinned = false } = {}) {
 }
 
 /**
- * A folder's face: its first letter on a tile. The colour is worked out from
- * the folder's ID, so it stays the same through every rename.
+ * A folder's face: the emoji its writer chose, or else its first letter on a
+ * tile. The tile's colour is worked out from the folder's ID, so it stays the
+ * same through every rename.
  */
 function folderFace(f) {
+  if (f.face) {
+    const face = document.createElement('span');
+    face.className = 'sidebar-item__icon sidebar-face is-emoji';
+    face.setAttribute('aria-hidden', 'true');
+    face.textContent = f.face;
+    return face;
+  }
   let h = 0;
   for (const ch of f.uuid || f.name) h = (h * 31 + ch.codePointAt(0)) % 360;
   const face = document.createElement('span');

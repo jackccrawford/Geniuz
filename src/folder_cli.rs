@@ -33,6 +33,14 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
             let f = reg.rename(&name, &new_name)?;
             Ok(format!("Renamed to {}. Its ID is still {}.", f.name, f.short_id()))
         }
+        FolderCommand::Face { name, face } => {
+            let f = reg.set_face(&name, face.as_deref().unwrap_or(""))?;
+            Ok(if f.face.is_empty() {
+                format!("{} has no face now. The window shows its first letter.", f.name)
+            } else {
+                format!("{} now shows {} beside its name.", f.name, f.face)
+            })
+        }
         FolderCommand::Describe { name, description } => {
             let f = reg.describe(&name, &description)?;
             Ok(format!("Updated {}. The earlier wording is kept.", f.name))
@@ -177,6 +185,7 @@ fn folder_json(f: &Folder, using: bool) -> serde_json::Value {
         "uuid": f.uuid,
         "name": f.name,
         "description": f.description,
+        "face": f.face,
         "created": f.created,
         "memories": count,
         "last_written": last,
@@ -216,6 +225,9 @@ fn show(reg: &Registry, name: Option<&str>, json: bool) -> Result<String, String
         format!("Last written: {}", last.map(|t| crate::shorten_ts(&t)).unwrap_or_else(|| "never".to_string())),
         format!("Location: {}", display_dir(&folder)),
     ];
+    if !folder.face.is_empty() {
+        lines.insert(1, format!("Face: {}", folder.face));
+    }
     if !folder.description.is_empty() {
         lines.push(String::new());
         lines.push(folder.description.clone());

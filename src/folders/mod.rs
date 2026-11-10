@@ -58,12 +58,15 @@ const KEY_UUID: &str = "folder_uuid";
 const KEY_NAME: &str = "folder_name";
 const KEY_DESCRIPTION: &str = "folder_description";
 const KEY_CREATED: &str = "folder_created";
+const KEY_FACE: &str = "folder_face";
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Folder {
     pub uuid: String,
     pub name: String,
     pub description: String,
+    /// One emoji its writer chose to show beside its name. Empty when none was chosen.
+    pub face: String,
     pub created: String,
     pub db_path: PathBuf,
 }
@@ -535,6 +538,17 @@ impl Registry {
         self.find(&folder.uuid)
     }
 
+    /// Set the face shown beside a folder's name, or clear it with an empty one.
+    /// Earlier faces are kept, as earlier names and descriptions are.
+    pub fn set_face(&self, query: &str, face: &str) -> Result<Folder, String> {
+        let folder = self.find(query)?;
+        let face = validate_face(face)?;
+        if face != folder.face {
+            replace_meta(&folder.db_path, KEY_FACE, &face)?;
+        }
+        self.find(&folder.uuid)
+    }
+
     fn check_name_free(&self, name: &str, except_uuid: Option<&str>) -> Result<(), String> {
         let lower = name_key(name);
         let taken = self.scan().folders.iter().any(|f| {
@@ -595,6 +609,23 @@ fn name_key(name: &str) -> String {
 }
 
 /// A name is short, one line, and can't be mistaken for an address or a path.
+/// A face is one emoji, or one or two characters. It sits on a small tile, so
+/// a word won't fit; the name is the place for words.
+pub fn validate_face(face: &str) -> Result<String, String> {
+    let face = face.trim();
+    if face.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("A face is one emoji, with no spaces or line breaks.".into());
+    }
+    // An emoji can be several code points joined together (a flag, a family),
+    // so the limit is generous for those and strict for plain letters.
+    let count = face.chars().count();
+    let limit = if face.is_ascii() { 2 } else { 12 };
+    if count > limit {
+        return Err("A face is one emoji, or one or two characters.".into());
+    }
+    Ok(face.to_string())
+}
+
 pub fn validate_name(name: &str) -> Result<String, String> {
     let name = name.trim();
     if name.is_empty() {
