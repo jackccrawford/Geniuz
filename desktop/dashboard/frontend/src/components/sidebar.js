@@ -302,8 +302,11 @@ function folderFace(f) {
   if (f.face) {
     const face = document.createElement('span');
     // A face of plain letters is drawn like the letter tile, not like an emoji.
-    const letters = /^[\p{L}\p{N}]+$/u.test(f.face);
-    face.className = `sidebar-item__icon sidebar-face ${letters ? 'is-wide' : 'is-emoji'}`;
+    // Accents written as separate marks count as part of their letter, and
+    // only two letters need the smaller size.
+    const letters = /^[\p{L}\p{N}\p{M}]+$/u.test(f.face);
+    const two = (f.face.match(/[\p{L}\p{N}]/gu) || []).length > 1;
+    face.className = `sidebar-item__icon sidebar-face${letters ? (two ? ' is-wide' : '') : ' is-emoji'}`;
     face.setAttribute('aria-hidden', 'true');
     face.textContent = f.face;
     if (letters) face.style.background = tileColour(f);

@@ -620,13 +620,17 @@ pub fn validate_face(face: &str) -> Result<String, String> {
     if face.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err("A face is one emoji, with no spaces or line breaks.".into());
     }
-    // An emoji can be several code points joined together (a flag, a family),
-    // so the limit is generous for those. Letters and digits, in any script,
-    // get two; with a mark or two beside them (an accent, a keycap) that is
-    // four code points at most.
+    // Two characters, whatever they are. More only for what is visibly one
+    // thing built from several code points: an emoji joined, styled or toned
+    // (a family, a keycap, a skin tone, a flag of tags), or a letter with its
+    // accents written separately.
     let count = face.chars().count();
     let letters = face.chars().filter(|c| c.is_alphanumeric()).count();
-    let limit = if letters > 0 { 4 } else { 12 };
+    let joined = face.chars().any(|c| {
+        matches!(c, '\u{200D}' | '\u{FE0F}' | '\u{20E3}' | '\u{1F3FB}'..='\u{1F3FF}' | '\u{E0020}'..='\u{E007F}')
+    });
+    let accents = face.chars().filter(|c| matches!(c, '\u{0300}'..='\u{036F}')).count();
+    let limit = if joined { 12 } else { 2 + accents.min(2) };
     if letters > 2 || count > limit {
         return Err("A face is one emoji, or one or two characters.".into());
     }

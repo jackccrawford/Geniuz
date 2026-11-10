@@ -1078,10 +1078,10 @@ fn a_face_is_chosen_changed_and_cleared_and_earlier_faces_are_kept() {
 
 #[test]
 fn a_face_is_one_emoji_or_two_characters_not_a_word() {
-    for ok in ["🍋", "🇫🇷", "👨‍👩‍👧", "L", "LJ", "é", "e\u{301}", "1️⃣", "二人", ""] {
+    for ok in ["🍋", "🇫🇷", "👨‍👩‍👧", "L", "LJ", "é", "e\u{301}", "1️⃣", "二人", "👋🏽", "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}", "🍋🎃", "?!", ""] {
         assert!(validate_face(ok).is_ok(), "{ok:?} should do");
     }
-    for bad in ["LIMEN", "Привет", "日本語", "ab🍋🍋🍋", "a b", "🍋 🎃", "line\nbreak", "🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋"] {
+    for bad in ["LIMEN", "Привет", "日本語", "ab🍋🍋🍋", "!!!!", "→→→", "🍋🎃🚪", "a b", "🍋 🎃", "line\nbreak", "🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋"] {
         assert!(validate_face(bad).is_err(), "{bad:?} should be refused");
     }
     let (_tmp, reg) = setup();
