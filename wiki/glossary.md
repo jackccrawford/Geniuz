@@ -11,7 +11,7 @@
 | Content | The full detail of a memory. |
 | Embed helper | `geniuz-embed`, which keeps the model loaded between calls. |
 | Embedding | Numbers representing a memory's meaning, used to search by meaning. |
-| Face | What the sidebar shows beside a folder's name: one emoji its writer chose, or else a plain tile coloured from the folder's ID. |
+| Face | What the sidebar shows beside a folder's name: one emoji its writer chose, or else a small mosaic of nine tiles laid out from the folder's ID, so every folder has its own and it never changes. |
 | Folder | A directory holding one `memory.db`, with its own permanent UUID, name and description. |
 | Gist | The short line you find a memory by. |
 | Harvest | What a recall's results point onward to, read from those memories. |

@@ -287,16 +287,35 @@ function folderGroup(key, title, folders, buttons, { pinned = false } = {}) {
   return group;
 }
 
-function tileColour(f) {
-  let h = 0;
-  for (const ch of f.uuid || f.name) h = (h * 31 + ch.codePointAt(0)) % 360;
-  return `hsl(${h} 42% 42%)`;
+/**
+ * The face a folder has before anyone chooses one: a small mosaic, nine tiles
+ * in the colours of the Geniuz mark, laid out from the folder's ID. Every
+ * folder gets its own, it never changes, and nobody had to pick it. Most
+ * tiles are teal and a few are light, as in the mark, so what the eye learns
+ * is where the light ones sit.
+ */
+const MOSAIC = ['#2F94A6', '#2F94A6', '#2F94A6', '#1A6E7C', '#1A6E7C', '#1A6E7C', '#F2EADA', '#F2EADA', '#E0A43B', '#CF5535'];
+function mosaic(uuid) {
+  // FNV-1a over the ID, then a fresh draw for each tile.
+  let h = 0x811c9dc5;
+  for (const ch of uuid) h = Math.imul(h ^ ch.codePointAt(0), 0x01000193) >>> 0;
+  const draw = () => {
+    h ^= h << 13; h >>>= 0;
+    h ^= h >>> 17;
+    h ^= h << 5; h >>>= 0;
+    return h;
+  };
+  const tiles = Array.from({ length: 9 }, () => MOSAIC[draw() % MOSAIC.length]);
+  // A mosaic with no light tile reads as blank, so one is always lit.
+  if (!tiles.some((c) => c === '#F2EADA' || c === '#E0A43B' || c === '#CF5535')) tiles[draw() % 9] = '#F2EADA';
+  const cells = tiles
+    .map((fill, i) => `<rect x="${2 + (i % 3) * 5}" y="${2 + Math.floor(i / 3) * 5}" width="4" height="4" rx="1" fill="${fill}"/>`)
+    .join('');
+  return `<svg viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg"><rect width="18" height="18" rx="4" fill="#0E3540"/>${cells}</svg>`;
 }
 
 /**
- * A folder's face: the emoji its writer chose, or else a plain tile. The
- * tile's colour is worked out from the folder's ID, so it stays the same
- * through every rename.
+ * A folder's face: the emoji its writer chose, or else its mosaic.
  */
 function folderFace(f) {
   const face = document.createElement('span');
@@ -306,7 +325,7 @@ function folderFace(f) {
     face.textContent = f.face;
   } else {
     face.className = 'sidebar-item__icon sidebar-face';
-    face.style.background = tileColour(f);
+    face.innerHTML = mosaic(f.uuid || f.name);
   }
   return face;
 }

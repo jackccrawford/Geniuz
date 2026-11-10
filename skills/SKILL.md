@@ -99,7 +99,7 @@ geniuz folder create "Website rebuild" -d "Decisions and progress on the new sit
 
 The description is for whoever opens the folder next. Often that's you. Through MCP, pass `create` to the `folders` tool.
 
-A folder can have a face: one emoji shown beside its name in the Geniuz window, chosen by whoever writes there. `geniuz folder face "Website rebuild" 🧱` sets it (through MCP, `face` on the `folders` tool). Without one, the window shows a plain tile in the folder's own colour.
+A folder can have a face: one emoji shown beside its name in the Geniuz window, chosen by whoever writes there. `geniuz folder face "Website rebuild" 🧱` sets it (through MCP, `face` on the `folders` tool). Without one, the window shows a small mosaic laid out from the folder's ID.
 
 ```bash
 geniuz folder list                     # all of them; * is the one in use

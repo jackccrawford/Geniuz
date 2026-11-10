@@ -1481,7 +1481,8 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .status-row__link:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; border-radius: 2px; }
 
 
-/* A folder's face: the emoji its writer chose, or a plain tile coloured from the folder's ID. */
+/* A folder's face: the emoji its writer chose, or a mosaic laid out from the folder's ID. */
+.sidebar-face svg { width: 100%; height: 100%; display: block; }
 .sidebar-face, .sidebar-item.is-active .sidebar-face {
   width: 18px; height: 18px; border-radius: 5px; opacity: 1;
   display: grid; place-items: center; line-height: 1; overflow: hidden; white-space: nowrap;

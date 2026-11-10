@@ -36,7 +36,7 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
         FolderCommand::Face { name, face } => {
             let f = reg.set_face(&name, face.as_deref().unwrap_or(""))?;
             Ok(if f.face.is_empty() {
-                format!("{} has no face now. The window shows a plain tile in its colour.", f.name)
+                format!("{} has no face now. The window shows its mosaic.", f.name)
             } else {
                 format!("{} now shows {} beside its name.", f.name, f.face)
             })
