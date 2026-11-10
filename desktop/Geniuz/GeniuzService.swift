@@ -97,6 +97,7 @@ private struct FolderListing: Decodable {
 
 let releasesAPI = URL(string: "https://api.github.com/repos/jackccrawford/Geniuz/releases/latest")!
 let releasesPage = URL(string: "https://github.com/jackccrawford/Geniuz/releases/latest")!
+let latestDmg = URL(string: "https://github.com/jackccrawford/Geniuz/releases/latest/download/Geniuz.dmg")!
 
 struct AvailableUpdate: Equatable {
     let version: String
@@ -443,9 +444,13 @@ class GeniuzService: ObservableObject {
                 UserDefaults.standard.set(Date(), forKey: self.lastUpdateCheckKey)
                 UserDefaults.standard.removeObject(forKey: self.updateRetryKey)
                 let latest = String(release.tagName.drop(while: { $0 == "v" || $0 == "V" }))
-                let dmg = release.assets.first(where: { $0.name == "Geniuz.dmg" })?.browserDownloadURL
+                // Download opens GitHub's own "latest" address, which always resolves to
+                // the newest release: this answer can be a day old, and a second release
+                // can come out in that day.
+                let hasDmg = release.assets.contains(where: { $0.name == "Geniuz.dmg" })
+                let link = hasDmg ? latestDmg : releasesPage
                 if isNewer(latest, than: self.appVersion) {
-                    self.availableUpdate = AvailableUpdate(version: latest, url: dmg ?? release.htmlURL)
+                    self.availableUpdate = AvailableUpdate(version: latest, url: link)
                     if userAsked { self.updateCheckMessage = "Geniuz \(latest) is available." }
                 } else {
                     self.availableUpdate = nil
@@ -476,7 +481,8 @@ class GeniuzService: ObservableObject {
               link.hasPrefix("https://github.com/jackccrawford/Geniuz/releases/"),
               let url = URL(string: link),
               isNewer(latest, than: appVersion) else { return nil }
-        return AvailableUpdate(version: latest, url: url)
+        // Whatever address was recorded, Download opens the latest one.
+        return AvailableUpdate(version: latest, url: url.pathExtension == "dmg" ? latestDmg : releasesPage)
     }
 
     func openUpdate() {
