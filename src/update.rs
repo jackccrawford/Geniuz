@@ -111,16 +111,16 @@ pub fn due(settings: &Settings, now: DateTime<Utc>) -> bool {
 }
 
 fn due_given(v: &Value, every: Duration, now: DateTime<Utc>) -> bool {
+    // An answer recorded by another version of Geniuz was worked out against
+    // that version: "nothing newer than 5.0.8" says nothing once this is 5.0.9.
+    // So the first run after an upgrade asks again, even inside a retry's wait.
+    if v.get("checked_by").and_then(Value::as_str) != Some(env!("CARGO_PKG_VERSION")) {
+        return true;
+    }
     if let Some(retry) = time(v, "retry_at") {
         if retry > now && retry - now <= Duration::hours(1) {
             return false;
         }
-    }
-    // An answer recorded by another version of Geniuz was worked out against
-    // that version: "nothing newer than 5.0.8" says nothing once this is 5.0.9.
-    // So the first run after an upgrade asks again.
-    if v.get("checked_by").and_then(Value::as_str) != Some(env!("CARGO_PKG_VERSION")) {
-        return true;
     }
     match time(v, "checked_at") {
         Some(last) => now - last >= every || last > now,
@@ -166,6 +166,25 @@ pub fn check() -> Result<Option<Available>, String> {
     });
     write(&out)?;
     Ok(found)
+}
+
+/// The link Download should open right now. The installer's own address is
+/// used only if it answers: for a few minutes after a release is published its
+/// installer may not be uploaded yet, and a release can lack one. Otherwise the
+/// latest release's page, which always exists.
+pub fn link_to_open(url: &str) -> String {
+    let page = format!("{}latest", RELEASES_PREFIX);
+    if url == page {
+        return page;
+    }
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(6)))
+        .build()
+        .new_agent();
+    match agent.head(url).call() {
+        Ok(r) if r.status().is_success() => url.to_string(),
+        _ => page,
+    }
 }
 
 /// Open a release link in the browser, without a shell in between. Only the
@@ -217,6 +236,10 @@ mod tests {
         assert!(due_given(&other, day, now), "checked three hours ago, but by another version");
         let mine = json!({ "checked_at": stamp(now - Duration::hours(3)), "checked_by": env!("CARGO_PKG_VERSION"), "latest": null, "url": null });
         assert!(!due_given(&mine, day, now), "this version checked three hours ago");
+        // A failed check waits an hour, but not across an upgrade.
+        let waiting = |by: &str| json!({ "checked_at": stamp(now - Duration::minutes(5)), "checked_by": by, "retry_at": stamp(now + Duration::minutes(50)) });
+        assert!(!due_given(&waiting(env!("CARGO_PKG_VERSION")), day, now), "this version is waiting out a failed check");
+        assert!(due_given(&waiting("0.0.1"), day, now), "another version's wait doesn't hold this one back");
         assert!(due_given(&mine, day, now + day), "and is due again a day later");
         // An answer that didn't come from a release of ours offers nothing.
         let elsewhere = json!({ "latest": "99.0.0", "url": "https://example.com/Geniuz-Setup.exe" });

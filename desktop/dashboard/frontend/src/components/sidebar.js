@@ -146,10 +146,15 @@ const SORTS = {
   fewest: { label: 'Fewest', says: 'by memories, fewest first',        by: (a, b) => a.memories - b.memories || byName(a, b) },
 };
 const SORT_KEY = 'geniuz.sidebar.sort';
+// Held here as well as in storage, so the choice works where storage doesn't.
+let sortNow = null;
 function readSort() {
-  try { const k = localStorage.getItem(SORT_KEY); return SORTS[k] ? k : 'az'; } catch { return 'az'; }
+  if (sortNow) return sortNow;
+  try { const k = localStorage.getItem(SORT_KEY); sortNow = SORTS[k] ? k : 'az'; } catch { sortNow = 'az'; }
+  return sortNow;
 }
 function writeSort(k) {
+  sortNow = k;
   try { localStorage.setItem(SORT_KEY, k); } catch { /* the choice lasts this session */ }
 }
 
@@ -187,6 +192,7 @@ function foldersSection(list, buttons) {
       for (const row of rows.querySelectorAll('.sidebar-folder')) {
         row.hidden = !!q && !row.dataset.tip?.toLowerCase().includes(q);
       }
+      rows.dispatchEvent(new CustomEvent('geniuz:filtered'));
     });
     sec.appendChild(filter);
   }
@@ -196,15 +202,37 @@ function foldersSection(list, buttons) {
   // how many memories they hold, either way round. Nothing here sorts folders
   // into kinds; a folder's face says whose it is.
   const made = all.map((f) => ({ f, btn: folderButton(f, buttons) }));
+  const divider = document.createElement('div');
+  divider.className = 'sidebar-folders__divider';
+  divider.setAttribute('role', 'separator');
+  // The line shows only with something on both sides of it, so filtering never
+  // leaves it at the top or bottom of the list.
+  const placeDivider = () => {
+    const seen = (pinned) => made.some(({ f, btn }) => !!f.pinned === pinned && !btn.hidden);
+    divider.hidden = !(seen(true) && seen(false));
+  };
   const arrange = () => {
     const by = SORTS[readSort()].by;
-    const pinnedFirst = (a, b) => (b.f.pinned ? 1 : 0) - (a.f.pinned ? 1 : 0);
+    const sorted = (pinned) => made.filter(({ f }) => !!f.pinned === pinned).sort((a, b) => by(a.f, b.f));
     // Moving a row that's already in the list re-places it, so nothing is rebuilt.
-    for (const { btn } of [...made].sort((a, b) => pinnedFirst(a, b) || by(a.f, b.f))) rows.appendChild(btn);
+    for (const { btn } of sorted(true)) rows.appendChild(btn);
+    rows.appendChild(divider);
+    for (const { btn } of sorted(false)) rows.appendChild(btn);
+    placeDivider();
   };
   arrange();
-  // The order only matters once there are a few folders to order.
-  if (all.length > 2) {
+  rows.addEventListener('geniuz:filtered', placeDivider);
+  // Counts change while the window is open; an order by count follows them.
+  document.addEventListener('geniuz:folder-counts', (ev) => {
+    let changed = false;
+    for (const fresh of ev.detail || []) {
+      const row = made.find(({ f }) => f.uuid === fresh.uuid);
+      if (row && row.f.memories !== fresh.memories) { row.f.memories = fresh.memories; changed = true; }
+    }
+    if (changed && (readSort() === 'most' || readSort() === 'fewest')) arrange();
+  });
+  // The order matters as soon as there are two folders to order.
+  if (all.length > 1) {
     const sort = document.createElement('button');
     sort.type = 'button';
     sort.className = 'sidebar-folders__sort';

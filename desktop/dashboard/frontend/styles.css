@@ -1447,11 +1447,9 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .is-collapsed .sidebar-folder.is-mirror { display: none !important; }
 .is-collapsed .sidebar-group.is-closed .sidebar-group__body { display: flex; }
 @media (prefers-reduced-motion: reduce) { .sidebar-group__caret { transition: none; } }
-.sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned) { margin-top: 6px; position: relative; }
-.sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned)::before {
-  content: ''; position: absolute; left: 8px; right: 8px; top: -4px; height: 1px; background: rgba(250, 244, 232, 0.16);
-}
-.is-collapsed .sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned)::before { display: none; }
+/* The thin line between the pinned folders and the rest. */
+.sidebar-folders__divider { flex: none; height: 1px; margin: 5px 8px; background: rgba(250, 244, 232, 0.16); }
+.sidebar-folders__divider[hidden], .is-collapsed .sidebar-folders__divider { display: none; }
 .sptr { cursor: pointer; }
 .sptr:hover { text-decoration: underline; }
 .sptr.is-missing { opacity: 0.6; cursor: default; text-decoration: none; }

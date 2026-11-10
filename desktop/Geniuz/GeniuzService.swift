@@ -380,6 +380,7 @@ class GeniuzService: ObservableObject {
     private let lastUpdateCheckKey = "geniuz.lastUpdateCheck"
     /// After a failed check: try again at this time, whatever the cadence.
     private let updateRetryKey = "geniuz.updateRetryAt"
+    private let updateCheckedByKey = "geniuz.updateCheckedBy"
 
     var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
@@ -400,6 +401,12 @@ class GeniuzService: ObservableObject {
         default: return
         }
         let now = Date()
+        // An answer from before an upgrade was worked out against the older app,
+        // so the first run of a new version asks again, even inside a retry's wait.
+        if UserDefaults.standard.string(forKey: updateCheckedByKey) != appVersion {
+            checkForUpdate(userAsked: false)
+            return
+        }
         if let retry = UserDefaults.standard.object(forKey: updateRetryKey) as? Date,
            retry > now, retry.timeIntervalSince(now) <= 3600 {
             return  // a failed check waits its hour (a clock set back can't stretch it)
@@ -442,6 +449,7 @@ class GeniuzService: ObservableObject {
                     return
                 }
                 UserDefaults.standard.set(Date(), forKey: self.lastUpdateCheckKey)
+                UserDefaults.standard.set(self.appVersion, forKey: self.updateCheckedByKey)
                 UserDefaults.standard.removeObject(forKey: self.updateRetryKey)
                 let latest = String(release.tagName.drop(while: { $0 == "v" || $0 == "V" }))
                 // Download opens GitHub's own "latest" address, which always resolves to
@@ -485,8 +493,20 @@ class GeniuzService: ObservableObject {
         return AvailableUpdate(version: latest, url: url.pathExtension == "dmg" ? latestDmg : releasesPage)
     }
 
+    /// Opens the disk image only if it answers: for a few minutes after a release is
+    /// published its image may not be uploaded yet. Otherwise the release page.
     func openUpdate() {
-        NSWorkspace.shared.open(availableUpdate?.url ?? releasesPage)
+        let url = availableUpdate?.url ?? releasesPage
+        guard url != releasesPage else {
+            NSWorkspace.shared.open(releasesPage)
+            return
+        }
+        var request = URLRequest(url: url, timeoutInterval: 6)
+        request.httpMethod = "HEAD"
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            let there = (response as? HTTPURLResponse)?.statusCode == 200
+            DispatchQueue.main.async { NSWorkspace.shared.open(there ? url : releasesPage) }
+        }.resume()
     }
 
     // MARK: - Settings load/save

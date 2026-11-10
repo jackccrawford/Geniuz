@@ -205,8 +205,10 @@ fn get_update() -> Option<UpdateStatus> {
         if !url.starts_with("https://github.com/jackccrawford/Geniuz/releases/") {
             return None;
         }
+        // The page of the latest release, never the address the check recorded:
+        // that one names a single release, and a newer one may be out by now.
         version_newer(latest, env!("CARGO_PKG_VERSION"))
-            .then(|| UpdateInfo { version: latest.to_string(), url: url.to_string() })
+            .then(|| UpdateInfo { version: latest.to_string(), url: format!("{}latest", geniuz::update::RELEASES_PREFIX) })
     })();
     Some(UpdateStatus { checked_at, newer })
 }
@@ -1287,7 +1289,10 @@ pub fn run() {
                         let id = event.id().0.as_str();
                         if id == "tray_update" {
                             if let Some(found) = geniuz::update::available() {
-                                let _ = geniuz::update::open(&found.url);
+                                // Checked off the menu's thread: it asks GitHub whether the installer is there.
+                                std::thread::spawn(move || {
+                                    let _ = geniuz::update::open(&geniuz::update::link_to_open(&found.url));
+                                });
                             }
                             return;
                         }
