@@ -1240,7 +1240,11 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 /* Folders (v5). The list scrolls by itself, so a long one leaves the rest of the
    sidebar in reach. Collapsed, only the folder on screen shows, as the open book. */
 .sidebar-section--folders { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
-.sidebar-folders { overflow-y: auto; max-height: 38vh; display: flex; flex-direction: column; gap: 1px; }
+/* The list takes the room its folders need, up to what the sidebar has left
+   once the items below it are placed; past that it scrolls. No fixed cap, so
+   nothing is cut off while there is empty space under it. */
+.sidebar-folders { overflow-y: auto; min-height: 0; flex: 0 1 auto; display: flex; flex-direction: column; gap: 1px; }
+.sidebar-section:not(.sidebar-section--folders), .sidebar-footer { flex: none; }
 .sidebar-folders__label { display: flex; align-items: center; justify-content: space-between; }
 .sidebar-folders__add {
   display: grid; place-items: center; width: 18px; height: 18px; padding: 0;
@@ -1490,9 +1494,6 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .sidebar-folder .sidebar-face { margin-top: 0; }
 .is-collapsed .sidebar-face { width: 20px; height: 20px; }
 
-/* Pinned keeps its own height; the rest of the list takes what's left. */
-.sidebar-group--pinned:not(.is-closed) { flex: 0 1 auto; }
-.sidebar-group--pinned .sidebar-group__body { max-height: 30vh; }
 
 /* More (···) on a folder's row, and the menu it opens. */
 .sidebar-folder__more {

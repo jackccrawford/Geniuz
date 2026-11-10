@@ -167,62 +167,41 @@ function foldersSection(list, buttons) {
     filter.setAttribute('aria-label', 'Filter folders');
     filter.addEventListener('input', () => {
       const q = filter.value.trim().toLowerCase();
-      // While filtering, every group is open and empty folders count too.
-      rows.classList.toggle('is-filtering', !!q);
       for (const row of rows.querySelectorAll('.sidebar-folder')) {
         row.hidden = !!q && !row.dataset.tip?.toLowerCase().includes(q);
-      }
-      // Headings count what matches while filtering, and their totals after.
-      for (const group of rows.querySelectorAll('.sidebar-group')) {
-        const count = group.querySelector('.sidebar-group__count');
-        if (!count) continue;
-        count.textContent = q
-          ? group.querySelectorAll('.sidebar-folder:not([hidden])').length
-          : count.dataset.total;
       }
     });
     sec.appendChild(filter);
   }
 
-  // One flat list while it's short. Past that: the folders the person pinned,
-  // then every other folder with the most recently written first. Nothing here
-  // sorts folders into kinds; a folder's face says whose it is. Empty folders
-  // wait behind a "Show N empty" line.
-  if (all.length <= FILTER_FROM) {
-    for (const f of all) rows.appendChild(folderButton(f, buttons));
-  } else {
-    const pinned = all.filter((f) => f.pinned);
-    const rest = all
-      .filter((f) => !f.pinned)
-      .sort((a, b) => (b.last_written || '').localeCompare(a.last_written || ''));
-    if (pinned.length) rows.appendChild(folderGroup('pinned', 'Pinned', pinned, buttons, { pinned: true }));
-    rows.appendChild(folderGroup('folders', 'Recent first', rest, buttons));
-    rows.classList.add('has-groups');
-  }
+  // One list. The folders the person pinned come first, then a thin line,
+  // then every other folder with the most recently written first. Nothing
+  // here sorts folders into kinds; a folder's face says whose it is.
+  const pinned = all.filter((f) => f.pinned);
+  const rest = all
+    .filter((f) => !f.pinned)
+    .sort((a, b) => (b.last_written || '').localeCompare(a.last_written || ''));
+  for (const f of [...pinned, ...rest]) rows.appendChild(folderButton(f, buttons));
   sec.appendChild(rows);
   return finishFoldersSection(sec, list, buttons);
 }
 
 /**
  * Choosing a folder reloads the app (so no screen shows one folder's memories
- * under another's name). Keep the sidebar's place across that reload: each
- * section's scroll is saved as the page goes and restored after, and the
- * folder now showing is brought into view. Call once the
+ * under another's name). Keep the sidebar's place across that reload: the
+ * list's scroll is saved as the page goes and restored after. Call once the
  * sidebar is in the document.
  */
 const SCROLL_KEY = 'geniuz.sidebar.scroll';
 export function keepSidebarPlace(aside) {
-  const boxes = () => [...aside.querySelectorAll('.sidebar-folders, .sidebar-group__body')];
-  const keyOf = (el) => (el.classList.contains('sidebar-folders') ? 'list' : el.closest('.sidebar-group')?.dataset.key || '');
+  const boxes = () => [...aside.querySelectorAll('.sidebar-folders')];
+  const keyOf = () => 'list';
   try {
     const saved = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || '{}');
     for (const b of boxes()) if (saved[keyOf(b)]) b.scrollTop = saved[keyOf(b)];
   } catch { /* a convenience */ }
-  // The folder now showing is brought into view, except in the recent-first
-  // list: its top is the news, and scrolling down to an older folder would hide it.
-  const current = aside.querySelector('.sidebar-folder.is-current');
-  const inRecentFirst = !!current?.closest('.sidebar-group[data-key="folders"]');
-  if (current && current.offsetParent && !inRecentFirst) current.scrollIntoView({ block: 'nearest' });
+  // The list is left where the person put it. Opening at the top keeps the
+  // pinned folders and the newest ones in view.
   const save = () => {
     try {
       const out = {};
@@ -232,59 +211,6 @@ export function keepSidebarPlace(aside) {
   };
   window.addEventListener('beforeunload', save);
   window.addEventListener('pagehide', save);
-}
-
-/** Group open/closed state, remembered per viewer (a convenience, so storage may fail). */
-function groupOpen(key) {
-  try { return localStorage.getItem(`geniuz.group.${key}`) !== 'closed'; } catch { return true; }
-}
-function setGroupOpen(key, open) {
-  try { localStorage.setItem(`geniuz.group.${key}`, open ? 'open' : 'closed'); } catch { /* fine */ }
-}
-
-/** A titled, collapsible run of folders. Empty ones wait behind "Show N empty". */
-function folderGroup(key, title, folders, buttons, { pinned = false } = {}) {
-  const group = document.createElement('div');
-  group.className = `sidebar-group${pinned ? ' sidebar-group--pinned' : ''}`;
-  group.dataset.key = key;
-  group.classList.toggle('is-closed', !groupOpen(key));
-  const head = document.createElement('button');
-  head.type = 'button';
-  head.className = 'sidebar-group__head';
-  head.setAttribute('aria-expanded', String(groupOpen(key)));
-  head.innerHTML = `<span class="sidebar-group__caret" aria-hidden="true"></span><span class="sidebar-group__title"></span><span class="sidebar-group__count"></span>`;
-  head.querySelector('.sidebar-group__title').textContent = title;
-  head.querySelector('.sidebar-group__count').textContent = folders.length;
-  head.querySelector('.sidebar-group__count').dataset.total = String(folders.length);
-  head.addEventListener('click', () => {
-    const open = group.classList.toggle('is-closed') === false;
-    head.setAttribute('aria-expanded', String(open));
-    setGroupOpen(key, open);
-  });
-  group.appendChild(head);
-
-  const body = document.createElement('div');
-  body.className = 'sidebar-group__body';
-  const empty = folders.filter((f) => !f.memories && !f.current && !f.pinned);
-  for (const f of folders) {
-    const btn = folderButton(f, buttons);
-    if (empty.includes(f)) btn.classList.add('is-empty-folder');
-    body.appendChild(btn);
-  }
-  if (empty.length) {
-    const more = document.createElement('button');
-    more.type = 'button';
-    more.className = 'sidebar-group__empties';
-    const label = (shown) => (shown ? `Hide ${empty.length} empty` : `Show ${empty.length} empty`);
-    more.textContent = label(false);
-    more.addEventListener('click', () => {
-      const shown = body.classList.toggle('shows-empty');
-      more.textContent = label(shown);
-    });
-    body.appendChild(more);
-  }
-  group.appendChild(body);
-  return group;
 }
 
 /**
