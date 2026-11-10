@@ -1240,8 +1240,21 @@ html.os-mac #main-host { padding-top: calc(var(--topbar-h) - var(--s-3)); }
 /* Folders (v5). The list scrolls by itself, so a long one leaves the rest of the
    sidebar in reach. Collapsed, only the folder on screen shows, as the open book. */
 .sidebar-section--folders { display: flex; flex-direction: column; min-height: 0; flex: 0 1 auto; }
-.sidebar-folders { overflow-y: auto; max-height: 38vh; display: flex; flex-direction: column; gap: 1px; }
-.sidebar-folders__label { display: flex; align-items: center; justify-content: space-between; }
+/* The list takes the room its folders need, up to what the sidebar has left
+   once the items below it are placed; past that it scrolls. No fixed cap, so
+   nothing is cut off while there is empty space under it. */
+.sidebar-folders { overflow-y: auto; min-height: 0; flex: 0 1 auto; display: flex; flex-direction: column; gap: 1px; }
+.sidebar-section:not(.sidebar-section--folders), .sidebar-footer { flex: none; }
+.sidebar-folders__label { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.sidebar-folders__label > span { margin-right: auto; }
+/* The list's order, said in a word; a click moves to the next one. */
+.sidebar-folders__sort {
+  padding: 1px 6px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer;
+  font: inherit; letter-spacing: 0.04em; opacity: 0.8;
+}
+.sidebar-folders__sort:hover { opacity: 1; background: rgba(250, 244, 232, 0.12); }
+.sidebar-folders__sort:focus-visible { opacity: 1; outline: 2px solid currentColor; outline-offset: 1px; }
+.is-collapsed .sidebar-folders__sort { display: none; }
 .sidebar-folders__add {
   display: grid; place-items: center; width: 18px; height: 18px; padding: 0;
   border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer;
@@ -1434,11 +1447,9 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .is-collapsed .sidebar-folder.is-mirror { display: none !important; }
 .is-collapsed .sidebar-group.is-closed .sidebar-group__body { display: flex; }
 @media (prefers-reduced-motion: reduce) { .sidebar-group__caret { transition: none; } }
-.sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned) { margin-top: 6px; position: relative; }
-.sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned)::before {
-  content: ''; position: absolute; left: 8px; right: 8px; top: -4px; height: 1px; background: rgba(250, 244, 232, 0.16);
-}
-.is-collapsed .sidebar-folder.is-pinned + .sidebar-folder:not(.is-pinned)::before { display: none; }
+/* The thin line between the pinned folders and the rest. */
+.sidebar-folders__divider { flex: none; height: 1px; margin: 5px 8px; background: rgba(250, 244, 232, 0.16); }
+.sidebar-folders__divider[hidden], .is-collapsed .sidebar-folders__divider { display: none; }
 .sptr { cursor: pointer; }
 .sptr:hover { text-decoration: underline; }
 .sptr.is-missing { opacity: 0.6; cursor: default; text-decoration: none; }
@@ -1490,9 +1501,6 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .sidebar-folder .sidebar-face { margin-top: 0; }
 .is-collapsed .sidebar-face { width: 20px; height: 20px; }
 
-/* Pinned keeps its own height; the rest of the list takes what's left. */
-.sidebar-group--pinned:not(.is-closed) { flex: 0 1 auto; }
-.sidebar-group--pinned .sidebar-group__body { max-height: 30vh; }
 
 /* More (···) on a folder's row, and the menu it opens. */
 .sidebar-folder__more {
@@ -1516,5 +1524,6 @@ html.os-linux .find-scope__panel { background: rgba(255, 255, 255, 0.92); }
 .folder-menu__item:hover { background: #EADFC9; }
 .folder-menu__item:focus-visible { background: #EADFC9; outline: 2px solid #123E48; outline-offset: -2px; }
 .folder-menu__detail { font-size: 12px; color: #5C6B70; font-variant-numeric: tabular-nums; }
-.sidebar-face.is-emoji, .sidebar-item.is-active .sidebar-face.is-emoji { background: rgba(250, 244, 232, 0.94); font-size: 12.5px; }
-.is-collapsed .sidebar-face.is-emoji { font-size: 14px; }
+/* An emoji stands on its own, with no tile behind it, and fills the space a mosaic takes. */
+.sidebar-face.is-emoji, .sidebar-item.is-active .sidebar-face.is-emoji { background: none; overflow: visible; font-size: 16px; }
+.is-collapsed .sidebar-face.is-emoji { font-size: 18px; }

@@ -97,6 +97,7 @@ private struct FolderListing: Decodable {
 
 let releasesAPI = URL(string: "https://api.github.com/repos/jackccrawford/Geniuz/releases/latest")!
 let releasesPage = URL(string: "https://github.com/jackccrawford/Geniuz/releases/latest")!
+let latestDmg = URL(string: "https://github.com/jackccrawford/Geniuz/releases/latest/download/Geniuz.dmg")!
 
 struct AvailableUpdate: Equatable {
     let version: String
@@ -379,6 +380,7 @@ class GeniuzService: ObservableObject {
     private let lastUpdateCheckKey = "geniuz.lastUpdateCheck"
     /// After a failed check: try again at this time, whatever the cadence.
     private let updateRetryKey = "geniuz.updateRetryAt"
+    private let updateCheckedByKey = "geniuz.updateCheckedBy"
 
     var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
@@ -399,6 +401,12 @@ class GeniuzService: ObservableObject {
         default: return
         }
         let now = Date()
+        // An answer from before an upgrade was worked out against the older app,
+        // so the first run of a new version asks again, even inside a retry's wait.
+        if UserDefaults.standard.string(forKey: updateCheckedByKey) != appVersion {
+            checkForUpdate(userAsked: false)
+            return
+        }
         if let retry = UserDefaults.standard.object(forKey: updateRetryKey) as? Date,
            retry > now, retry.timeIntervalSince(now) <= 3600 {
             return  // a failed check waits its hour (a clock set back can't stretch it)
@@ -441,11 +449,16 @@ class GeniuzService: ObservableObject {
                     return
                 }
                 UserDefaults.standard.set(Date(), forKey: self.lastUpdateCheckKey)
+                UserDefaults.standard.set(self.appVersion, forKey: self.updateCheckedByKey)
                 UserDefaults.standard.removeObject(forKey: self.updateRetryKey)
                 let latest = String(release.tagName.drop(while: { $0 == "v" || $0 == "V" }))
-                let dmg = release.assets.first(where: { $0.name == "Geniuz.dmg" })?.browserDownloadURL
+                // Download opens GitHub's own "latest" address, which always resolves to
+                // the newest release: this answer can be a day old, and a second release
+                // can come out in that day.
+                let hasDmg = release.assets.contains(where: { $0.name == "Geniuz.dmg" })
+                let link = hasDmg ? latestDmg : releasesPage
                 if isNewer(latest, than: self.appVersion) {
-                    self.availableUpdate = AvailableUpdate(version: latest, url: dmg ?? release.htmlURL)
+                    self.availableUpdate = AvailableUpdate(version: latest, url: link)
                     if userAsked { self.updateCheckMessage = "Geniuz \(latest) is available." }
                 } else {
                     self.availableUpdate = nil
@@ -476,11 +489,24 @@ class GeniuzService: ObservableObject {
               link.hasPrefix("https://github.com/jackccrawford/Geniuz/releases/"),
               let url = URL(string: link),
               isNewer(latest, than: appVersion) else { return nil }
-        return AvailableUpdate(version: latest, url: url)
+        // Whatever address was recorded, Download opens the latest one.
+        return AvailableUpdate(version: latest, url: url.pathExtension == "dmg" ? latestDmg : releasesPage)
     }
 
+    /// Opens the disk image only if it answers: for a few minutes after a release is
+    /// published its image may not be uploaded yet. Otherwise the release page.
     func openUpdate() {
-        NSWorkspace.shared.open(availableUpdate?.url ?? releasesPage)
+        let url = availableUpdate?.url ?? releasesPage
+        guard url != releasesPage else {
+            NSWorkspace.shared.open(releasesPage)
+            return
+        }
+        var request = URLRequest(url: url, timeoutInterval: 6)
+        request.httpMethod = "HEAD"
+        URLSession.shared.dataTask(with: request) { _, response, _ in
+            let there = (response as? HTTPURLResponse)?.statusCode == 200
+            DispatchQueue.main.async { NSWorkspace.shared.open(there ? url : releasesPage) }
+        }.resume()
     }
 
     // MARK: - Settings load/save

@@ -18,6 +18,18 @@ const LATEST_RELEASE: &str = "https://api.github.com/repos/jackccrawford/Geniuz/
 /// Only links under the project's own releases open from Geniuz.
 pub const RELEASES_PREFIX: &str = "https://github.com/jackccrawford/Geniuz/releases/";
 
+/// Where Download goes: GitHub's own "latest" addresses, which always resolve
+/// to the newest release. A check's answer can be a day old, and a second
+/// release can come out in that day; the link must not be as stale as the
+/// answer. On Windows it is the installer itself, elsewhere the release page.
+pub fn download_link() -> String {
+    if cfg!(windows) {
+        format!("{}latest/download/Geniuz-Setup.exe", RELEASES_PREFIX)
+    } else {
+        format!("{}latest", RELEASES_PREFIX)
+    }
+}
+
 /// A release newer than this one.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Available {
@@ -71,11 +83,17 @@ pub fn version_newer(candidate: &str, current: &str) -> bool {
 
 /// The last check's answer, if it found a release newer than this one.
 pub fn available() -> Option<Available> {
-    let v = read();
+    available_in(&read())
+}
+
+/// The recorded link only shows the answer came from a release of ours; what
+/// Download opens is always `download_link()`, never the address of the one
+/// release the check happened to see.
+fn available_in(v: &Value) -> Option<Available> {
     let version = v.get("latest")?.as_str()?.to_string();
-    let url = v.get("url")?.as_str()?.to_string();
+    let url = v.get("url")?.as_str()?;
     (url.starts_with(RELEASES_PREFIX) && version_newer(&version, env!("CARGO_PKG_VERSION")))
-        .then_some(Available { version, url })
+        .then(|| Available { version, url: download_link() })
 }
 
 /// Whether a check is due now. A failed check waits an hour; a clock set back
@@ -89,13 +107,22 @@ pub fn due(settings: &Settings, now: DateTime<Utc>) -> bool {
         "weekly" => Duration::days(7),
         _ => return false,
     };
-    let v = read();
-    if let Some(retry) = time(&v, "retry_at") {
+    due_given(&read(), every, now)
+}
+
+fn due_given(v: &Value, every: Duration, now: DateTime<Utc>) -> bool {
+    // An answer recorded by another version of Geniuz was worked out against
+    // that version: "nothing newer than 5.0.8" says nothing once this is 5.0.9.
+    // So the first run after an upgrade asks again, even inside a retry's wait.
+    if v.get("checked_by").and_then(Value::as_str) != Some(env!("CARGO_PKG_VERSION")) {
+        return true;
+    }
+    if let Some(retry) = time(v, "retry_at") {
         if retry > now && retry - now <= Duration::hours(1) {
             return false;
         }
     }
-    match time(&v, "checked_at") {
+    match time(v, "checked_at") {
         Some(last) => now - last >= every || last > now,
         None => true,
     }
@@ -127,24 +154,37 @@ pub fn check() -> Result<Option<Available>, String> {
         }
     };
     let latest = release["tag_name"].as_str().unwrap_or("").trim_start_matches(['v', 'V']).to_string();
-    // The installer for this system if the release has one, else the release page.
-    let asset = if cfg!(windows) { "Geniuz-Setup.exe" } else { "" };
-    let url = release["assets"]
-        .as_array()
-        .and_then(|a| a.iter().find(|x| !asset.is_empty() && x["name"].as_str() == Some(asset)))
-        .and_then(|x| x["browser_download_url"].as_str())
-        .or_else(|| release["html_url"].as_str())
-        .unwrap_or("")
-        .to_string();
-    let found = (version_newer(&latest, env!("CARGO_PKG_VERSION")) && url.starts_with(RELEASES_PREFIX))
-        .then(|| Available { version: latest, url });
+    // The answer must be a release of ours; what Download opens is the "latest" link.
+    let from_us = release["html_url"].as_str().unwrap_or("").starts_with(RELEASES_PREFIX);
+    let found = (version_newer(&latest, env!("CARGO_PKG_VERSION")) && from_us)
+        .then(|| Available { version: latest, url: download_link() });
     let out = json!({
         "checked_at": now.to_rfc3339_opts(SecondsFormat::Secs, true),
+        "checked_by": env!("CARGO_PKG_VERSION"),
         "latest": found.as_ref().map(|f| f.version.clone()),
         "url": found.as_ref().map(|f| f.url.clone()),
     });
     write(&out)?;
     Ok(found)
+}
+
+/// The link Download should open right now. The installer's own address is
+/// used only if it answers: for a few minutes after a release is published its
+/// installer may not be uploaded yet, and a release can lack one. Otherwise the
+/// latest release's page, which always exists.
+pub fn link_to_open(url: &str) -> String {
+    let page = format!("{}latest", RELEASES_PREFIX);
+    if url == page {
+        return page;
+    }
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(std::time::Duration::from_secs(6)))
+        .build()
+        .new_agent();
+    match agent.head(url).call() {
+        Ok(r) if r.status().is_success() => url.to_string(),
+        _ => page,
+    }
 }
 
 /// Open a release link in the browser, without a shell in between. Only the
@@ -173,6 +213,37 @@ mod tests {
         assert!(!version_newer("5.0.3", "5.0.3"));
         assert!(!version_newer("5.0.2", "5.0.3"));
         assert!(!version_newer("5.0.7-rc.1", "5.0.6"));
+    }
+
+    /// Two releases in one day: a PC that had checked that morning offered the
+    /// first one's installer all evening, and after installing it said "up to date".
+    #[test]
+    fn a_days_old_answer_still_downloads_the_newest_and_an_upgrade_asks_again() {
+        let now = Utc::now();
+        let day = Duration::days(1);
+        let stamp = |t: DateTime<Utc>| t.to_rfc3339_opts(SecondsFormat::Secs, true);
+        // Recorded by an earlier version, with that release's own installer address.
+        let old = json!({
+            "checked_at": stamp(now - Duration::hours(3)),
+            "latest": "99.0.0",
+            "url": "https://github.com/jackccrawford/Geniuz/releases/download/v99.0.0/Geniuz-Setup.exe",
+        });
+        let found = available_in(&old).expect("still newer than this version");
+        assert_eq!(found.url, download_link(), "the link is the latest one, not the recorded one");
+        assert!(found.url.contains("/releases/latest"));
+        assert!(due_given(&old, day, now), "an answer with no version on it was worked out by another Geniuz");
+        let other = json!({ "checked_at": stamp(now - Duration::hours(3)), "checked_by": "0.0.1", "latest": null, "url": null });
+        assert!(due_given(&other, day, now), "checked three hours ago, but by another version");
+        let mine = json!({ "checked_at": stamp(now - Duration::hours(3)), "checked_by": env!("CARGO_PKG_VERSION"), "latest": null, "url": null });
+        assert!(!due_given(&mine, day, now), "this version checked three hours ago");
+        // A failed check waits an hour, but not across an upgrade.
+        let waiting = |by: &str| json!({ "checked_at": stamp(now - Duration::minutes(5)), "checked_by": by, "retry_at": stamp(now + Duration::minutes(50)) });
+        assert!(!due_given(&waiting(env!("CARGO_PKG_VERSION")), day, now), "this version is waiting out a failed check");
+        assert!(due_given(&waiting("0.0.1"), day, now), "another version's wait doesn't hold this one back");
+        assert!(due_given(&mine, day, now + day), "and is due again a day later");
+        // An answer that didn't come from a release of ours offers nothing.
+        let elsewhere = json!({ "latest": "99.0.0", "url": "https://example.com/Geniuz-Setup.exe" });
+        assert!(available_in(&elsewhere).is_none());
     }
 
     /// Asks the real GitHub. Run by hand: cargo test --lib update -- --ignored

@@ -136,6 +136,28 @@ function folderTip(f) {
   return lines.join('\n');
 }
 
+// The orders a person can put the folder list in. Names compare the way a
+// person reads them: without regard to case, and "Finn 2" before "Finn 10".
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+const SORTS = {
+  az:     { label: 'A–Z',    says: 'by name, A to Z',                  by: byName },
+  za:     { label: 'Z–A',    says: 'by name, Z to A',                  by: (a, b) => byName(b, a) },
+  most:   { label: 'Most',   says: 'by memories, most first',          by: (a, b) => b.memories - a.memories || byName(a, b) },
+  fewest: { label: 'Fewest', says: 'by memories, fewest first',        by: (a, b) => a.memories - b.memories || byName(a, b) },
+};
+const SORT_KEY = 'geniuz.sidebar.sort';
+// Held here as well as in storage, so the choice works where storage doesn't.
+let sortNow = null;
+function readSort() {
+  if (sortNow) return sortNow;
+  try { const k = localStorage.getItem(SORT_KEY); sortNow = SORTS[k] ? k : 'az'; } catch { sortNow = 'az'; }
+  return sortNow;
+}
+function writeSort(k) {
+  sortNow = k;
+  try { localStorage.setItem(SORT_KEY, k); } catch { /* the choice lasts this session */ }
+}
+
 // Folders replace the Memories row. Choosing one reloads the app, so nothing on
 // screen can still be showing the last folder's memories.
 function foldersSection(list, buttons) {
@@ -167,37 +189,68 @@ function foldersSection(list, buttons) {
     filter.setAttribute('aria-label', 'Filter folders');
     filter.addEventListener('input', () => {
       const q = filter.value.trim().toLowerCase();
-      // While filtering, every group is open and empty folders count too.
-      rows.classList.toggle('is-filtering', !!q);
       for (const row of rows.querySelectorAll('.sidebar-folder')) {
         row.hidden = !!q && !row.dataset.tip?.toLowerCase().includes(q);
       }
-      // Headings count what matches while filtering, and their totals after.
-      for (const group of rows.querySelectorAll('.sidebar-group')) {
-        const count = group.querySelector('.sidebar-group__count');
-        if (!count) continue;
-        count.textContent = q
-          ? group.querySelectorAll('.sidebar-folder:not([hidden])').length
-          : count.dataset.total;
-      }
+      rows.dispatchEvent(new CustomEvent('geniuz:filtered'));
     });
     sec.appendChild(filter);
   }
 
-  // One flat list while it's short. Past that: the folders the person pinned,
-  // then every other folder with the most recently written first. Nothing here
-  // sorts folders into kinds; a folder's face says whose it is. Empty folders
-  // wait behind a "Show N empty" line.
-  if (all.length <= FILTER_FROM) {
-    for (const f of all) rows.appendChild(folderButton(f, buttons));
-  } else {
-    const pinned = all.filter((f) => f.pinned);
-    const rest = all
-      .filter((f) => !f.pinned)
-      .sort((a, b) => (b.last_written || '').localeCompare(a.last_written || ''));
-    if (pinned.length) rows.appendChild(folderGroup('pinned', 'Pinned', pinned, buttons, { pinned: true }));
-    rows.appendChild(folderGroup('folders', 'Recent first', rest, buttons));
-    rows.classList.add('has-groups');
+  // One list. The folders the person pinned come first, then a thin line,
+  // then every other folder, both in the order the person chose: by name or by
+  // how many memories they hold, either way round. Nothing here sorts folders
+  // into kinds; a folder's face says whose it is.
+  const made = all.map((f) => ({ f, btn: folderButton(f, buttons) }));
+  const divider = document.createElement('div');
+  divider.className = 'sidebar-folders__divider';
+  divider.setAttribute('role', 'separator');
+  // The line shows only with something on both sides of it, so filtering never
+  // leaves it at the top or bottom of the list.
+  const placeDivider = () => {
+    const seen = (pinned) => made.some(({ f, btn }) => !!f.pinned === pinned && !btn.hidden);
+    divider.hidden = !(seen(true) && seen(false));
+  };
+  const arrange = () => {
+    const by = SORTS[readSort()].by;
+    const sorted = (pinned) => made.filter(({ f }) => !!f.pinned === pinned).sort((a, b) => by(a.f, b.f));
+    // Moving a row that's already in the list re-places it, so nothing is rebuilt.
+    for (const { btn } of sorted(true)) rows.appendChild(btn);
+    rows.appendChild(divider);
+    for (const { btn } of sorted(false)) rows.appendChild(btn);
+    placeDivider();
+  };
+  arrange();
+  rows.addEventListener('geniuz:filtered', placeDivider);
+  // Counts change while the window is open; an order by count follows them.
+  document.addEventListener('geniuz:folder-counts', (ev) => {
+    let changed = false;
+    for (const fresh of ev.detail || []) {
+      const row = made.find(({ f }) => f.uuid === fresh.uuid);
+      if (row && row.f.memories !== fresh.memories) { row.f.memories = fresh.memories; changed = true; }
+    }
+    if (changed && (readSort() === 'most' || readSort() === 'fewest')) arrange();
+  });
+  // The order matters as soon as there are two folders to order.
+  if (all.length > 1) {
+    const sort = document.createElement('button');
+    sort.type = 'button';
+    sort.className = 'sidebar-folders__sort';
+    const show = () => {
+      const s = SORTS[readSort()];
+      sort.textContent = s.label;
+      sort.title = `Sorted ${s.says}. Click to change`;
+      sort.setAttribute('aria-label', `Folders sorted ${s.says}. Change the order`);
+    };
+    sort.addEventListener('click', () => {
+      const keys = Object.keys(SORTS);
+      writeSort(keys[(keys.indexOf(readSort()) + 1) % keys.length]);
+      arrange();
+      show();
+      rows.scrollTop = 0;
+    });
+    show();
+    label.insertBefore(sort, add);
   }
   sec.appendChild(rows);
   return finishFoldersSection(sec, list, buttons);
@@ -205,24 +258,20 @@ function foldersSection(list, buttons) {
 
 /**
  * Choosing a folder reloads the app (so no screen shows one folder's memories
- * under another's name). Keep the sidebar's place across that reload: each
- * section's scroll is saved as the page goes and restored after, and the
- * folder now showing is brought into view. Call once the
+ * under another's name). Keep the sidebar's place across that reload: the
+ * list's scroll is saved as the page goes and restored after. Call once the
  * sidebar is in the document.
  */
 const SCROLL_KEY = 'geniuz.sidebar.scroll';
 export function keepSidebarPlace(aside) {
-  const boxes = () => [...aside.querySelectorAll('.sidebar-folders, .sidebar-group__body')];
-  const keyOf = (el) => (el.classList.contains('sidebar-folders') ? 'list' : el.closest('.sidebar-group')?.dataset.key || '');
+  const boxes = () => [...aside.querySelectorAll('.sidebar-folders')];
+  const keyOf = () => 'list';
   try {
     const saved = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || '{}');
     for (const b of boxes()) if (saved[keyOf(b)]) b.scrollTop = saved[keyOf(b)];
   } catch { /* a convenience */ }
-  // The folder now showing is brought into view, except in the recent-first
-  // list: its top is the news, and scrolling down to an older folder would hide it.
-  const current = aside.querySelector('.sidebar-folder.is-current');
-  const inRecentFirst = !!current?.closest('.sidebar-group[data-key="folders"]');
-  if (current && current.offsetParent && !inRecentFirst) current.scrollIntoView({ block: 'nearest' });
+  // The list is left where the person put it. Opening at the top keeps the
+  // pinned folders and the newest ones in view.
   const save = () => {
     try {
       const out = {};
@@ -232,59 +281,6 @@ export function keepSidebarPlace(aside) {
   };
   window.addEventListener('beforeunload', save);
   window.addEventListener('pagehide', save);
-}
-
-/** Group open/closed state, remembered per viewer (a convenience, so storage may fail). */
-function groupOpen(key) {
-  try { return localStorage.getItem(`geniuz.group.${key}`) !== 'closed'; } catch { return true; }
-}
-function setGroupOpen(key, open) {
-  try { localStorage.setItem(`geniuz.group.${key}`, open ? 'open' : 'closed'); } catch { /* fine */ }
-}
-
-/** A titled, collapsible run of folders. Empty ones wait behind "Show N empty". */
-function folderGroup(key, title, folders, buttons, { pinned = false } = {}) {
-  const group = document.createElement('div');
-  group.className = `sidebar-group${pinned ? ' sidebar-group--pinned' : ''}`;
-  group.dataset.key = key;
-  group.classList.toggle('is-closed', !groupOpen(key));
-  const head = document.createElement('button');
-  head.type = 'button';
-  head.className = 'sidebar-group__head';
-  head.setAttribute('aria-expanded', String(groupOpen(key)));
-  head.innerHTML = `<span class="sidebar-group__caret" aria-hidden="true"></span><span class="sidebar-group__title"></span><span class="sidebar-group__count"></span>`;
-  head.querySelector('.sidebar-group__title').textContent = title;
-  head.querySelector('.sidebar-group__count').textContent = folders.length;
-  head.querySelector('.sidebar-group__count').dataset.total = String(folders.length);
-  head.addEventListener('click', () => {
-    const open = group.classList.toggle('is-closed') === false;
-    head.setAttribute('aria-expanded', String(open));
-    setGroupOpen(key, open);
-  });
-  group.appendChild(head);
-
-  const body = document.createElement('div');
-  body.className = 'sidebar-group__body';
-  const empty = folders.filter((f) => !f.memories && !f.current && !f.pinned);
-  for (const f of folders) {
-    const btn = folderButton(f, buttons);
-    if (empty.includes(f)) btn.classList.add('is-empty-folder');
-    body.appendChild(btn);
-  }
-  if (empty.length) {
-    const more = document.createElement('button');
-    more.type = 'button';
-    more.className = 'sidebar-group__empties';
-    const label = (shown) => (shown ? `Hide ${empty.length} empty` : `Show ${empty.length} empty`);
-    more.textContent = label(false);
-    more.addEventListener('click', () => {
-      const shown = body.classList.toggle('shows-empty');
-      more.textContent = label(shown);
-    });
-    body.appendChild(more);
-  }
-  group.appendChild(body);
-  return group;
 }
 
 /**

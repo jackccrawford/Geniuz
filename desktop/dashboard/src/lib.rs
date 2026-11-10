@@ -205,8 +205,10 @@ fn get_update() -> Option<UpdateStatus> {
         if !url.starts_with("https://github.com/jackccrawford/Geniuz/releases/") {
             return None;
         }
+        // The page of the latest release, never the address the check recorded:
+        // that one names a single release, and a newer one may be out by now.
         version_newer(latest, env!("CARGO_PKG_VERSION"))
-            .then(|| UpdateInfo { version: latest.to_string(), url: url.to_string() })
+            .then(|| UpdateInfo { version: latest.to_string(), url: format!("{}latest", geniuz::update::RELEASES_PREFIX) })
     })();
     Some(UpdateStatus { checked_at, newer })
 }
@@ -739,7 +741,7 @@ fn resolve_address(address: String) -> Option<PointerTarget> {
 // fixed list of fields, so anything else in it would be lost.
 
 /// Every action with a shortcut: menu ID, what it's called, and its default.
-const SHORTCUTS: [(&str, &str, &str); 9] = [
+const SHORTCUTS: [(&str, &str, &str); 12] = [
     ("menu_keep", "Keep", "CmdOrCtrl+N"),
     ("menu_find", "Find", "CmdOrCtrl+K"),
     ("menu_recent", "Memories", "CmdOrCtrl+0"),
@@ -749,7 +751,62 @@ const SHORTCUTS: [(&str, &str, &str); 9] = [
     ("menu_settings", "Settings", "CmdOrCtrl+,"),
     ("menu_export", "Export this folder", "CmdOrCtrl+Shift+E"),
     ("menu_refresh", "Refresh", "CmdOrCtrl+R"),
+    ("menu_text_bigger", "Bigger text", "CmdOrCtrl+="),
+    ("menu_text_smaller", "Smaller text", "CmdOrCtrl+-"),
+    // Not CmdOrCtrl+0, which already opens Memories.
+    ("menu_text_default", "Default text size", "CmdOrCtrl+Shift+0"),
 ];
+
+// ---- Text size ---------------------------------------------------------------
+// The whole window is scaled, as a browser's zoom does, so every piece of text
+// grows together. The choice is kept in its own file, for the reason above.
+
+const TEXT_SIZES: [f64; 9] = [0.8, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.8, 2.0];
+
+fn text_size_path() -> std::path::PathBuf {
+    geniuz::data_dir().join("text-size")
+}
+
+/// The saved scale, or 1.0. Anything unreadable or out of range counts as 1.0.
+fn saved_text_size() -> f64 {
+    std::fs::read_to_string(text_size_path())
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|z| (TEXT_SIZES[0]..=TEXT_SIZES[TEXT_SIZES.len() - 1]).contains(z))
+        .unwrap_or(1.0)
+}
+
+/// The next size up or down from `now`, stopping at the ends.
+fn step_text_size(now: f64, bigger: bool) -> f64 {
+    let at = TEXT_SIZES.iter().position(|z| (z - now).abs() < 0.001);
+    match (at, bigger) {
+        (Some(i), true) => TEXT_SIZES[(i + 1).min(TEXT_SIZES.len() - 1)],
+        (Some(i), false) => TEXT_SIZES[i.saturating_sub(1)],
+        // A saved value that isn't one of the steps: move to the nearest step that way.
+        (None, true) => TEXT_SIZES.iter().copied().find(|z| *z > now).unwrap_or(now),
+        (None, false) => TEXT_SIZES.iter().rev().copied().find(|z| *z < now).unwrap_or(now),
+    }
+}
+
+/// Apply a menu choice to the window and remember it.
+fn change_text_size(app: &tauri::AppHandle, id: &str) {
+    use tauri::Manager;
+    let now = saved_text_size();
+    let next = match id {
+        "menu_text_bigger" => step_text_size(now, true),
+        "menu_text_smaller" => step_text_size(now, false),
+        _ => 1.0,
+    };
+    if let Some(window) = app.get_webview_window("main") {
+        if let Err(e) = window.set_zoom(next) {
+            eprintln!("[geniuz] text size not changed: {e}");
+            return;
+        }
+    }
+    if let Err(e) = std::fs::write(text_size_path(), next.to_string()) {
+        eprintln!("[geniuz] text size not saved: {e}");
+    }
+}
 
 fn shortcuts_path() -> std::path::PathBuf {
     geniuz::data_dir().join("shortcuts.json")
@@ -984,6 +1041,10 @@ fn build_menu(app: &tauri::AppHandle, shortcuts: bool) -> tauri::Result<Menu<tau
             &item("menu_sidebar", "Toggle Sidebar")?,
             &item("menu_refresh", "Refresh")?,
             &PredefinedMenuItem::separator(app)?,
+            &item("menu_text_default", "Default Text Size")?,
+            &item("menu_text_bigger", "Bigger")?,
+            &item("menu_text_smaller", "Smaller")?,
+            &PredefinedMenuItem::separator(app)?,
             &PredefinedMenuItem::fullscreen(app, None)?,
         ],
     )?;
@@ -1030,6 +1091,19 @@ fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(u, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Download, from the Status page: the same as the tray's. On Windows that is
+/// the installer itself when it answers, and the latest release's page when it
+/// doesn't; elsewhere the page. Off the caller's thread, since it asks GitHub.
+#[tauri::command]
+fn open_update() {
+    std::thread::spawn(|| {
+        let link = geniuz::update::link_to_open(&geniuz::update::download_link());
+        if let Err(e) = geniuz::update::open(&link) {
+            eprintln!("[geniuz] opening the update failed: {e}");
+        }
+    });
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -1048,6 +1122,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             open_link,
+            open_update,
             get_app_version,
             get_update,
             view_folder,
@@ -1084,6 +1159,15 @@ pub fn run() {
             let handle = app.handle();
             let menu = build_menu(handle, true)?;
             app.set_menu(menu)?;
+
+            // The text size chosen last time.
+            let size = saved_text_size();
+            if (size - 1.0).abs() > 0.001 {
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_zoom(size);
+                }
+            }
 
             // Native vibrancy — the window is `transparent: true` in
             // tauri.conf.json; here we ask the OS to fill the chrome with
@@ -1219,7 +1303,10 @@ pub fn run() {
                         let id = event.id().0.as_str();
                         if id == "tray_update" {
                             if let Some(found) = geniuz::update::available() {
-                                let _ = geniuz::update::open(&found.url);
+                                // Checked off the menu's thread: it asks GitHub whether the installer is there.
+                                std::thread::spawn(move || {
+                                    let _ = geniuz::update::open(&geniuz::update::link_to_open(&found.url));
+                                });
                             }
                             return;
                         }
@@ -1286,6 +1373,7 @@ pub fn run() {
                         eprintln!("[geniuz] open website failed: {e}");
                     }
                 }
+                "menu_text_bigger" | "menu_text_smaller" | "menu_text_default" => change_text_size(app, id),
                 // Everything else switches surfaces in the frontend.
                 _ => {
                     if let Some(window) = app.get_webview_window("main") {
@@ -1316,6 +1404,29 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn text_size_steps_up_and_down_and_stops_at_the_ends() {
+        assert_eq!(step_text_size(1.0, true), 1.1);
+        assert_eq!(step_text_size(1.0, false), 0.9);
+        assert_eq!(step_text_size(2.0, true), 2.0, "no bigger than the biggest");
+        assert_eq!(step_text_size(0.8, false), 0.8, "no smaller than the smallest");
+        // A value between steps moves to the next step in that direction.
+        assert_eq!(step_text_size(1.3, true), 1.4);
+        assert_eq!(step_text_size(1.3, false), 1.25);
+        // Nine clicks up from the smallest reach the biggest, never past it.
+        let mut z = 0.8;
+        for _ in 0..12 { z = step_text_size(z, true); }
+        assert_eq!(z, 2.0);
+    }
+
+    #[test]
+    fn every_shortcut_default_is_different() {
+        let mut seen = std::collections::HashSet::new();
+        for (id, _, keys) in SHORTCUTS {
+            assert!(seen.insert(keys.to_lowercase()), "{id} reuses {keys}");
+        }
+    }
 
     /// Export copies the folder picked on the page, not whichever the window shows.
     /// Shares GENIUZ_HOME with the other test here, so both run in one test.

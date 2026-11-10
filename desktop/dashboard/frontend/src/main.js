@@ -216,6 +216,8 @@ async function refreshFolderCounts(list) {
       if (el.textContent !== String(f.memories)) el.textContent = f.memories;
     }
   }
+  // The sidebar re-sorts by count if that is the order the person chose.
+  document.dispatchEvent(new CustomEvent('geniuz:folder-counts', { detail: fresh.folders || [] }));
   return fresh;
 }
 
