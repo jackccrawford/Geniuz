@@ -190,6 +190,11 @@ export function folderDiskBytes(folder) {
 }
 
 /** Open a web link from a memory in the viewer's browser. */
+/** Download the newest release: the installer on Windows, the release page elsewhere. */
+export function openUpdate() {
+  return invoke('open_update');
+}
+
 export function openLink(url) {
   return invoke('open_link', { url });
 }

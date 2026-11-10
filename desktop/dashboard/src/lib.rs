@@ -1091,6 +1091,19 @@ fn open_link(app: tauri::AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(u, None::<&str>).map_err(|e| e.to_string())
 }
 
+/// Download, from the Status page: the same as the tray's. On Windows that is
+/// the installer itself when it answers, and the latest release's page when it
+/// doesn't; elsewhere the page. Off the caller's thread, since it asks GitHub.
+#[tauri::command]
+fn open_update() {
+    std::thread::spawn(|| {
+        let link = geniuz::update::link_to_open(&geniuz::update::download_link());
+        if let Err(e) = geniuz::update::open(&link) {
+            eprintln!("[geniuz] opening the update failed: {e}");
+        }
+    });
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -1109,6 +1122,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             open_link,
+            open_update,
             get_app_version,
             get_update,
             view_folder,

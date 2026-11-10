@@ -131,7 +131,7 @@ export async function mount(container) {
       : row('Updates', lastCheck ? `Up to date (checked ${escapeHtml(lastCheck)})` : 'Not checked yet · the menu bar app checks', lastCheck ? 'ok' : 'none'),
   ]);
   versionSection.querySelector('[data-update]')?.addEventListener('click', () => {
-    api.openLink(update.url).catch((e) => console.error('[geniuz] opening the update failed:', e));
+    api.openUpdate().catch((e) => console.error('[geniuz] opening the update failed:', e));
   });
   body.appendChild(versionSection);
 
