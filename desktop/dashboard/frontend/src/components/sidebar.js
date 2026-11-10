@@ -218,8 +218,11 @@ export function keepSidebarPlace(aside) {
     const saved = JSON.parse(sessionStorage.getItem(SCROLL_KEY) || '{}');
     for (const b of boxes()) if (saved[keyOf(b)]) b.scrollTop = saved[keyOf(b)];
   } catch { /* a convenience */ }
+  // The folder now showing is brought into view, except in the recent-first
+  // list: its top is the news, and scrolling down to an older folder would hide it.
   const current = aside.querySelector('.sidebar-folder.is-current');
-  if (current && current.offsetParent) current.scrollIntoView({ block: 'nearest' });
+  const inRecentFirst = !!current?.closest('.sidebar-group[data-key="folders"]');
+  if (current && current.offsetParent && !inRecentFirst) current.scrollIntoView({ block: 'nearest' });
   const save = () => {
     try {
       const out = {};
