@@ -294,29 +294,20 @@ function tileColour(f) {
 }
 
 /**
- * A folder's face: the emoji its writer chose, or else its first letter on a
- * tile. The tile's colour is worked out from the folder's ID, so it stays the
- * same through every rename.
+ * A folder's face: the emoji its writer chose, or else a plain tile. The
+ * tile's colour is worked out from the folder's ID, so it stays the same
+ * through every rename.
  */
 function folderFace(f) {
-  if (f.face) {
-    const face = document.createElement('span');
-    // A face of plain letters is drawn like the letter tile, not like an emoji.
-    // Accents written as separate marks count as part of their letter, and
-    // only two letters need the smaller size.
-    const letters = /^[\p{L}\p{N}\p{M}]+$/u.test(f.face);
-    const two = (f.face.match(/[\p{L}\p{N}]/gu) || []).length > 1;
-    face.className = `sidebar-item__icon sidebar-face${letters ? (two ? ' is-wide' : '') : ' is-emoji'}`;
-    face.setAttribute('aria-hidden', 'true');
-    face.textContent = f.face;
-    if (letters) face.style.background = tileColour(f);
-    return face;
-  }
   const face = document.createElement('span');
-  face.className = 'sidebar-item__icon sidebar-face';
   face.setAttribute('aria-hidden', 'true');
-  face.style.background = tileColour(f);
-  face.textContent = (f.name.match(/\p{L}/u)?.[0] || f.name.trim()[0] || '?').toUpperCase();
+  if (f.face) {
+    face.className = 'sidebar-item__icon sidebar-face is-emoji';
+    face.textContent = f.face;
+  } else {
+    face.className = 'sidebar-item__icon sidebar-face';
+    face.style.background = tileColour(f);
+  }
   return face;
 }
 

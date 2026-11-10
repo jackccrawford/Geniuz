@@ -613,26 +613,27 @@ fn name_key(name: &str) -> String {
 }
 
 /// A name is short, one line, and can't be mistaken for an address or a path.
-/// A face is one emoji, or one or two characters. It sits on a small tile, so
-/// a word won't fit; the name is the place for words.
+/// A face is one emoji. Letters are refused: a letter on a tile says nothing a
+/// name doesn't, and the name is the place for words.
 pub fn validate_face(face: &str) -> Result<String, String> {
+    const NOT_A_FACE: &str = "A face is one emoji, with no letters.";
     let face = face.trim();
     if face.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err("A face is one emoji, with no spaces or line breaks.".into());
     }
-    // Two characters, whatever they are. More only for what is visibly one
-    // thing built from several code points: an emoji joined, styled or toned
-    // (a family, a keycap, a skin tone, a flag of tags), or a letter with its
-    // accents written separately.
-    let count = face.chars().count();
-    let letters = face.chars().filter(|c| c.is_alphanumeric()).count();
+    // A digit is part of an emoji only in a keycap (1️⃣); a letter never is.
+    let keycap = face.contains('\u{20E3}');
+    if face.chars().any(|c| c.is_alphabetic() || (c.is_numeric() && !keycap)) {
+        return Err(NOT_A_FACE.into());
+    }
+    // Two characters, or more only for what is visibly one thing built from
+    // several code points: an emoji joined, styled or toned (a family, a
+    // keycap, a skin tone, a flag made of tags).
     let joined = face.chars().any(|c| {
         matches!(c, '\u{200D}' | '\u{FE0F}' | '\u{20E3}' | '\u{1F3FB}'..='\u{1F3FF}' | '\u{E0020}'..='\u{E007F}')
     });
-    let accents = face.chars().filter(|c| matches!(c, '\u{0300}'..='\u{036F}')).count();
-    let limit = if joined { 12 } else { 2 + accents.min(2) };
-    if letters > 2 || count > limit {
-        return Err("A face is one emoji, or one or two characters.".into());
+    if face.chars().count() > if joined { 12 } else { 2 } {
+        return Err(NOT_A_FACE.into());
     }
     Ok(face.to_string())
 }

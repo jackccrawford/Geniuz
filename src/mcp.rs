@@ -1003,6 +1003,8 @@ mod tests {
         assert!(!is_err && out.starts_with("🎿 Piste ("), "{out}");
         let (out, is_err) = call_tool(&reg, None, "folders", &json!({ "name": "Piste", "face": "a word" }));
         assert!(is_err && out.contains("one emoji"), "{out}");
+        let (out, is_err) = call_tool(&reg, None, "folders", &json!({ "name": "Piste", "face": "P" }));
+        assert!(is_err && out.contains("no letters"), "{out}");
         assert_eq!(reg.find("Piste").unwrap().face, "🎿", "a refused face changes nothing");
         let (out, _) = call_tool(&reg, None, "folders", &json!({ "name": "Piste", "face": "" }));
         assert!(out.starts_with("Piste ("), "{out}");

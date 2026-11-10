@@ -314,11 +314,11 @@ pub enum FolderCommand {
     },
 
     /// Choose the face shown beside a folder's name in the window: one emoji. Leave it out to clear it
-    #[command(after_help = "Example:\n  geniuz folder face Work 🧰\n\nA folder's own writer chooses its face. Without one, the window shows the folder's first letter.")]
+    #[command(after_help = "Example:\n  geniuz folder face Work 🧰\n\nA folder's own writer chooses its face. Without one, the window shows a plain tile in the folder's own colour.")]
     Face {
         /// Name or 8-character ID
         name: String,
-        /// One emoji, or one or two characters
+        /// One emoji
         face: Option<String>,
     },
 

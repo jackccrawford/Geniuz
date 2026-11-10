@@ -1077,15 +1077,15 @@ fn a_face_is_chosen_changed_and_cleared_and_earlier_faces_are_kept() {
 }
 
 #[test]
-fn a_face_is_one_emoji_or_two_characters_not_a_word() {
-    for ok in ["🍋", "🇫🇷", "👨‍👩‍👧", "L", "LJ", "é", "e\u{301}", "1️⃣", "二人", "👋🏽", "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}", "🍋🎃", "?!", ""] {
+fn a_face_is_one_emoji_and_never_letters() {
+    for ok in ["🍋", "🇫🇷", "👨‍👩‍👧", "1️⃣", "👋🏽", "⛷️", "🏴\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}", ""] {
         assert!(validate_face(ok).is_ok(), "{ok:?} should do");
     }
-    for bad in ["LIMEN", "Привет", "日本語", "ab🍋🍋🍋", "!!!!", "→→→", "🍋🎃🚪", "a b", "🍋 🎃", "line\nbreak", "🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋🍋"] {
+    for bad in ["L", "LJ", "é", "LIMEN", "Привет", "二人", "7", "a🍋", "!!!!", "🍋🎃🚪", "🍋 🎃", "line\nbreak"] {
         assert!(validate_face(bad).is_err(), "{bad:?} should be refused");
     }
     let (_tmp, reg) = setup();
     reg.create("Work", "", None).unwrap();
-    assert!(reg.set_face("Work", "a whole word").is_err());
+    assert!(reg.set_face("Work", "W").is_err());
     assert_eq!(reg.find("Work").unwrap().face, "", "a refused face changes nothing");
 }
