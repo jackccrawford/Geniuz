@@ -1,6 +1,6 @@
 [package]
 name = "geniuz"
-version = "5.0.9"
+version = "5.0.10"
 edition = "2021"
 description = "Your AI remembers now — persistent memory for AI agents"
 license = "MIT"
