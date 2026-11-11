@@ -279,8 +279,8 @@ fn recall_thread(
             let mut v = serde_json::json!({ "uuid": &e.memory_uuid[..8], "gist": e.gist, "created_at": e.created_at });
             if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8.min(p.len())]); }
             if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+                    if e.images_unavailable > 0 && e.content.is_some() { v["images_unavailable"] = serde_json::json!(e.images_unavailable); }
             if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
-            if e.images_unavailable > 0 { v["images_unavailable"] = serde_json::json!(e.images_unavailable); }
             v
         }).collect();
         return Ok(serde_json::to_string_pretty(&serde_json::json!({
@@ -363,6 +363,7 @@ fn recall_all(
             if let Some(s) = h.entry.score { v["score"] = serde_json::json!(format!("{:.3}", s)); }
             if !h.entry.images.is_empty() { v["images"] = serde_json::json!(h.entry.images); }
             if let Some(c) = content(h) { v["content"] = serde_json::json!(c); }
+            if h.entry.images_unavailable > 0 && v.get("content").is_some() { v["images_unavailable"] = serde_json::json!(h.entry.images_unavailable); }
             v
         }).collect();
         return serde_json::to_string_pretty(&serde_json::json!({
@@ -375,8 +376,10 @@ fn recall_all(
     let mut lines = Vec::new();
     for h in &found.hits {
         let score = h.entry.score.map(|s| format!(" ({:.3})", s)).unwrap_or_default();
-        lines.push(format!("{} | {} | {} | {}{}{}", h.address(), h.folder.name, shorten_ts(&h.entry.created_at), h.entry.gist, score, h.entry.image_mark()));
-        if let Some(c) = content(h) {
+        let words = content(h);
+        let mark = if words.is_some() { h.entry.image_mark_opened() } else { h.entry.image_mark() };
+        lines.push(format!("{} | {} | {} | {}{}{}", h.address(), h.folder.name, shorten_ts(&h.entry.created_at), h.entry.gist, score, mark));
+        if let Some(c) = words {
             lines.extend(c.lines().map(|l| format!("           {}", l)));
             lines.push(String::new());
         }
@@ -970,6 +973,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
                     if let Some(s) = e.score { v["score"] = serde_json::json!(format!("{:.3}", s)); }
                     if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+                    if e.images_unavailable > 0 && e.content.is_some() { v["images_unavailable"] = serde_json::json!(e.images_unavailable); }
                     v
                 }).collect();
                 let mut out = serde_json::json!({
@@ -1051,6 +1055,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8]); }
                     if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
                     if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+                    if e.images_unavailable > 0 && e.content.is_some() { v["images_unavailable"] = serde_json::json!(e.images_unavailable); }
                     v
                 }).collect();
                 return Ok(serde_json::to_string_pretty(&serde_json::json!({
@@ -1177,6 +1182,7 @@ fn run(cli: Cli) -> Result<String, String> {
                             if let Some(p) = parent_short { v["parent"] = serde_json::json!(p); }
                             if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
                             if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+                    if e.images_unavailable > 0 && e.content.is_some() { v["images_unavailable"] = serde_json::json!(e.images_unavailable); }
                             println!("{}", serde_json::to_string(&v).unwrap());
                         } else {
                             let uuid_short = &e.memory_uuid[..8.min(e.memory_uuid.len())];
@@ -1248,7 +1254,11 @@ fn run(cli: Cli) -> Result<String, String> {
                 format!("Searchable by meaning: {} of {}", embeddings, memories),
             ];
             // Said only when there are some: most folders hold words alone.
-            let images = db.images().unwrap_or_default();
+            // A folder from before images has no such table: quiet. Anything else is said.
+            let images = db.images().unwrap_or_else(|e| {
+                if !e.contains("no such table") { eprintln!("[geniuz] Couldn't count this folder's images: {}", e); }
+                Vec::new()
+            });
             if !images.is_empty() {
                 let bytes: u64 = images.iter().map(|i| i.bytes).sum();
                 let size = if bytes < 1_048_576 { format!("{} KB", (bytes + 512) / 1024) } else { format!("{:.1} MB", bytes as f64 / 1_048_576.0) };

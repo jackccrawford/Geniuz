@@ -186,7 +186,7 @@ A result line names a memory's images after the gist (`· image 1B2C3D4E`). The 
 
 The words are what search finds, so say in the content what the image shows and why it was kept. Those words stay for good, whatever later happens to the image. You can decline to keep an image; say so plainly if you do.
 
-On very rare occasions an image may be unavailable for retrieval. A memory read in full then says `· 1 image unavailable`, and asking for the image says the same. The memory's words are still the record: work from them, and ask the person if the picture mattered.
+On very rare occasions an image may be unavailable for retrieval. A memory read in full then says `· 1 image unavailable`, and asking for the image by its ID answers that the image is unavailable. The memory's words are still the record: work from them, and ask the person if the picture mattered.
 
 ### Withdrawing an image
 

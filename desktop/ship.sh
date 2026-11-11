@@ -123,7 +123,7 @@ hdiutil create -volname "$VOLNAME" \
 
 # The mount point is the third tab-separated field, and has a space in it now.
 MOUNT_POINT="$(hdiutil attach -readwrite -noverify -noautoopen "$DMG_RW" | \
-    grep -E '^/dev/' | tail -1 | cut -f3-)"
+    grep -E '^/dev/' | tail -1 | cut -f3- || true)"
 if [ ! -d "$MOUNT_POINT" ]; then
     echo "ERROR: couldn't find where the disk image mounted (got '$MOUNT_POINT')." >&2
     exit 1

@@ -478,6 +478,8 @@ fn find(
                 .semantic_search_with(&query, &window, limit, backend.as_deref())
                 .or_else(|_| db.keyword_search_in(&query, &window, limit))?;
             add_harvest(&db.harvest(&entries, &query));
+            let mut entries = entries;
+            db.mark_images(&mut entries);
             memories.extend(entries.into_iter().map(|e| (e, f)));
         }
         memories.sort_by(|a, b| {

@@ -370,7 +370,9 @@ class GeniuzService: ObservableObject {
                 self.cliOnPath = onPath
                 // Launch at login is set in the dashboard's Settings now, which only
                 // writes the file: macOS has to be told here, when the file changes.
-                if s.launchAtLogin != self.settings.launchAtLogin {
+                // Only from a file that is there: with none, `s` holds the defaults, and
+                // the default (on) must not undo a choice the person made.
+                if FileManager.default.fileExists(atPath: self.settingsPath), s.launchAtLogin != self.settings.launchAtLogin {
                     self.applyLaunchAtLogin(s.launchAtLogin)
                 }
                 self.settings = s

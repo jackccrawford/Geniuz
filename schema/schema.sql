@@ -121,7 +121,7 @@ CREATE TABLE IF NOT EXISTS images (
     CHECK((data IS NULL) = (withdrawn_at IS NOT NULL)),
     CHECK(data IS NULL OR length(data) >= 1),
     -- A withdrawn image keeps no size: that went with the bytes.
-    CHECK((width > 0 AND height > 0) OR withdrawn_at IS NOT NULL)
+    CHECK((withdrawn_at IS NULL AND width > 0 AND height > 0) OR (withdrawn_at IS NOT NULL AND width = 0 AND height = 0))
 );
 
 -- Which memories show which images, and in what order. One image can serve many

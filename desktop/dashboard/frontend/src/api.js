@@ -186,7 +186,8 @@ export function getSettings() {
 // Whether autocorrect is on, as last read. Kept here so a form can set its fields
 // as it is drawn, without waiting: a form that waits can finish drawing after the
 // person has moved on, and draw over what they moved on to. Read once when the
-// window opens, and again whenever settings are read or saved.
+// window opens, and again whenever settings are read or saved. A change made from
+// the command line while the window is open is not seen until then.
 let autocorrect = false;
 export function autocorrectOn() {
   return autocorrect;

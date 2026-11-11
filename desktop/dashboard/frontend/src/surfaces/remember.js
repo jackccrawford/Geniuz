@@ -264,7 +264,9 @@ export async function mount(container) {
   form.addEventListener('dragleave', () => form.classList.remove('is-dropping'));
   form.addEventListener('drop', (e) => {
     form.classList.remove('is-dropping');
-    // Always ours: a drop the form doesn't take must not reach the web view.
+    // Files are ours, taken or not: one the form doesn't take must not reach the
+    // web view. Dragged text is left alone, so it still lands in a field.
+    if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
     e.preventDefault();
     addImages(e.dataTransfer?.files || []);
   });
@@ -514,11 +516,14 @@ export async function mount(container) {
     const content = contentInput.value.trim();
     if (!content || !gist) return;
     submitBtn.disabled = true;
+    // Cancel waits too: pressed mid-keep, it would clear the form and leave, and the
+    // memory would be kept all the same.
+    cancelBtn.disabled = true;
     submitBtn.textContent = 'Keeping…';
     status.textContent = picked.length ? 'Keeping, and preparing the images…' : 'Keeping…';
     // Let the window draw the pressed button before the work starts.
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-    const idle = () => { submitBtn.textContent = 'Keep'; };
+    const idle = () => { submitBtn.textContent = 'Keep'; cancelBtn.disabled = false; };
     try {
       const chosen = chosenFolder();
       const parent = reply && reply.folder === chosen ? reply.uuid : null;

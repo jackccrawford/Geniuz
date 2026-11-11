@@ -638,7 +638,7 @@ fn execute_recall_all(reg: &Registry, backend: Option<&dyn EmbeddingBackend>, ar
         .iter()
         .map(|h| {
             let score = h.entry.score.map(|s| format!(" ({:.3})", s)).unwrap_or_default();
-            let line = format!("{} | {} | {} | {}{}{}", h.address(), h.folder.name, crate::shorten_ts(&h.entry.created_at), h.entry.gist, score, h.entry.image_mark());
+            let line = format!("{} | {} | {} | {}{}{}", h.address(), h.folder.name, crate::shorten_ts(&h.entry.created_at), h.entry.gist, score, if full { h.entry.image_mark_opened() } else { h.entry.image_mark() });
             let content = full
                 .then(|| DatabaseManager::open_existing(&h.folder.db_path.to_string_lossy()).ok()?.get_full_content(&h.entry.memory_uuid).ok().flatten())
                 .flatten();

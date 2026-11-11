@@ -28,10 +28,13 @@ function caps(keys) {
 function keysFromEvent(e) {
   if (['Meta', 'Control', 'Shift', 'Alt'].includes(e.key)) return null;
   const parts = [];
-  if (e.metaKey || e.ctrlKey) parts.push('CmdOrCtrl');
+  // The menu reads CmdOrCtrl as ⌘ on a Mac, so Control there is not it.
+  const primary = isMac() ? e.metaKey : e.ctrlKey;
+  if (primary) parts.push('CmdOrCtrl');
   if (e.altKey) parts.push('Alt');
-  if (e.shiftKey) parts.push('Shift');
+  // Shift alone doesn't count: Shift+A is a capital letter, typed all day.
   if (!parts.length) return null; // a plain letter would fire while typing
+  if (e.shiftKey) parts.push('Shift');
   const code = e.code.replace(/^Key/, '').replace(/^Digit/, '');
   parts.push(code === 'Comma' ? ',' : code);
   return parts.join('+');
@@ -47,6 +50,8 @@ function capsHtml(keys) {
 }
 
 let dialog = null;
+// Ends a change that is waiting for its keys, when the panel is opened again over it.
+let endRecording = null;
 
 function ensureDialog() {
   if (dialog) return dialog;
@@ -61,6 +66,7 @@ function ensureDialog() {
 
 export async function openShortcuts() {
   const d = ensureDialog();
+  if (endRecording) { endRecording(); endRecording = null; api.refreshMenu(true).catch(() => {}); }
   const first = isMac() ? '⌘1' : 'Ctrl+1';
   const ninth = isMac() ? '⌘9' : 'Ctrl+9';
   d.innerHTML = `
@@ -126,8 +132,9 @@ export async function openShortcuts() {
     if (stopRecording) return;
     // Claimed before the wait below, so a second click or a Reset can't slip in.
     let onKey = null;
-    const finish = () => { if (onKey) window.removeEventListener('keydown', onKey, true); stopRecording = null; };
+    const finish = () => { if (onKey) window.removeEventListener('keydown', onKey, true); stopRecording = null; endRecording = null; };
     stopRecording = finish;
+    endRecording = finish;
     btn.textContent = 'Press keys…';
     btn.classList.add('is-recording');
     list.querySelectorAll('[data-reset]').forEach((b) => { b.disabled = true; });

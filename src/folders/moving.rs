@@ -211,9 +211,16 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
         }
         let copied = staging.join(entry.file_name());
         std::fs::copy(&path, &copied).map_err(|e| format!("Couldn't copy {}: {}", path.display(), e))?;
-        // Opened for writing: Windows refuses to flush a file opened only to read
-        // ("Access is denied"), which stopped every move across drives there.
-        std::fs::OpenOptions::new().write(true).open(&copied)
+        // Windows refuses to flush a file opened only to read ("Access is denied"),
+        // which stopped every move across drives there, so there it is opened for
+        // writing. Elsewhere it is opened to read, as before: a read-only file in
+        // the folder, which the copy keeps read-only, must not stop the move.
+        let opened = if cfg!(windows) {
+            std::fs::OpenOptions::new().write(true).open(&copied)
+        } else {
+            std::fs::File::open(&copied)
+        };
+        opened
             .and_then(|f| f.sync_all())
             .map_err(|e| format!("Couldn't save {}: {}", copied.display(), e))?;
     }

@@ -57,8 +57,9 @@ jobs:
 
       - name: Build
         run: |
-          # Linux: the program looks for its bundled library in ../lib beside
-          # itself, so it starts without the launcher script setting a path.
+          # Linux: an rpath of $ORIGIN/../lib, so the system's loader finds the
+          # bundled ONNX Runtime beside the program even when it is started
+          # without the launcher script. install.sh still installs the launcher.
           if [ "${{ runner.os }}" = "Linux" ]; then
             export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/../lib'
           fi
