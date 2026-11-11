@@ -1456,8 +1456,10 @@ fn geniuz_binary_path() -> String {
 
 /// The file another program should start. The install script puts the program at
 /// `geniuz.bin` beside a small `geniuz` launcher that tells it where its bundled
-/// library is; started directly, `geniuz.bin` can't find the library and stops
-/// (Lunar, 10 Nov 2026: every connection `mcp install` wrote on Linux was dead).
+/// library is. A build from before 5.1.0 can't find that library when `geniuz.bin`
+/// is started directly, and stops (Lunar, 10 Nov 2026: every connection `mcp
+/// install` wrote on Linux was dead). Later builds find it themselves, and the
+/// launcher is still the name a person knows, so it is still the one written.
 fn launcher_for(exe: &std::path::Path) -> std::path::PathBuf {
     if exe.extension().and_then(|e| e.to_str()) == Some("bin") {
         let launcher = exe.with_extension("");

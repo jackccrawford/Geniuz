@@ -26,7 +26,7 @@ To build the dashboard as well: `cd desktop/dashboard && cargo tauri build`.
 
 ### Updates
 
-On a Mac, the menubar tells you when a newer Geniuz is out, and **Download** opens it. Install it the same way, by dragging it to Applications. Under **Settings → Updates** you choose how often it checks (daily, weekly, or only when you ask) or check now. The dashboard's Status page shows the same answer. A check asks GitHub for the latest release and sends nothing from your folders.
+On a Mac, the menubar tells you when a newer Geniuz is out, and **Download** opens it. Install it the same way, by dragging it to Applications. In the dashboard's Settings, under **Updates**, you choose how often it checks (daily, weekly, or only when you ask) or check now. The dashboard's Status page shows the same answer. A check asks GitHub for the latest release and sends nothing from your folders.
 
 ## Connect your AI
 
@@ -61,6 +61,12 @@ geniuz recall
 geniuz recall -l 5
 geniuz recall --all "topic"
 geniuz recall 13625F6B:3487B9B0
+
+geniuz keep -f Work -c "The error dialog" -g "bug: save dialog" --image shot.png
+geniuz keep -f Work -c "Same dialog, fixed" -g "fix: save dialog" --image-id 1B2C3D4E
+geniuz image -f Work
+geniuz image -f Work 1B2C3D4E -o shot.webp
+
 geniuz tui
 geniuz dashboard
 geniuz capture -f Docs ./docs/
@@ -121,9 +127,35 @@ The memories view loads 100 at a time, newest or oldest first, and loads more as
 
 Editing a description keeps the old wording. Your first folder, "My memory", can be renamed, but it can't be moved or archived, because other files live beside it.
 
+## Images
+
+A memory can show up to five images: a screenshot, a chart, a photo of a whiteboard. The words are still what search finds, so say in the content what the image shows.
+
+**In the dashboard**, the Keep page has an Images row. Paste an image, drag one onto it, or choose a file. A memory that has images shows a small mark in the list, and the images themselves when you open it.
+
+**From the command line**, add `--image <file>` to `keep`, once per image, or `--image-id <ID>` to show an image that is already kept. One image can serve many memories. `geniuz image` lists a folder's images, and `geniuz image <ID> -o file.webp` takes one out.
+
+**Through an AI tool**, `keep` takes `images` (file paths, or the IDs of images already kept), and `recall` takes `image` to hand one back to look at. A result line names a memory's images after the gist, such as `· image 1B2C3D4E`. The picture is only loaded when it is asked for by that ID, so recalling a memory costs nothing extra.
+
+Geniuz reads PNG, JPEG, GIF, WebP, BMP and TIFF files of up to 40 MB. It keeps each one as WebP, no wider or taller than 1568 pixels, inside the folder's own file. There are no loose image files to lose, and Export carries them.
+
+### Taking an image back
+
+An image is the one thing in Geniuz that can be removed. If you kept a picture you shouldn't have, its owner can have it erased, or have another put in its place, such as the same screenshot with a number blurred.
+
+```bash
+geniuz image -f Work admin withdraw 1B2C3D4E
+geniuz image -f Work admin withdraw 1B2C3D4E --confirm <FULL-ID>
+geniuz image -f Work admin replace 1B2C3D4E blurred.png
+```
+
+It takes two runs. The first changes nothing: it prints the image, the memories that show it, and the line to run next. The second carries `--confirm` with the image's full ID, and does it. If you use Geniuz through an AI agent that can run commands, ask it to do this for you. It is not offered through MCP, so an AI tool that can't run commands can't do it.
+
+Afterwards the image is gone from the folder. A memory that showed it says `1 image unavailable` when read in full, and nothing more. What it doesn't reach: backups, exports, and anything already written about the image, in a memory or in a conversation. The memory's words stay.
+
 ## Keyboard shortcuts
 
-In the dashboard. Change any of these under Settings, and the menu follows at once.
+In the dashboard. **Help → Keyboard Shortcuts** shows them all; click one there to change it, and the menu follows at once. Settings has a row that opens the same list.
 
 | What it does | Keys, on a Mac |
 |---|---|
@@ -145,7 +177,7 @@ On Windows and Linux, use Ctrl in place of ⌘.
 
 **Note on `geniuz watch --exec`.** Your command runs through the shell with your own rights. `{gist}`, `{content}` and `{json}` reach it as shell variables, so put them in double quotes, not single. Shell syntax in a memory does not run.
 
-**Do not store secrets.** A memory cannot be removed through Geniuz.
+**Do not store secrets.** A memory cannot be removed through Geniuz. An image can be taken back (see Images above); the words kept with it cannot.
 
 ## Where your data lives
 
@@ -160,6 +192,20 @@ Read the schema freely, and write through Geniuz, which keeps embeddings and ide
 **A memory file from before Geniuz 4.0** isn't opened: Geniuz says so and names [`schema/migrate-before-4.0.sql`](../schema/migrate-before-4.0.sql), which brings it forward once, with a backup first. The steps are in the script, written so an AI agent can carry them out.
 
 ## Settings
+
+Your choices are in one place: the dashboard's Settings page. On a Mac, the gear in the menubar opens it.
+
+| Setting | What it does |
+|---|---|
+| Launch Geniuz at login | Starts the menubar app when you sign in |
+| Recent memories in the menu bar | How many the menubar shows; 0 hides them |
+| Autocorrect as you type | Off unless you turn it on. What you keep is read by an AI, which understands a typo; autocorrect can change a word you meant |
+| Check for updates automatically, and how often | Daily, weekly, or only when you ask |
+| Keyboard shortcuts | Opens the list, where you can change one |
+
+`geniuz settings list` shows the same choices from the command line, and `geniuz settings set <name> <value>` changes one. They are kept in `settings.json`.
+
+These variables are for unusual setups:
 
 | Variable | What it does |
 |---|---|
