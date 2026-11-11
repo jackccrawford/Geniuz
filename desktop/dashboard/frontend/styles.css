@@ -50,8 +50,10 @@
 
   --fs-micro: 11px;
   /* Hints, notes and status lines. A dozen rules used this before anything
-     defined it, so they silently fell back to the size around them. */
-  --fs-meta:  12px;
+     defined it, so they drew at the size around them, 13px. Kept at 13px, the
+     size everyone has been seeing (Jack, 10 Nov 2026). Text size is changed for
+     the whole window at once, by View > Bigger/Smaller, which zooms every size here. */
+  --fs-meta:  13px;
   --fs-body:  13px;
   --fs-medium:14px;
   --fs-large: 17px;
