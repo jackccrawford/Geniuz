@@ -4,6 +4,8 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     name = "geniuz",
+    // Help says "geniuz" even where the program file is geniuz.bin behind a launcher.
+    bin_name = "geniuz",
     version,
     about = "Your AI remembers now",
     long_about = "GENIUZ: Your AI remembers now.\n\nYour AI starts every conversation from zero. Geniuz keeps what matters,\nthe calls you made and the reasons behind them, on your own computer,\nwhere any AI you use can find it: Claude Desktop through MCP, or any\nagent that can run a command. A memory is never edited, so the record holds.",

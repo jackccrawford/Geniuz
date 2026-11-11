@@ -1292,8 +1292,41 @@ fn config_paths() -> Vec<std::path::PathBuf> {
 fn geniuz_binary_path() -> String {
     // Use the currently running binary's path
     std::env::current_exe()
-        .map(|p| p.to_string_lossy().to_string())
+        .map(|p| launcher_for(&p).to_string_lossy().to_string())
         .unwrap_or_else(|_| "geniuz".to_string())
+}
+
+/// The file another program should start. The install script puts the program at
+/// `geniuz.bin` beside a small `geniuz` launcher that tells it where its bundled
+/// library is; started directly, `geniuz.bin` can't find the library and stops
+/// (Lunar, 10 Nov 2026: every connection `mcp install` wrote on Linux was dead).
+fn launcher_for(exe: &std::path::Path) -> std::path::PathBuf {
+    if exe.extension().and_then(|e| e.to_str()) == Some("bin") {
+        let launcher = exe.with_extension("");
+        if launcher.is_file() {
+            return launcher;
+        }
+    }
+    exe.to_path_buf()
+}
+
+#[cfg(test)]
+mod launcher_tests {
+    use super::launcher_for;
+
+    #[test]
+    fn a_connection_names_the_launcher_not_the_program_behind_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("geniuz.bin");
+        std::fs::write(&program, b"").unwrap();
+        // No launcher beside it: the program itself is all there is.
+        assert_eq!(launcher_for(&program), program);
+        let launcher = dir.path().join("geniuz");
+        std::fs::write(&launcher, b"").unwrap();
+        assert_eq!(launcher_for(&program), launcher);
+        // An ordinary install has no .bin and is left alone.
+        assert_eq!(launcher_for(&launcher), launcher);
+    }
 }
 
 /// macOS runs a quarantined app from a random path that disappears when it quits,
