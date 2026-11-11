@@ -1247,6 +1247,13 @@ fn run(cli: Cli) -> Result<String, String> {
                 format!("Memories: {}", memories),
                 format!("Searchable by meaning: {} of {}", embeddings, memories),
             ];
+            // Said only when there are some: most folders hold words alone.
+            let images = db.images().unwrap_or_default();
+            if !images.is_empty() {
+                let bytes: u64 = images.iter().map(|i| i.bytes).sum();
+                let size = if bytes < 1_048_576 { format!("{} KB", (bytes + 512) / 1024) } else { format!("{:.1} MB", bytes as f64 / 1_048_576.0) };
+                lines.push(format!("Images: {}, {}", images.len(), size));
+            }
             if embeddings < memories {
                 lines.push("Run 'geniuz backfill' to make the rest searchable by meaning.".to_string());
             } else if memories > 0 {
