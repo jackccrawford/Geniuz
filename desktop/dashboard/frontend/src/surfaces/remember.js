@@ -556,7 +556,8 @@ export async function mount(container) {
       }
       status.textContent = `Kept · ${shortUuid}${answered}`;
       // Navigate to Recent and select the new memory
-      setTimeout(() => navigate('recent'), 300);
+      // Only if the person is still here: they may have gone to another page meanwhile.
+      setTimeout(() => { if (getState().currentSurface === 'remember') navigate('recent'); }, 300);
     } catch (err) {
       status.textContent = `Couldn't save: ${err?.message || err}`;
       idle();

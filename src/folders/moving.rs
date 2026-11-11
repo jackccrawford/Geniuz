@@ -61,7 +61,7 @@ impl Registry {
                 // has been lost, because the -wal file moves with the directory.
                 drop(lock);
                 std::fs::rename(&dir, &target)
-                    .map_err(|e| format!("Couldn't move {}: {}{}", dir.display(), e, held_open_hint(&e)))?;
+                    .map_err(|e| format!("Couldn't move {}: {}{}", dir.display(), e, held_open_hint(&e, false)))?;
                 None
             }
         };
@@ -82,20 +82,24 @@ impl Registry {
     }
 }
 
+/// "Access is denied" on Windows, when a folder's directory is renamed, most
+/// often means some other program has a file in it open: Windows won't rename a
+/// directory in use. `finishes_later` is for the step after the move is recorded,
+/// where running the move again is not the remedy.
+fn held_open_hint(e: &std::io::Error, finishes_later: bool) -> &'static str {
+    if !(cfg!(windows) && e.kind() == std::io::ErrorKind::PermissionDenied) {
+        ""
+    } else if finishes_later {
+        "\n  Most often this means another program has the folder open. Close the Geniuz window and any AI app connected to Geniuz; the move finishes the next time Geniuz runs after that."
+    } else {
+        "\n  Most often this means another program has the folder open. Close the Geniuz window and any AI app connected to Geniuz, then run the move again. If it still fails, check that you can write to both places."
+    }
+}
+
 /// Write a complete backup of a live database to one file: flush the `-wal`
 /// file and hold off writers first, since a plain copy can miss what is in it.
 /// The backup is a file to keep, not a folder to use: it carries the same UUIDs,
 /// so `add` refuses it while the original is present.
-/// What to do about "Access is denied" on Windows, which there means some other
-/// program has a file in the folder open: Windows won't rename a directory in use.
-fn held_open_hint(e: &std::io::Error) -> &'static str {
-    if cfg!(windows) && e.kind() == std::io::ErrorKind::PermissionDenied {
-        "\n  Another program has this folder open. Close the Geniuz window and any AI app connected to Geniuz, then run the move again."
-    } else {
-        ""
-    }
-}
-
 pub fn backup_to(db: &Path, target: &Path) -> Result<u64, String> {
     let lock = quiesce(db)?;
     let bytes = std::fs::copy(db, target).map_err(|e| format!("Copy failed: {}", e))?;
@@ -240,7 +244,7 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     let retired = archive.join(format!("{}{}{}", folder.uuid, MOVED_MARK, stamp));
     std::fs::rename(dir, &retired)
-        .map_err(|e| format!("Couldn't retire {}: {}. Geniuz will finish this next time it runs.{}", dir.display(), e, held_open_hint(&e)))?;
+        .map_err(|e| format!("Couldn't retire {}: {}. Geniuz will finish this next time it runs.{}", dir.display(), e, held_open_hint(&e, true)))?;
     drop(owner);
     publish(&staging, &dest.join(&folder.uuid))
         .map_err(|e| format!("{} Geniuz will finish this next time it runs.", e))?;
