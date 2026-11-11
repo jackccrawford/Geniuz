@@ -760,7 +760,7 @@ fn run(cli: Cli) -> Result<String, String> {
             let memories = if n == 1 { "memory" } else { "memories" };
             Ok(match with {
                 Some(_) => format!("Replaced image {short}: {} x {}, in {n} {memories}.{log}", change.image.width, change.image.height),
-                None => format!("Withdrew image {short}: it is erased from this folder. It is no longer listed, and {n} {memories} now say an image is unavailable.{log}"),
+                None => format!("Withdrew image {short}: it is erased from this folder. It is no longer listed, and {n} {memories} now {} an image is unavailable.{log}", if n == 1 { "says" } else { "say" }),
             })
         }
 
