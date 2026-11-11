@@ -280,6 +280,7 @@ fn recall_thread(
             if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8.min(p.len())]); }
             if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
             if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
+            if e.images_unavailable > 0 { v["images_unavailable"] = serde_json::json!(e.images_unavailable); }
             v
         }).collect();
         return Ok(serde_json::to_string_pretty(&serde_json::json!({
@@ -296,7 +297,8 @@ fn recall_thread(
     for e in &thread.entries {
         let parent = e.parent_uuid.as_deref()
             .map(|p| format!(" <- {}", &p[..8.min(p.len())])).unwrap_or_default();
-        lines.push(format!("{} | {} | {}{}{}", &e.memory_uuid[..8], shorten_ts(&e.created_at), e.gist, parent, e.image_mark()));
+        let mark = if e.content.is_some() { e.image_mark_opened() } else { e.image_mark() };
+        lines.push(format!("{} | {} | {}{}{}", &e.memory_uuid[..8], shorten_ts(&e.created_at), e.gist, parent, mark));
         if let Some(ref content) = e.content {
             for line in content.lines() {
                 lines.push(format!("           {}", line));
@@ -708,54 +710,42 @@ fn run(cli: Cli) -> Result<String, String> {
             } else {
                 get_db_to_keep()?
             };
-            let (id, file) = match &action {
-                cli::ImageAdmin::Withdraw { id } => (id, None),
-                cli::ImageAdmin::Replace { id, file } => (id, Some(file)),
+            let (id, file, confirm) = match &action {
+                cli::ImageAdmin::Withdraw { id, confirm } => (id, None, confirm),
+                cli::ImageAdmin::Replace { id, file, confirm } => (id, Some(file), confirm),
             };
             let Some((info, _)) = db.image(id)? else {
                 return Err(format!("No image {} in this folder. `geniuz image -f <folder>` lists them.", id.to_uppercase()));
             };
             let short = info.image_uuid[..8].to_string();
-            // Already withdrawn: say so now, before asking anyone to type anything.
-            if let Some(at) = &info.withdrawn_at {
-                return Err(format!(
-                    "Image {short} was withdrawn on {}. Its bytes are gone and it stays that way: keep a new image in a reply instead.",
-                    shorten_ts(at)
-                ));
-            }
-            // A person at a terminal, or nothing. No flag stands in for them: the ID
-            // is listed by `geniuz image`, so a flag would let any script do this.
-            {
-                use std::io::IsTerminal;
-                if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
-                    return Err("This needs a person at a terminal: it asks you to type the image's ID. Nothing was changed.".to_string());
-                }
+            if info.unavailable {
+                return Err(format!("Image {short} is already unavailable, and stays that way: keep a new image in a reply instead."));
             }
             // Read and prepare the new image first, so a file that can't be read changes nothing.
             let with = match file {
-                Some(f) if f == "-" => return Err("Give the new image as a file: the terminal is needed for your answer.".to_string()),
                 Some(f) => Some(geniuz::pictures::prepare(&read_image(f)?).map_err(|e| format!("{}: {}", f, e))?),
                 None => None,
             };
             let shown_in = db.memories_showing(&info.image_uuid)?;
             let doing = if with.is_some() { "replace" } else { "withdraw" };
-            let go = {
-                use std::io::Write;
-                eprintln!(
-                    "This will {doing} image {short} ({} x {}), shown in {} {}: {}",
-                    info.width, info.height, shown_in.len(),
-                    if shown_in.len() == 1 { "memory" } else { "memories" }, shown_in.join(" ")
-                );
-                eprintln!("  Every one of them changes. An agent that looked at it before may still hold the old image.");
-                eprintln!("  It can't be undone, and it doesn't reach backups, exports or agents' transcripts.");
-                eprint!("Type the image's ID to go ahead: ");
-                let _ = std::io::stderr().flush();
-                let mut line = String::new();
-                std::io::stdin().read_line(&mut line).map_err(|e| format!("Couldn't read your answer: {}", e))?;
-                line.trim().eq_ignore_ascii_case(&short)
+            // Two runs. The first only says what would change, so whoever asked can be
+            // shown it; the second must carry the image's whole ID, which no list line
+            // prints, so it can't be done in one step from a short ID alone.
+            let Some(confirm) = confirm else {
+                let folder = IN_FOLDER.get().and_then(|f| f.clone()).unwrap_or_default();
+                let tail = match file { Some(f) => format!(" {f}"), None => String::new() };
+                return Ok(format!(
+                    "Nothing was changed. This would {doing} image {short} ({} x {}, kept {}), shown in {} {}: {}\n  \
+                     Every one of them changes. An agent that looked at it before may still hold the old image.\n  \
+                     It can't be undone, and it doesn't reach backups, exports, or what was already written about the image.\n\
+                     To go ahead, once the folder's owner has seen this:\n  \
+                     geniuz image -f {folder} admin {doing} {short}{tail} --confirm {}",
+                    info.width, info.height, shorten_ts(&info.created_at), shown_in.len(),
+                    if shown_in.len() == 1 { "memory" } else { "memories" }, shown_in.join(" "), info.image_uuid
+                ));
             };
-            if !go {
-                return Err(format!("That isn't {short}, so nothing was changed."));
+            if !confirm.trim().eq_ignore_ascii_case(&info.image_uuid) {
+                return Err("--confirm takes the image's full ID, and that isn't it. Nothing was changed. Run it without --confirm to see the full ID.".to_string());
             }
             let change = match &with {
                 Some(p) => db.replace_image(&info.image_uuid, p)?,
@@ -770,7 +760,7 @@ fn run(cli: Cli) -> Result<String, String> {
             let memories = if n == 1 { "memory" } else { "memories" };
             Ok(match with {
                 Some(_) => format!("Replaced image {short}: {} x {}, in {n} {memories}.{log}", change.image.width, change.image.height),
-                None => format!("Withdrew image {short}: its bytes are erased from this folder. {n} {memories} now say an image was withdrawn.{log}"),
+                None => format!("Withdrew image {short}: it is erased from this folder. It is no longer listed, and {n} {memories} now say an image is unavailable.{log}"),
             })
         }
 
@@ -787,10 +777,9 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
                 let mut lines = Vec::new();
                 for i in &all {
-                    let state = match (&i.withdrawn_at, &i.replaced_at) {
-                        (Some(at), _) => format!("  withdrawn {}", shorten_ts(at)),
-                        (None, Some(at)) => format!("  replaced {}", shorten_ts(at)),
-                        _ => String::new(),
+                    let state = match &i.replaced_at {
+                        Some(at) => format!("  replaced {}", shorten_ts(at)),
+                        None => String::new(),
                     };
                     lines.push(format!(
                         "{}  {} x {}  {}  {}  in {} {}{}",
@@ -803,20 +792,15 @@ fn run(cli: Cli) -> Result<String, String> {
             let Some((info, data)) = db.image(&id)? else {
                 return Err(format!("No image {} in this folder. `geniuz image -f <folder>` lists them.", id.to_uppercase()));
             };
-            let shown_in = db.memories_showing(&info.image_uuid)?;
-            if let Some(at) = &info.withdrawn_at {
-                // There are no bytes to give. Say what happened, in JSON too.
+            if info.unavailable {
+                // There are no bytes to give, and no more to say than that.
                 if json {
-                    let mut v = serde_json::to_value(&info).unwrap();
-                    v["memories"] = serde_json::json!(shown_in);
-                    return Ok(serde_json::to_string_pretty(&v).unwrap());
+                    return Ok(serde_json::to_string_pretty(&serde_json::json!({ "image_uuid": info.image_uuid, "unavailable": true })).unwrap());
                 }
-                let said = format!(
-                    "Image {} was withdrawn on {} by the folder's owner. Its bytes are gone.\n  Shown in: {}",
-                    &info.image_uuid[..8], shorten_ts(at), shown_in.join(" ")
-                );
+                let said = format!("Image {} is unavailable.", &info.image_uuid[..8]);
                 return if base64 || out.is_some() { Err(said) } else { Ok(said) };
             }
+            let shown_in = db.memories_showing(&info.image_uuid)?;
             if base64 {
                 use base64::Engine;
                 return Ok(serde_json::json!({
@@ -1017,7 +1001,9 @@ fn run(cli: Cli) -> Result<String, String> {
                 if let Some(s) = e.score {
                     suffix.push_str(&format!(" ({:.3})", s));
                 }
-                lines.push(format!("{} | {} | {}{}{}", uuid_short, ts, e.gist, suffix, e.image_mark()));
+                // Read with its words, a memory also says when an image it showed is unavailable.
+                let mark = if e.content.is_some() { e.image_mark_opened() } else { e.image_mark() };
+                lines.push(format!("{} | {} | {}{}{}", uuid_short, ts, e.gist, suffix, mark));
                 if let Some(ref content) = e.content {
                     for line in content.lines() {
                         lines.push(format!("           {}", line));
@@ -1090,7 +1076,9 @@ fn run(cli: Cli) -> Result<String, String> {
                 if let Some(ref p) = e.parent_uuid {
                     suffix.push_str(&format!(" <- {}", &p[..8.min(p.len())]));
                 }
-                lines.push(format!("{} | {} | {}{}{}", uuid_short, ts, e.gist, suffix, e.image_mark()));
+                // Read with its words, a memory also says when an image it showed is unavailable.
+                let mark = if e.content.is_some() { e.image_mark_opened() } else { e.image_mark() };
+                lines.push(format!("{} | {} | {}{}{}", uuid_short, ts, e.gist, suffix, mark));
                 if let Some(ref content) = e.content {
                     for line in content.lines() {
                         lines.push(format!("           {}", line));
@@ -1349,6 +1337,7 @@ mod watch_exec_tests {
             content: Some(content.into()),
             score: None,
             images: Vec::new(),
+            images_unavailable: 0,
         };
         let (cmd, vars) = watch_exec_command(template, &e);
         let out = std::process::Command::new("sh").arg("-c").arg(&cmd).envs(vars).output().unwrap();
