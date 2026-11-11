@@ -118,11 +118,11 @@ pub enum Command {
         admin: Option<ImageCommand>,
 
         /// Write the image to this file, or - for a pipe
-        #[arg(short, long, value_name = "FILE")]
+        #[arg(short, long, value_name = "FILE", requires = "id")]
         out: Option<String>,
 
         /// Print it as the Base64 block a model is handed
-        #[arg(long, conflicts_with = "out")]
+        #[arg(long, conflicts_with = "out", requires = "id")]
         base64: bool,
 
         /// Output as JSON

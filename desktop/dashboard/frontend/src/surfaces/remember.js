@@ -487,6 +487,7 @@ export async function mount(container) {
   setTimeout(() => (reply ? contentInput : gistInput).focus(), 0);
 
   cancelBtn.addEventListener('click', () => {
+    clearImages(); // lets go of the previews, which a browser otherwise holds until the window closes
     clearDraft();
     navigate('recent');
   });
@@ -507,9 +508,18 @@ export async function mount(container) {
     try {
       const chosen = chosenFolder();
       const parent = reply && reply.folder === chosen ? reply.uuid : null;
-      const images = await Promise.all(picked.map((p) => asDataUrl(p.file)));
+      // Exactly these are sent, and exactly these are taken off afterwards: one
+      // added while this was keeping stays in the form for the next memory.
+      const sent = picked.slice();
+      const images = await Promise.all(sent.map((p) => asDataUrl(p.file)));
       const shortUuid = await api.rememberMemory(gist || null, content, chosen, parent, images);
-      clearImages();
+      for (const p of sent) {
+        const at = picked.indexOf(p);
+        if (at >= 0) picked.splice(at, 1);
+        URL.revokeObjectURL(p.url);
+      }
+      sayImages('');
+      drawImages();
       const answered = parent ? `, a reply to ${String(parent).slice(0, 8).toUpperCase()}` : '';
       clearDraft();
       if (chosen && chosen !== shown?.uuid) {

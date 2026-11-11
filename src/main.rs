@@ -148,18 +148,18 @@ pub fn resolve_db_path() -> Result<PathBuf, String> {
     geniuz::folders::Registry::from_env().resolve(flag, env_db.as_deref(), cwd.as_deref())
 }
 
-/// An image's bytes, from a file or (for `-`) the pipe. The file is only read.
+/// An image's bytes, from a file or (for `-`) the pipe. The file is only read, and
+/// through a cap: something far larger than an image is refused while it is being
+/// read, not after all of it is in memory.
 fn read_image(source: &str) -> Result<Vec<u8>, String> {
     if source == "-" {
-        use std::io::{IsTerminal, Read};
+        use std::io::IsTerminal;
         if std::io::stdin().is_terminal() {
             return Err("No image on the pipe.\n  Use one of:\n    --image path/to/shot.png\n    cat shot.png | geniuz keep -f <folder> -c \"...\" -g \"...\" --image -".to_string());
         }
-        let mut buf = Vec::new();
-        std::io::stdin().read_to_end(&mut buf).map_err(|e| format!("Couldn't read the image from the pipe: {}", e))?;
-        return Ok(buf);
+        return geniuz::pictures::read_capped(std::io::stdin().lock()).map_err(|e| format!("The image on the pipe: {}", e));
     }
-    std::fs::read(source).map_err(|e| {
+    let file = std::fs::File::open(source).map_err(|e| {
         // macOS names screenshots with a narrow no-break space before AM/PM, which
         // looks like a space and isn't one: a hand-typed name misses the file.
         let hint = if e.kind() == std::io::ErrorKind::NotFound && (source.contains(" AM") || source.contains(" PM")) {
@@ -168,7 +168,8 @@ fn read_image(source: &str) -> Result<Vec<u8>, String> {
             ""
         };
         format!("Couldn't read {}: {}{}", source, e, hint)
-    })
+    })?;
+    geniuz::pictures::read_capped(file).map_err(|e| format!("{}: {}", source, e))
 }
 
 pub fn get_db() -> Result<db::DatabaseManager, String> {
@@ -832,10 +833,17 @@ fn run(cli: Cli) -> Result<String, String> {
                     std::io::stdout().write_all(&data).map_err(|e| format!("Couldn't write the image: {}", e))?;
                     return Ok(String::new());
                 }
-                if std::path::Path::new(&out).exists() {
-                    return Err(format!("{} already exists, and Geniuz won't write over it. Choose another name.", out));
-                }
-                std::fs::write(&out, &data).map_err(|e| format!("Couldn't write {}: {}", out, e))?;
+                // Created only if nothing is there, in one step: checking first and
+                // writing after could follow a link or lose a race with another program.
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&out).map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::AlreadyExists {
+                        format!("{} already exists, and Geniuz won't write over it. Choose another name.", out)
+                    } else {
+                        format!("Couldn't write {}: {}", out, e)
+                    }
+                })?;
+                file.write_all(&data).map_err(|e| format!("Couldn't write {}: {}", out, e))?;
                 return Ok(format!("Wrote {} ({} x {}, {})", out, info.width, info.height, kb(info.bytes)));
             }
             if json {

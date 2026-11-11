@@ -1098,7 +1098,7 @@ fn a_moved_folder_refuses_images_and_an_older_file_still_closes() {
     let path = dir.path().join("memory.db");
     crate::db::DatabaseManager::new(path.to_str().unwrap()).unwrap();
     let conn = rusqlite::Connection::open(&path).unwrap();
-    let sql = super::moving::fence_sql(&conn);
+    let sql = super::moving::fence_sql(&conn).unwrap();
     assert!(sql.contains("_images_insert") && sql.contains("_memory_images_insert"), "{sql}");
     conn.execute_batch(&sql).unwrap();
     let err = conn
@@ -1110,7 +1110,7 @@ fn a_moved_folder_refuses_images_and_an_older_file_still_closes() {
     let old = dir.path().join("old.db");
     let conn = rusqlite::Connection::open(&old).unwrap();
     conn.execute_batch("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE memories (memory_uuid TEXT);").unwrap();
-    let sql = super::moving::fence_sql(&conn);
+    let sql = super::moving::fence_sql(&conn).unwrap();
     assert!(!sql.contains("images"), "{sql}");
     conn.execute_batch(&sql).unwrap();
     assert!(conn.execute("INSERT INTO memories VALUES ('x')", []).is_err());

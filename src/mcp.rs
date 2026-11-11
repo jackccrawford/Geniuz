@@ -134,6 +134,7 @@ fn base_tool_definitions() -> Value {
                         },
                         "images": {
                             "type": "array",
+                            "maxItems": 5,
                             "items": { "type": "string" },
                             "description": "Optional. Up to 5 images to keep with the note, such as a screenshot or a diagram: each is the path of an image file on this computer, or the ID of an image this folder already holds (so several notes can show one image). The file is read once and left as it is; a downscaled copy is stored in the folder. The note's words are how the image is found later, so they say what it shows. An image stays with every note that shows it, and only the person can take one back, so it's worth a look at what else is in a screenshot before keeping it."
                         }
@@ -245,13 +246,21 @@ fn execute_keep(
         let Some(list) = list.as_array() else {
             return ("Error: images is a list: file paths, or IDs of images this folder holds.".to_string(), true);
         };
+        // Counted before any file is opened: a long list is refused without reading one.
+        if list.len() > geniuz::pictures::MAX_PER_MEMORY {
+            return (format!(
+                "Error: A memory carries at most {} images; this one has {}. Keep the rest in a reply.",
+                geniuz::pictures::MAX_PER_MEMORY, list.len()
+            ), true);
+        }
         for item in list {
             let Some(item) = item.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
                 return ("Error: each image is a file path or an image ID.".to_string(), true);
             };
             if std::path::Path::new(item).is_file() {
-                let prepared = std::fs::read(item)
+                let prepared = std::fs::File::open(item)
                     .map_err(|e| format!("couldn't read it: {}", e))
+                    .and_then(geniuz::pictures::read_capped)
                     .and_then(|bytes| geniuz::pictures::prepare(&bytes));
                 match prepared {
                     Ok(p) => attach.push(geniuz::db::Attach::New(p)),

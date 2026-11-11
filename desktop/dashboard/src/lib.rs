@@ -274,8 +274,16 @@ fn remember_memory(
     };
     // Pasted or dropped images arrive as `data:` addresses. Each is prepared by the
     // same code the command line uses, before anything is kept.
+    let images = images.unwrap_or_default();
+    // Counted before any is decoded: a long list is refused without preparing one.
+    if images.len() > geniuz::pictures::MAX_PER_MEMORY {
+        return Err(format!(
+            "A memory carries at most {} images; this one has {}. Keep the rest in a reply.",
+            geniuz::pictures::MAX_PER_MEMORY, images.len()
+        ));
+    }
     let mut attach = Vec::new();
-    for (n, url) in images.unwrap_or_default().iter().enumerate() {
+    for (n, url) in images.iter().enumerate() {
         let picture = geniuz::pictures::from_data_url(url)
             .and_then(|bytes| geniuz::pictures::prepare(&bytes))
             .map_err(|e| format!("Image {}: {}", n + 1, e))?;
@@ -338,14 +346,16 @@ fn get_activity(days: Option<u32>) -> Result<Vec<DailyCount>, String> {
 #[tauri::command]
 fn semantic_search(query: String, limit: Option<u32>) -> Result<Vec<RecentMemory>, String> {
     let db = open_db()?;
-    let entries = db.semantic_search(&query, limit.unwrap_or(20) as usize)?;
+    let mut entries = db.semantic_search(&query, limit.unwrap_or(20) as usize)?;
+    db.mark_images(&mut entries);
     Ok(entries.into_iter().map(map_recent).collect())
 }
 
 #[tauri::command]
 fn keyword_search(query: String, limit: Option<u32>) -> Result<Vec<RecentMemory>, String> {
     let db = open_db()?;
-    let entries = db.keyword_search(&query, limit.unwrap_or(20) as usize)?;
+    let mut entries = db.keyword_search(&query, limit.unwrap_or(20) as usize)?;
+    db.mark_images(&mut entries);
     Ok(entries.into_iter().map(map_recent).collect())
 }
 

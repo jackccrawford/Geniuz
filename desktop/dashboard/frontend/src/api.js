@@ -130,13 +130,17 @@ export function openPath(path) {
 // -------------------------------------------------------------------------
 
 /**
- * Fetch full details for a single memory by UUID.
- * Returns: { uuid, gist, content, created_at, parent_uuid } | null
+ * One image as a `data:` address the page can show.
+ * Returns: string. Rejects if the image was withdrawn or isn't in the folder.
  */
 export function getImage(id, folder = null) {
   return invoke('get_image', { id, folder });
 }
 
+/**
+ * Fetch full details for a single memory by UUID.
+ * Returns: { uuid, gist, content, created_at, parent_uuid, images } | null
+ */
 export function getMemoryDetail(uuid, folder = null) {
   return invoke('get_memory_detail', { uuid, folder });
 }

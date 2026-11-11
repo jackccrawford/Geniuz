@@ -1370,6 +1370,15 @@ impl DatabaseManager {
     /// None when this folder has no such image; an error when several match.
     pub fn resolve_image(&self, partial: &str) -> Result<Option<String>, String> {
         let partial = partial.trim();
+        // An address naming another folder is not an image here, as with memories.
+        if let Some((folder, _)) = partial.rsplit_once(':') {
+            let here: Option<String> = self.conn()?
+                .query_row("SELECT value FROM _meta WHERE key = 'folder_uuid'", [], |r| r.get(0))
+                .ok();
+            if here.is_some_and(|h| !h.to_uppercase().starts_with(&folder.trim().to_uppercase())) {
+                return Ok(None);
+            }
+        }
         let partial = partial.rsplit_once(':').map(|(_, i)| i).unwrap_or(partial).trim().to_uppercase();
         if partial.len() < 8 || partial.len() > 36 || !partial.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
             return Ok(None);
@@ -1396,13 +1405,23 @@ impl DatabaseManager {
         if entries.is_empty() {
             return;
         }
-        let Ok(conn) = self.conn() else { return };
+        // A file with no image tables has no images: quiet. Anything else that goes
+        // wrong is said, so attachments are never hidden without a word.
+        let complain = |what: &dyn std::fmt::Display| {
+            let what = what.to_string();
+            if !what.contains("no such table") {
+                eprintln!("[geniuz] Couldn't read which memories have images: {}", what);
+            }
+        };
+        let conn = match self.conn() { Ok(c) => c, Err(e) => return complain(&e) };
         let marks = vec!["?"; entries.len()].join(",");
-        let Ok(mut stmt) = conn.prepare(&format!(
+        let mut stmt = match conn.prepare(&format!(
             "SELECT memory_uuid, substr(image_uuid, 1, 8) FROM memory_images WHERE memory_uuid IN ({marks}) ORDER BY position"
-        )) else { return };
+        )) { Ok(s) => s, Err(e) => return complain(&e) };
         let ids: Vec<&str> = entries.iter().map(|e| e.memory_uuid.as_str()).collect();
-        let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(ids), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) else { return };
+        let rows = match stmt.query_map(rusqlite::params_from_iter(ids), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) {
+            Ok(r) => r, Err(e) => return complain(&e),
+        };
         let mut by: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
         for (m, i) in rows.flatten() {
             by.entry(m).or_default().push(i);

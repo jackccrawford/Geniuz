@@ -131,13 +131,16 @@ pub(super) fn fenced(conn: &Connection) -> bool {
 /// Triggers that refuse every change to a store's contents, in the file itself.
 /// Only tables the file has: one last opened by an older Geniuz has no image
 /// tables yet, and a trigger on a missing table would stop the whole move.
-pub(super) fn fence_sql(conn: &Connection) -> String {
+///
+/// Fails if the file can't be asked which tables it has: guessing "none" would
+/// close off only part of it, and the retired original could still take writes.
+pub(super) fn fence_sql(conn: &Connection) -> Result<String, String> {
     let mut sql = String::new();
     for table in ["memories", "memory_embeddings", "embedding_meta", "_meta", "images", "memory_images"] {
-        let exists = conn
-            .query_row("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1", [table], |_| Ok(()))
-            .is_ok();
-        if !exists {
+        let exists: i64 = conn
+            .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1", [table], |r| r.get(0))
+            .map_err(|e| format!("Couldn't read the folder's tables: {}", e))?;
+        if exists == 0 {
             continue;
         }
         for op in ["insert", "update", "delete"] {
@@ -149,7 +152,7 @@ pub(super) fn fence_sql(conn: &Connection) -> String {
             ));
         }
     }
-    sql
+    Ok(sql)
 }
 
 /// Move across drives. Every step can be interrupted without losing a memory or
@@ -206,7 +209,8 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
     verify_copy(&staging.join(DB_FILE), folder, expected)
         .map_err(|e| format!("{} The original is untouched; the partial copy is at {}.", e, staging.display()))?;
 
-    lock.execute_batch(&format!("{}COMMIT;", fence_sql(&lock)))
+    let fence = fence_sql(&lock).map_err(|e| format!("Couldn't close off the original: {}. Nothing moved.", e))?;
+    lock.execute_batch(&format!("{}COMMIT;", fence))
         .map_err(|e| format!("Couldn't close off the original: {}. Nothing moved.", e))?;
     drop(lock);
     let committed = staging.join(MOVE_COMMITTED);
