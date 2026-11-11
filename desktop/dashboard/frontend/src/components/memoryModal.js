@@ -76,9 +76,9 @@ export async function openMemory(uuid, { onClose, folder = null } = {}) {
       </div>
     </header>
     <div class="memory-modal__text">${text ? su.renderText(text) : ''}</div>
-    ${(m.images || []).length ? `<div class="memory-modal__images">${m.images.map((i) => i.withdrawn_at ? `
+    ${(m.images || []).length ? `<div class="memory-modal__images">${m.images.map((i) => i.unavailable ? `
       <figure class="memory-modal__image memory-modal__image--withdrawn">
-        <figcaption>image ${su.esc(i.id)} · withdrawn ${su.esc(su.timeFull(i.withdrawn_at))} by this folder's owner</figcaption>
+        <figcaption>An image that was here is unavailable.</figcaption>
       </figure>` : `
       <figure class="memory-modal__image">
         <img data-image="${su.esc(i.id)}" width="${Number(i.width) || 0}" height="${Number(i.height) || 0}" alt="An image kept with this memory">

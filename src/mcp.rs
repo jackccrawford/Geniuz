@@ -679,17 +679,14 @@ fn recall_image(reg: &Registry, args: &Value) -> Option<Value> {
         )),
         Err(e) => return refuse(format!("Error: {}", e)),
     };
-    let shown_in = db.memories_showing(&info.image_uuid).unwrap_or_default();
-    // Withdrawn: there is nothing to look at, and that is worth knowing, not an error.
-    if let Some(at) = &info.withdrawn_at {
+    // Unavailable: there is nothing to look at, and that is worth knowing, not an error.
+    if info.unavailable {
         return Some(json!({
-            "content": [{ "type": "text", "text": format!(
-                "Image {} was withdrawn on {} by the folder's owner. Its bytes are gone; the notes that showed it remain: {}",
-                &info.image_uuid[..8], crate::shorten_ts(at), shown_in.join(" ")
-            ) }],
+            "content": [{ "type": "text", "text": format!("Image {} is unavailable.", &info.image_uuid[..8]) }],
             "isError": false
         }));
     }
+    let shown_in = db.memories_showing(&info.image_uuid).unwrap_or_default();
     let replaced = info.replaced_at.as_deref()
         .map(|at| format!(" · replaced {} by the folder's owner, so it may differ from what an earlier reader saw", crate::shorten_ts(at)))
         .unwrap_or_default();
@@ -867,7 +864,8 @@ fn format_entries(entries: &[MemoryEntry], full: bool, db: &DatabaseManager) -> 
     db.mark_images(&mut entries);
     let mut lines = Vec::new();
     for e in &entries {
-        let head = entry_line(e);
+        // Read in full, a memory also says when an image it showed is unavailable.
+        let head = if full { format!("{}{}", entry_line(e), e.unavailable_note()) } else { entry_line(e) };
         if full {
             let content = db.get_full_content(&e.memory_uuid)
                 .ok().flatten().unwrap_or_default();
@@ -925,6 +923,7 @@ mod tests {
             content: None,
             score,
             images: Vec::new(),
+            images_unavailable: 0,
         }
     }
 

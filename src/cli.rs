@@ -47,7 +47,7 @@ pub enum ImageCommand {
     #[command(
         hide = true,
         arg_required_else_help = true,
-        after_help = "Kept means kept: a memory can't be changed, and neither can its image. No MCP tool does either.\nThis is the one way through, for the person who owns the folder (or their administrator).\n\n  withdraw  Erases the image's bytes. Its place stays, marked withdrawn with the date,\n            so every memory that showed it says an image was withdrawn.\n  replace   Puts another image in its place, marked replaced with the date:\n            for example the same screenshot with a number blurred.\n\nBoth change every memory that shows the image, and an agent that looked at it\nbefore may still hold the old one in its context. Neither can be undone.\n\nIt needs a person at a terminal: it asks for the image's ID to be typed, and\ndoes nothing when run by a script or with its input piped. That keeps it out of\nan agent's ordinary reach. It is not a lock: whoever can run programs as you on\nthis computer can change your files, and Geniuz can't prevent that.\n\nWhat this can't reach: backups, exports, a copy of the folder moved earlier,\nand the transcript of any agent that already looked at the image.\n\nExamples:\n  geniuz image -f Work admin withdraw 1B2C3D4E\n  geniuz image -f Work admin replace 1B2C3D4E blurred.png"
+        after_help = "Kept means kept: a memory can't be changed, and neither can its image. No MCP tool does either.\nThis is the one way through, for the person who owns the folder. An agent runs it\nonly when that person asks, after showing them what the first run prints.\n\n  withdraw  Erases the image: its bytes and its size. A memory that showed it\n            says an image is unavailable, and nothing more.\n  replace   Puts another image in its place, marked replaced with the date:\n            for example the same screenshot with a number blurred.\n\nIt takes two runs. The first changes nothing: it prints the image, the memories\nthat show it, and the line to run next. The second carries --confirm with the\nimage's full ID, and does it.\n\n  geniuz image -f Work admin withdraw 1B2C3D4E\n  geniuz image -f Work admin withdraw 1B2C3D4E --confirm <FULL-ID>\n\nBoth change every memory that shows the image, and an agent that looked at it\nbefore may still hold the old one in its context. Neither can be undone, and\nneither reaches backups, exports, or what an agent already wrote about the image.\n\nThe two runs guard against a slip, not against intent: whoever can run programs\nas you can already reach the folder's file."
     )]
     Admin {
         #[command(subcommand)]
@@ -57,10 +57,13 @@ pub enum ImageCommand {
 
 #[derive(Subcommand)]
 pub enum ImageAdmin {
-    /// Erase an image's bytes for good; its place stays, marked withdrawn
+    /// Erase an image for good; memories that showed it say an image is unavailable
     Withdraw {
         /// The image's ID
         id: String,
+        /// The image's full ID, as the first run printed it. Without this, nothing changes.
+        #[arg(long, value_name = "FULL-ID")]
+        confirm: Option<String>,
     },
     /// Put another image in its place, for every memory that shows it
     Replace {
@@ -68,6 +71,9 @@ pub enum ImageAdmin {
         id: String,
         /// The new image, as a file
         file: String,
+        /// The image's full ID, as the first run printed it. Without this, nothing changes.
+        #[arg(long, value_name = "FULL-ID")]
+        confirm: Option<String>,
     },
 }
 

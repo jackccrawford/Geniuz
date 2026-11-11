@@ -145,7 +145,7 @@ struct ImageRef {
     height: u32,
     bytes: u64,
     /// When the folder's owner took it back or put another in its place, if they did.
-    withdrawn_at: Option<String>,
+    unavailable: bool,
     replaced_at: Option<String>,
 }
 
@@ -541,7 +541,7 @@ fn get_memory_detail(uuid: String, folder: Option<String>) -> Result<Option<Memo
             .into_iter()
             .map(|i| ImageRef {
                 id: i.image_uuid[..8].to_string(), width: i.width, height: i.height, bytes: i.bytes,
-                withdrawn_at: i.withdrawn_at, replaced_at: i.replaced_at,
+                unavailable: i.unavailable, replaced_at: i.replaced_at,
             })
             .collect();
         MemoryDetail { images, ..map_detail(e) }
@@ -557,8 +557,8 @@ fn get_image(id: String, folder: Option<String>) -> Result<String, String> {
         None => open_db()?,
     };
     let (info, data) = db.image(&id)?.ok_or_else(|| format!("No image {} in this folder.", id.to_uppercase()))?;
-    if info.withdrawn_at.is_some() {
-        return Err("This image was withdrawn.".to_string());
+    if info.unavailable {
+        return Err("This image is unavailable.".to_string());
     }
     Ok(geniuz::pictures::data_url(&info.media_type, &data))
 }

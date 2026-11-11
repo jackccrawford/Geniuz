@@ -103,15 +103,15 @@ CREATE TABLE IF NOT EXISTS embedding_meta (
 -- are stored once.
 --
 -- The folder's owner can take an image back (`geniuz image admin`): withdrawn, its
--- bytes and hash are erased and the row stays, so every memory that showed it says
--- so; replaced, the bytes change and the row says when. Both are a person's act,
--- never an agent's tool.
+-- bytes, hash and size are erased and the row stays, so a memory that showed it
+-- can say an image is unavailable, and no more than that; replaced, the bytes
+-- change and the row says when. Done at the owner's word, never as an MCP tool.
 CREATE TABLE IF NOT EXISTS images (
     image_uuid   TEXT PRIMARY KEY NOT NULL CHECK(length(image_uuid) = 36),
     sha256       TEXT UNIQUE CHECK(sha256 IS NULL OR length(sha256) = 64),
     media_type   TEXT NOT NULL,
-    width        INTEGER NOT NULL CHECK(width > 0),
-    height       INTEGER NOT NULL CHECK(height > 0),
+    width        INTEGER NOT NULL,
+    height       INTEGER NOT NULL,
     created_at   TEXT NOT NULL DEFAULT(strftime('%Y-%m-%d %H:%M:%S', 'now')),
     withdrawn_at TEXT,
     replaced_at  TEXT,
@@ -119,7 +119,9 @@ CREATE TABLE IF NOT EXISTS images (
     -- Bytes and hash together, and absent only once withdrawn.
     CHECK((data IS NULL) = (sha256 IS NULL)),
     CHECK((data IS NULL) = (withdrawn_at IS NOT NULL)),
-    CHECK(data IS NULL OR length(data) >= 1)
+    CHECK(data IS NULL OR length(data) >= 1),
+    -- A withdrawn image keeps no size: that went with the bytes.
+    CHECK((width > 0 AND height > 0) OR withdrawn_at IS NOT NULL)
 );
 
 -- Which memories show which images, and in what order. One image can serve many

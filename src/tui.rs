@@ -938,6 +938,7 @@ mod tests {
             content: None,
             score: None,
             images: Vec::new(),
+            images_unavailable: 0,
         }
     }
 

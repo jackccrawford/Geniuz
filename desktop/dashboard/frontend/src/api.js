@@ -139,7 +139,7 @@ export function openPath(path) {
 
 /**
  * One image as a `data:` address the page can show.
- * Returns: string. Rejects if the image was withdrawn or isn't in the folder.
+ * Returns: string. Rejects if the image is unavailable or isn't in the folder.
  */
 export function getImage(id, folder = null) {
   return invoke('get_image', { id, folder });
