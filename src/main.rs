@@ -843,7 +843,12 @@ fn run(cli: Cli) -> Result<String, String> {
                         format!("Couldn't write {}: {}", out, e)
                     }
                 })?;
-                file.write_all(&data).map_err(|e| format!("Couldn't write {}: {}", out, e))?;
+                if let Err(e) = file.write_all(&data) {
+                    // Not left half-written: a second try would be refused as "already exists".
+                    drop(file);
+                    let _ = std::fs::remove_file(&out);
+                    return Err(format!("Couldn't write {}: {}", out, e));
+                }
                 return Ok(format!("Wrote {} ({} x {}, {})", out, info.width, info.height, kb(info.bytes)));
             }
             if json {
