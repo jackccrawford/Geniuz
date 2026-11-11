@@ -17,8 +17,10 @@ import { openShortcuts } from './components/shortcutsDialog.js';
 // A file dropped anywhere must never replace the window: left alone, the web view
 // opens it like a browser would, with no way back. A surface that takes drops
 // (the Keep form) handles its own; everything else is refused here.
-window.addEventListener('dragover', (e) => e.preventDefault());
-window.addEventListener('drop', (e) => e.preventDefault());
+// Only files are refused: dragging words into a text box still works.
+const carriesFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+window.addEventListener('dragover', (e) => { if (carriesFiles(e)) e.preventDefault(); });
+window.addEventListener('drop', (e) => { if (carriesFiles(e)) e.preventDefault(); });
 import { openFolderDialog } from './components/folderDialog.js';
 
 // Tag the document so CSS can target Tauri-specific rules.

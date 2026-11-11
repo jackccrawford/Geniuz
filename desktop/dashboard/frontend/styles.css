@@ -1659,6 +1659,11 @@ button:active:not(:disabled),
   transform: scale(0.94);
   transition-duration: 0ms;
 }
+/* The Keep button brightens on hover with a rule that outweighs the one above,
+   so its press is said again at that weight. */
+.remember-actions__submit:active:not(:disabled) {
+  filter: brightness(0.7) contrast(1.15);
+}
 @media (prefers-reduced-motion: reduce) {
   button:active:not(:disabled),
   [role="button"]:active {

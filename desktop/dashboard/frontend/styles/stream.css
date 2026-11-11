@@ -233,7 +233,6 @@ html.os-linux .sidebar {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  margin-top: 16px;
 }
 .memory-modal__image {
   margin: 0;

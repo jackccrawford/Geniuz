@@ -35,6 +35,21 @@ pub struct Picture {
     pub sha256: String,
 }
 
+/// Read an image's bytes, but never more than `MAX_INPUT_BYTES`: a file or a pipe
+/// far larger than any image is refused while it is being read, not after all of
+/// it has been taken into memory.
+pub fn read_capped(from: impl std::io::Read) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    from.take(MAX_INPUT_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("couldn't read it: {}", e))?;
+    if bytes.len() > MAX_INPUT_BYTES {
+        return Err(format!("That is over {} MB, more than Geniuz reads for one image.", MAX_INPUT_BYTES / (1024 * 1024)));
+    }
+    Ok(bytes)
+}
+
 /// What a Claude model spends to look at an image: one token per 28 x 28 px patch.
 pub fn tokens(width: u32, height: u32) -> u32 {
     width.div_ceil(28) * height.div_ceil(28)
@@ -50,6 +65,10 @@ pub fn data_url(media_type: &str, data: &[u8]) -> String {
 /// or dropped image.
 pub fn from_data_url(url: &str) -> Result<Vec<u8>, String> {
     use base64::Engine;
+    // Base64 is a third longer than the bytes it carries: refuse before decoding.
+    if url.len() > MAX_INPUT_BYTES / 3 * 4 + 1024 {
+        return Err(format!("That is over {} MB, more than Geniuz reads for one image.", MAX_INPUT_BYTES / (1024 * 1024)));
+    }
     let (head, body) = url.split_once(',').ok_or("That isn't an image Geniuz can read.")?;
     if !head.starts_with("data:") || !head.ends_with(";base64") {
         return Err("That isn't an image Geniuz can read.".to_string());
@@ -83,18 +102,19 @@ pub fn prepare(bytes: &[u8]) -> Result<Picture, String> {
     let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|_| NOT_AN_IMAGE.to_string())?;
-    // A small file can claim an enormous canvas. Refuse before allocating it.
+    // A small file can claim an enormous canvas. Refuse before allocating it. 384 MB
+    // is three times what the largest image seen in testing needed (4097 x 7237).
     let mut limits = image::Limits::default();
-    limits.max_image_width = Some(20_000);
-    limits.max_image_height = Some(20_000);
-    limits.max_alloc = Some(1024 * 1024 * 1024);
+    limits.max_image_width = Some(16_384);
+    limits.max_image_height = Some(16_384);
+    limits.max_alloc = Some(384 * 1024 * 1024);
     reader.limits(limits);
     let mut decoder = reader.into_decoder().map_err(|_| NOT_AN_IMAGE.to_string())?;
     // A phone photo is stored sideways with a note saying which way is up. WebP
     // output drops the note, so turn the pixels now.
     let orientation = decoder.orientation().unwrap_or(image::metadata::Orientation::NoTransforms);
     let mut im = DynamicImage::from_decoder(decoder).map_err(|e| match e {
-        image::ImageError::Limits(_) => "That image is too large to read: more than 20,000 pixels on a side.".to_string(),
+        image::ImageError::Limits(_) => "That image is too large to read: more than 16,384 pixels on a side, or more pixels than Geniuz will hold at once.".to_string(),
         _ => NOT_AN_IMAGE.to_string(),
     })?;
     im.apply_orientation(orientation);
@@ -111,7 +131,8 @@ pub fn prepare(bytes: &[u8]) -> Result<Picture, String> {
     }
     let (width, height) = (im.width(), im.height());
 
-    // Alpha only when the image uses it: an opaque image is smaller without.
+    // Alpha only when the image's format has it: one without is smaller. (A format
+    // with alpha whose pixels all happen to be opaque keeps its alpha channel.)
     let encoded = if im.color().has_alpha() {
         let px = im.to_rgba8();
         webp::Encoder::from_rgba(&px, width, height).encode_simple(false, QUALITY).map(|m| m.to_vec())
@@ -184,6 +205,17 @@ mod tests {
         for bad in ["", "hello", "data:image/png,plain", "data:image/png;base64,***"] {
             assert!(from_data_url(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_read_stops_at_the_limit_and_says_so() {
+        use std::io::Read;
+        assert_eq!(read_capped(&b"abc"[..]).unwrap(), b"abc");
+        let over = std::io::repeat(7).take(MAX_INPUT_BYTES as u64 + 10);
+        assert!(read_capped(over).unwrap_err().contains("over 40 MB"));
+        let exactly = std::io::repeat(7).take(MAX_INPUT_BYTES as u64);
+        assert_eq!(read_capped(exactly).unwrap().len(), MAX_INPUT_BYTES);
+        assert!(from_data_url(&format!("data:image/png;base64,{}", "A".repeat(MAX_INPUT_BYTES * 2))).unwrap_err().contains("over 40 MB"));
     }
 
     #[test]
