@@ -14,6 +14,9 @@ import { subscribe, getState, setState, navigate } from './store.js';
 import { openMemory } from './components/memoryModal.js';
 import { openShortcuts } from './components/shortcutsDialog.js';
 
+// Read once as the window opens, so the forms know the autocorrect setting when drawn.
+api.getSettings().catch(() => {});
+
 // A file dropped anywhere must never replace the window: left alone, the web view
 // opens it like a browser would, with no way back. A surface that takes drops
 // (the Keep form) handles its own; everything else is refused here.

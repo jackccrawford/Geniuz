@@ -28,9 +28,10 @@ async function pickDirectory(title) {
 }
 
 /** With no folder, makes a new one. */
-export async function openFolderDialog(folder = null) {
-  // Read before the form opens, so nobody types into it under the wrong setting.
-  const autocorrect = await api.getSettings().then((s) => !!s?.autocorrect).catch(() => false);
+export function openFolderDialog(folder = null) {
+  // Known already, not waited for: two opens in quick succession would otherwise
+  // finish in either order, and the older could draw over the newer.
+  const autocorrect = api.autocorrectOn();
   const d = ensureDialog();
   d.setAttribute('aria-label', folder ? `Edit ${folder.name}` : 'New folder');
   d.innerHTML = `<form class="memory-modal__panel folder-form" method="dialog">

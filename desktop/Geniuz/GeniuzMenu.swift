@@ -427,7 +427,7 @@ struct GeniuzAboutView: View {
                     Label("Connected", systemImage: "checkmark.circle.fill")
                 } else {
                     Label("Not connected", systemImage: "circle")
-                    Text("The dashboard's Status page connects it.")
+                    Text("Use Connect to Claude Desktop in the Geniuz menu.")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                 }

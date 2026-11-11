@@ -52,7 +52,9 @@ export function replyTo({ uuid, folder, gist }) {
 }
 
 export async function mount(container) {
-  const autocorrect = await api.getSettings().then((s) => !!s?.autocorrect).catch(() => false);
+  // Known already, not waited for: waiting here let this form draw over a page the
+  // person had since moved to.
+  const autocorrect = api.autocorrectOn();
   const root = document.createElement('main');
   root.className = 'main';
 
@@ -173,7 +175,7 @@ export async function mount(container) {
   contentInput.addEventListener('input', updateSubmitState);
 
   // Autocorrect is off in the markup; a person can turn it on in Settings. The
-  // setting was read before the form was drawn, so nothing is typed under the wrong one.
+  // setting is the one read when the window opened or Settings was last saved.
   if (autocorrect) [gistInput, contentInput].forEach((el) => el.setAttribute('autocorrect', 'on'));
 
   // ---- Images ------------------------------------------------------------

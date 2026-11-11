@@ -180,7 +180,16 @@ export function getStatus() {
  *   recent_memories_count }
  */
 export function getSettings() {
-  return invoke('get_settings');
+  return invoke('get_settings').then((s) => { autocorrect = !!s?.autocorrect; return s; });
+}
+
+// Whether autocorrect is on, as last read. Kept here so a form can set its fields
+// as it is drawn, without waiting: a form that waits can finish drawing after the
+// person has moved on, and draw over what they moved on to. Read once when the
+// window opens, and again whenever settings are read or saved.
+let autocorrect = false;
+export function autocorrectOn() {
+  return autocorrect;
 }
 
 /**
@@ -188,7 +197,7 @@ export function getSettings() {
  * after save (which may differ from the patch if the file rejected a field).
  */
 export function updateSettings(settings) {
-  return invoke('update_settings', { patch: { settings } });
+  return invoke('update_settings', { patch: { settings } }).then((s) => { autocorrect = !!s?.autocorrect; return s; });
 }
 
 /**
