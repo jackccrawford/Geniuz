@@ -6,6 +6,7 @@
 // bottom of the form. No themes — the dashboard only has one register.
 
 import * as api from '../api.js';
+import { openShortcuts } from '../components/shortcutsDialog.js';
 
 export async function mount(container) {
   container.innerHTML = `<div class="surface-loading">Loading settings…</div>`;
@@ -168,7 +169,88 @@ export async function mount(container) {
       ]));
     }
 
-    shell.appendChild(shortcutsSection());
+    // Writing
+    shell.appendChild(section('Writing', [
+      row({
+        title: 'Autocorrect as you type',
+        help: 'Off, a memory is kept exactly as you typed it; the AI that reads it understands a typo. On, your computer may change words as you write, and on a Mac a pending correction takes the first click on Keep.',
+        control: toggle({
+          checked: !!edited.autocorrect,
+          onChange: (v) => update({ autocorrect: v }),
+        }),
+      }),
+    ]));
+
+    // Updates
+    const often = document.createElement('select');
+    often.className = 'input';
+    for (const [value, label] of [['daily', 'Daily'], ['weekly', 'Weekly'], ['manual', 'Only when I ask']]) {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = label;
+      often.appendChild(o);
+    }
+    often.value = edited.update_check_frequency || 'daily';
+    often.disabled = !edited.autoupdate_enabled;
+    often.addEventListener('change', () => update({ update_check_frequency: often.value }));
+
+    const checkWrap = document.createElement('div');
+    checkWrap.className = 'update-check';
+    const checkBtn = document.createElement('button');
+    checkBtn.type = 'button';
+    checkBtn.className = 'btn';
+    checkBtn.textContent = 'Check now';
+    const checkSaid = document.createElement('span');
+    checkSaid.className = 'update-check__said';
+    checkSaid.setAttribute('role', 'status');
+    checkSaid.setAttribute('aria-live', 'polite');
+    checkBtn.addEventListener('click', async () => {
+      checkBtn.disabled = true;
+      checkBtn.textContent = 'Checking…';
+      try {
+        const found = await api.checkUpdateNow();
+        // The same words the Mac's About window uses, so one check never reads two
+        // ways. Neither sentence ends on the version: "5.0.11." reads as a number
+        // cut short (Jack, 10 Nov 2026).
+        checkSaid.textContent = found?.newer
+          ? `Geniuz ${found.newer.version} is available. Status has the download.`
+          : `Geniuz ${appVersion || ''} is up to date.`.replace('  ', ' ');
+      } catch (e) {
+        checkSaid.textContent = `Couldn't check: ${e?.message || e}`;
+      }
+      checkBtn.textContent = 'Check now';
+      checkBtn.disabled = false;
+    });
+    checkWrap.appendChild(checkSaid);
+    checkWrap.appendChild(checkBtn);
+
+    shell.appendChild(section('Updates', [
+      row({
+        title: 'Check for updates automatically',
+        help: 'A check asks GitHub for the latest Geniuz release. GitHub sees this computer\'s internet address and the Geniuz version; none of your memories or folders are sent.',
+        control: toggle({
+          checked: !!edited.autoupdate_enabled,
+          onChange: (v) => update({ autoupdate_enabled: v }),
+        }),
+      }),
+      row({ title: 'How often', control: often }),
+      row({ title: 'Check for a new version', help: 'Asks once, now, whatever is set above.', control: checkWrap }),
+    ]));
+
+    // Keyboard shortcuts: one row. The list itself is help that can be changed,
+    // and lives in its own panel (also under Help in the menu).
+    const showKeys = document.createElement('button');
+    showKeys.type = 'button';
+    showKeys.className = 'btn';
+    showKeys.textContent = 'Show shortcuts';
+    showKeys.addEventListener('click', () => openShortcuts());
+    shell.appendChild(section('Keyboard', [
+      row({
+        title: 'Keyboard shortcuts',
+        help: 'See them all, or change one. Also under Help in the menu.',
+        control: showKeys,
+      }),
+    ]));
 
     // About
     const aboutSection = document.createElement('section');
@@ -207,105 +289,7 @@ export async function mount(container) {
 
 // ---- inline helpers --------------------------------------------------------
 
-// ---- Keyboard shortcuts ----------------------------------------------------
-// These save as soon as they're set, and appear in the menu at once. They have
-// nothing to do with the Save bar above, which is for the shared settings file.
-
-function pretty(keys) {
-  if (!keys) return 'None';
-  const mac = /Mac/.test(navigator.platform);
-  return keys
-    .replace('CmdOrCtrl', mac ? '⌘' : 'Ctrl')
-    .replace('Shift', mac ? '⇧' : 'Shift')
-    .replace('Alt', mac ? '⌥' : 'Alt')
-    .replace('Comma', ',')
-    .split('+')
-    .join(mac ? '' : '+');
-}
-
-function keysFromEvent(e) {
-  if (['Meta', 'Control', 'Shift', 'Alt'].includes(e.key)) return null;
-  const parts = [];
-  if (e.metaKey || e.ctrlKey) parts.push('CmdOrCtrl');
-  if (e.altKey) parts.push('Alt');
-  if (e.shiftKey) parts.push('Shift');
-  if (!parts.length) return null; // a plain letter would fire while typing
-  const code = e.code.replace(/^Key/, '').replace(/^Digit/, '');
-  parts.push(code === 'Comma' ? ',' : code);
-  return parts.join('+');
-}
-
-function shortcutsSection() {
-  const sec = document.createElement('section');
-  sec.className = 'settings-section';
-  sec.innerHTML = '<div class="settings-section__label">Keyboard shortcuts</div>';
-  const list = document.createElement('div');
-  sec.appendChild(list);
-  const note = document.createElement('div');
-  note.className = 'settings-row__help shortcut-note';
-  note.textContent = '⌘1 to ⌘9 switch to your first nine folders, in sidebar order.'.replace('⌘1', /Mac/.test(navigator.platform) ? '⌘1' : 'Ctrl+1').replace('⌘9', /Mac/.test(navigator.platform) ? '⌘9' : 'Ctrl+9');
-  sec.appendChild(note);
-  const status = document.createElement('div');
-  status.className = 'shortcut-status';
-  status.setAttribute('aria-live', 'polite');
-  sec.appendChild(status);
-
-  const draw = async () => {
-    const rows = await api.getShortcuts();
-    list.innerHTML = '';
-    for (const s of rows) {
-      const keysBtn = document.createElement('button');
-      keysBtn.type = 'button';
-      keysBtn.className = 'btn btn--ghost shortcut-keys';
-      keysBtn.textContent = pretty(s.keys);
-      keysBtn.title = 'Click, then press the new keys. Delete clears it, Esc cancels.';
-      keysBtn.addEventListener('click', () => record(s, keysBtn));
-      const wrap = document.createElement('div');
-      wrap.className = 'shortcut-control';
-      wrap.appendChild(keysBtn);
-      if (s.keys !== s.default_keys) {
-        const reset = document.createElement('button');
-        reset.type = 'button';
-        reset.className = 'shortcut-reset';
-        reset.textContent = 'Reset';
-        reset.addEventListener('click', () => save(s, s.default_keys));
-        wrap.appendChild(reset);
-      }
-      list.appendChild(row({ title: s.label, control: wrap }));
-    }
-  };
-
-  const save = async (s, keys) => {
-    try {
-      await api.setShortcut(s.id, keys);
-      status.textContent = '';
-    } catch (e) {
-      status.textContent = e?.message || String(e);
-    }
-    await api.refreshMenu(true).catch(() => {});
-    await draw();
-  };
-
-  // The menu would act on these keys first, so it goes without shortcuts meanwhile.
-  const record = async (s, btn) => {
-    btn.textContent = 'Press keys…';
-    btn.classList.add('is-recording');
-    await api.refreshMenu(false).catch(() => {});
-    const onKey = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.key === 'Escape') { finish(); api.refreshMenu(true).catch(() => {}); draw(); return; }
-      if (e.key === 'Backspace' || e.key === 'Delete') { finish(); save(s, ''); return; }
-      const keys = keysFromEvent(e);
-      if (keys) { finish(); save(s, keys); }
-    };
-    const finish = () => window.removeEventListener('keydown', onKey, true);
-    window.addEventListener('keydown', onKey, true);
-  };
-
-  draw().catch((e) => { status.textContent = e?.message || String(e); });
-  return sec;
-}
+let rowIds = 0;
 
 function section(label, rows) {
   const sec = document.createElement('section');
@@ -327,6 +311,9 @@ function row({ title, help, control }) {
   const t = document.createElement('div');
   t.className = 'settings-row__title';
   t.textContent = title;
+  // The control is named by this title for anyone using a screen reader: a
+  // switch or a menu beside a line of text is otherwise an unnamed control.
+  t.id = `settings-row-${(rowIds += 1)}`;
   main.appendChild(t);
   if (help) {
     const h = document.createElement('div');
@@ -338,6 +325,13 @@ function row({ title, help, control }) {
 
   const ctl = document.createElement('div');
   ctl.className = 'settings-row__control';
+  // Switches, menus and number boxes say nothing of themselves; a button with
+  // words on it ("Check now") already has its name.
+  const unnamed = '[role="switch"], select, input';
+  const named = control.matches?.(unnamed) ? control : control.querySelector?.(unnamed);
+  if (named && !named.hasAttribute('aria-label') && !named.hasAttribute('aria-labelledby')) {
+    named.setAttribute('aria-labelledby', t.id);
+  }
   ctl.appendChild(control);
   r.appendChild(ctl);
 

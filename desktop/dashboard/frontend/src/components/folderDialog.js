@@ -29,6 +29,9 @@ async function pickDirectory(title) {
 
 /** With no folder, makes a new one. */
 export function openFolderDialog(folder = null) {
+  // Known already, not waited for: two opens in quick succession would otherwise
+  // finish in either order, and the older could draw over the newer.
+  const autocorrect = api.autocorrectOn();
   const d = ensureDialog();
   d.setAttribute('aria-label', folder ? `Edit ${folder.name}` : 'New folder');
   d.innerHTML = `<form class="memory-modal__panel folder-form" method="dialog">
@@ -36,11 +39,11 @@ export function openFolderDialog(folder = null) {
     <h2 class="folder-form__title">${folder ? 'Edit folder' : 'New folder'}</h2>
     <label class="remember-field">
       <span class="remember-field__label">Name</span>
-      <input class="remember-field__input" name="name" maxlength="60" autocomplete="off" value="${su.esc(folder?.name || '')}">
+      <input class="remember-field__input" name="name" maxlength="60" autocomplete="off" autocorrect="off" value="${su.esc(folder?.name || '')}">
     </label>
     <label class="remember-field">
       <span class="remember-field__label">Description</span>
-      <textarea class="remember-field__textarea folder-form__description" name="description" rows="5" placeholder="${PROMPT}">${su.esc(folder?.description || '')}</textarea>
+      <textarea class="remember-field__textarea folder-form__description" name="description" autocorrect="off" rows="5" placeholder="${PROMPT}">${su.esc(folder?.description || '')}</textarea>
     </label>
     ${folder ? `<p class="folder-form__where">Location: <code>${su.esc(folder.location)}</code></p>` : ''}
     <div class="remember-status" aria-live="polite"></div>
@@ -56,6 +59,10 @@ export function openFolderDialog(folder = null) {
   </form>`;
 
   const form = d.querySelector('form');
+  // Autocorrect is off in the markup. A person can turn it on in Settings, and
+  // then it applies to the description only: a folder's name is how it is
+  // addressed, so it is never changed for them.
+  if (autocorrect) form.querySelector('textarea[name="description"]')?.setAttribute('autocorrect', 'on');
   const status = form.querySelector('.remember-status');
   const fail = (e) => { status.textContent = e?.message || String(e); };
   const action = (name) => form.querySelector(`[data-action="${name}"]`);

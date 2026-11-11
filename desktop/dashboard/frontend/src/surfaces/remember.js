@@ -51,7 +51,16 @@ export function replyTo({ uuid, folder, gist }) {
   navigate('remember');
 }
 
+// Lets go of the image previews of the form that was here before: a browser keeps
+// each one until told otherwise, and a form left by going to another page never
+// reaches Cancel or Keep.
+let releasePreviews = null;
+
 export async function mount(container) {
+  if (releasePreviews) { releasePreviews(); releasePreviews = null; }
+  // Known already, not waited for: waiting here let this form draw over a page the
+  // person had since moved to.
+  const autocorrect = api.autocorrectOn();
   const root = document.createElement('main');
   root.className = 'main';
 
@@ -80,6 +89,9 @@ export async function mount(container) {
       </select>
     </label>`
     : '';
+  // autocorrect is off on Gist and Content unless Settings turns it on: what is
+  // typed is what is kept. With it on, the Mac rewrites the last word on the click
+  // meant for Keep and swallows that click, so Keep needed two (Jack, 10 Nov 2026).
   form.innerHTML = `
     ${folderField}
     <div class="remember-field reply-field">
@@ -116,6 +128,7 @@ export async function mount(container) {
         class="remember-field__input"
         name="gist"
         autocomplete="off"
+        autocorrect="off"
         required
         placeholder="One line saying what this is"
       />
@@ -125,10 +138,18 @@ export async function mount(container) {
       <textarea
         class="remember-field__textarea"
         name="content"
+        autocorrect="off"
         rows="10"
         placeholder="What you learned, decided, or discovered."
       ></textarea>
     </label>
+    <div class="remember-field remember-images">
+      <span class="remember-field__label">Images <span class="remember-field__hint">· optional, up to 5 images. Paste a screenshot, drop one here, or <button type="button" class="remember-images__pick">choose a file</button></span></span>
+      <input type="file" class="remember-images__file" accept="image/*" multiple hidden />
+      <ul class="remember-images__list" aria-label="Images to keep with this memory"></ul>
+      <p class="remember-images__msg" role="status" aria-live="polite" hidden></p>
+      <p class="remember-images__note" hidden>Kept with the memory, at screen size. Say in the words what an image shows: that's how it's found later. An image stays, so look at what else is in it first.</p>
+    </div>
     <div class="remember-actions">
       <button type="button" class="remember-actions__cancel" data-action="cancel">Cancel</button>
       <button type="submit" class="remember-actions__submit" disabled>Keep</button>
@@ -158,6 +179,97 @@ export async function mount(container) {
     submitBtn.disabled = !contentInput.value.trim() || !gistInput.value.trim();
   };
   contentInput.addEventListener('input', updateSubmitState);
+
+  // Autocorrect is off in the markup; a person can turn it on in Settings. The
+  // setting is the one read when the window opened or Settings was last saved.
+  if (autocorrect) [gistInput, contentInput].forEach((el) => el.setAttribute('autocorrect', 'on'));
+
+  // ---- Images ------------------------------------------------------------
+  // Each is shown before anything is kept, with a way to take it off: an image
+  // is hard to take back afterwards.
+  const MAX_IMAGES = 5; // as pictures::MAX_PER_MEMORY
+  const picked = []; // { file, url }
+  const imageList = form.querySelector('.remember-images__list');
+  const imageNote = form.querySelector('.remember-images__note');
+  const imageFile = form.querySelector('.remember-images__file');
+  const imagePick = form.querySelector('.remember-images__pick');
+  const imageMsg = form.querySelector('.remember-images__msg');
+  const drawImages = () => {
+    imageList.innerHTML = picked.map((p, i) => `
+      <li class="remember-image">
+        <img src="${p.url}" alt="Image ${i + 1} to keep">
+        <button type="button" class="remember-image__remove" data-remove="${i}" aria-label="Don't keep image ${i + 1}" title="Don't keep this image">
+          <svg viewBox="0 0 12 12" width="10" height="10" aria-hidden="true"><path d="M2.5 2.5l7 7m0-7l-7 7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+      </li>`).join('');
+    imageNote.hidden = !picked.length;
+    // At the limit there is nothing more to choose.
+    const full = picked.length >= MAX_IMAGES;
+    imagePick.disabled = full;
+    imagePick.title = full ? `A memory carries at most ${MAX_IMAGES} images` : '';
+  };
+  const sayImages = (text) => {
+    imageMsg.textContent = text || '';
+    imageMsg.hidden = !text;
+  };
+  // Takes what it can and says, beside the images, why anything was left out.
+  // Returns whether there were files at all, so a paste of plain words is left alone.
+  const addImages = (files) => {
+    const all = [...files];
+    if (!all.length) return false;
+    const images = all.filter((f) => f.type.startsWith('image/'));
+    const others = all.length - images.length;
+    let over = 0;
+    for (const file of images) {
+      if (picked.length >= MAX_IMAGES) { over += 1; continue; }
+      picked.push({ file, url: URL.createObjectURL(file) });
+    }
+    const said = [];
+    if (others) said.push(others === 1 ? "That isn't an image, so it wasn't added. Only images can be kept with a memory." : `${others} of those aren't images, so they weren't added. Only images can be kept with a memory.`);
+    if (over) said.push(`A memory carries at most ${MAX_IMAGES} images, so ${over === 1 ? "one wasn't" : `${over} weren't`} added. Keep the rest in a reply.`);
+    sayImages(said.join(' '));
+    drawImages();
+    return true;
+  };
+  const clearImages = () => {
+    picked.forEach((p) => URL.revokeObjectURL(p.url));
+    picked.length = 0;
+    sayImages('');
+    drawImages();
+  };
+  releasePreviews = () => picked.forEach((p) => URL.revokeObjectURL(p.url));
+  const asDataUrl = (file) => new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = () => reject(new Error(`Couldn't read ${file.name || 'that image'}`));
+    r.readAsDataURL(file);
+  });
+  imageList.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-remove]');
+    if (!b) return;
+    const [gone] = picked.splice(Number(b.dataset.remove), 1);
+    if (gone) URL.revokeObjectURL(gone.url);
+    sayImages('');
+    drawImages();
+  });
+  imagePick.addEventListener('click', () => imageFile.click());
+  imageFile.addEventListener('change', () => { addImages(imageFile.files); imageFile.value = ''; });
+  // Pasting words works as it always did: this only takes a clipboard that holds an image.
+  form.addEventListener('paste', (e) => {
+    if (addImages(e.clipboardData?.files || [])) e.preventDefault();
+  });
+  form.addEventListener('dragover', (e) => {
+    if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); form.classList.add('is-dropping'); }
+  });
+  form.addEventListener('dragleave', () => form.classList.remove('is-dropping'));
+  form.addEventListener('drop', (e) => {
+    form.classList.remove('is-dropping');
+    // Files are ours, taken or not: one the form doesn't take must not reach the
+    // web view. Dragged text is left alone, so it still lands in a field.
+    if (![...(e.dataTransfer?.types || [])].includes('Files')) return;
+    e.preventDefault();
+    addImages(e.dataTransfer?.files || []);
+  });
   gistInput.addEventListener('input', updateSubmitState);
 
   // ---- Reply to ----------------------------------------------------------
@@ -391,6 +503,7 @@ export async function mount(container) {
   setTimeout(() => (reply ? contentInput : gistInput).focus(), 0);
 
   cancelBtn.addEventListener('click', () => {
+    clearImages(); // lets go of the previews, which a browser otherwise holds until the window closes
     clearDraft();
     navigate('recent');
   });
@@ -403,11 +516,29 @@ export async function mount(container) {
     const content = contentInput.value.trim();
     if (!content || !gist) return;
     submitBtn.disabled = true;
-    status.textContent = 'Saving…';
+    // Cancel waits too: pressed mid-keep, it would clear the form and leave, and the
+    // memory would be kept all the same.
+    cancelBtn.disabled = true;
+    submitBtn.textContent = 'Keeping…';
+    status.textContent = picked.length ? 'Keeping, and preparing the images…' : 'Keeping…';
+    // Let the window draw the pressed button before the work starts.
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const idle = () => { submitBtn.textContent = 'Keep'; cancelBtn.disabled = false; };
     try {
       const chosen = chosenFolder();
       const parent = reply && reply.folder === chosen ? reply.uuid : null;
-      const shortUuid = await api.rememberMemory(gist || null, content, chosen, parent);
+      // Exactly these are sent, and exactly these are taken off afterwards: one
+      // added while this was keeping stays in the form for the next memory.
+      const sent = picked.slice();
+      const images = await Promise.all(sent.map((p) => asDataUrl(p.file)));
+      const shortUuid = await api.rememberMemory(gist || null, content, chosen, parent, images);
+      for (const p of sent) {
+        const at = picked.indexOf(p);
+        if (at >= 0) picked.splice(at, 1);
+        URL.revokeObjectURL(p.url);
+      }
+      sayImages('');
+      drawImages();
       const answered = parent ? `, a reply to ${String(parent).slice(0, 8).toUpperCase()}` : '';
       clearDraft();
       if (chosen && chosen !== shown?.uuid) {
@@ -418,15 +549,18 @@ export async function mount(container) {
         contentInput.value = '';
         folderSelect.value = shown.uuid;
         setReply(null);
+        idle();
         updateSubmitState();
         gistInput.focus();
         return;
       }
       status.textContent = `Kept · ${shortUuid}${answered}`;
       // Navigate to Recent and select the new memory
-      setTimeout(() => navigate('recent'), 300);
+      // Only if the person is still here: they may have gone to another page meanwhile.
+      setTimeout(() => { if (getState().currentSurface === 'remember') navigate('recent'); }, 300);
     } catch (err) {
       status.textContent = `Couldn't save: ${err?.message || err}`;
+      idle();
       submitBtn.disabled = false;
     }
   });

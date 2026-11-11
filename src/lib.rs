@@ -7,6 +7,7 @@ pub mod update;
 pub mod window;
 pub mod dig;
 pub mod gist;
+pub mod pictures;
 
 use std::path::PathBuf;
 

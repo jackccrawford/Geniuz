@@ -131,6 +131,12 @@ fn base_tool_definitions() -> Value {
                         "thread": {
                             "type": "string",
                             "description": "Optional. Short UUID or address of a memory in the same folder to thread this to. Builds chains: question to answer, draft to final, problem to solution. A memory in another folder can't be threaded to: keep this in that folder, or put its address in the content instead."
+                        },
+                        "images": {
+                            "type": "array",
+                            "maxItems": 5,
+                            "items": { "type": "string" },
+                            "description": "Optional. Up to 5 images to keep with the note, such as a screenshot or a diagram: each is the path of an image file on this computer, or the ID of an image this folder already holds (so several notes can show one image). The file is read once and left as it is; a downscaled copy is stored in the folder. The note's words are how the image is found later, so they say what it shows. An image stays with every note that shows it, and only the person can take one back, so it's worth a look at what else is in a screenshot before keeping it."
                         }
                     },
                     "required": ["content", "gist"]
@@ -162,6 +168,10 @@ fn base_tool_definitions() -> Value {
                         "full": {
                             "type": "boolean",
                             "description": "If true, returns full content of each memory. Default false (gist summaries only)."
+                        },
+                        "image": {
+                            "type": "string",
+                            "description": "Optional. The ID or address of an image, as shown after 'image' on a result line (for example 1B2C3D4E). Returns that image itself, to look at, with its size and the notes that show it, instead of searching. Looking at one costs about 1,700 tokens."
                         },
                         "limit": {
                             "type": "integer",
@@ -229,10 +239,55 @@ fn execute_keep(
         None => return ("Error: gist is required: one line saying what this memory is".to_string(), true),
     };
     let thread = params.get("thread").and_then(|t| t.as_str());
+    // Each image is a file on this computer or one the folder already holds. All
+    // are read and prepared before anything is kept, so a bad one keeps nothing.
+    let mut attach: Vec<geniuz::db::Attach> = Vec::new();
+    if let Some(list) = params.get("images").filter(|v| !v.is_null()) {
+        let Some(list) = list.as_array() else {
+            return ("Error: images is a list: file paths, or IDs of images this folder holds.".to_string(), true);
+        };
+        // Counted before any file is opened: a long list is refused without reading one.
+        if list.len() > geniuz::pictures::MAX_PER_MEMORY {
+            return (format!(
+                "Error: A memory carries at most {} images; this one has {}. Keep the rest in a reply.",
+                geniuz::pictures::MAX_PER_MEMORY, list.len()
+            ), true);
+        }
+        for item in list {
+            let Some(item) = item.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+                return ("Error: each image is a file path or an image ID.".to_string(), true);
+            };
+            if std::path::Path::new(item).is_file() {
+                let prepared = std::fs::File::open(item)
+                    .map_err(|e| format!("couldn't read it: {}", e))
+                    .and_then(geniuz::pictures::read_capped)
+                    .and_then(|bytes| geniuz::pictures::prepare(&bytes));
+                match prepared {
+                    Ok(p) => attach.push(geniuz::db::Attach::New(p)),
+                    Err(e) => return (format!("Error: {}: {}", item, e), true),
+                }
+            } else {
+                match db.resolve_image(item) {
+                    Ok(Some(_)) => attach.push(geniuz::db::Attach::Existing(item.to_string())),
+                    Ok(None) => return (format!(
+                        "Error: {} is neither an image file on this computer nor the ID of an image in this folder. \
+                         An image a person pasted into a chat isn't a file Geniuz can read: it needs the file's path.",
+                        item
+                    ), true),
+                    Err(e) => return (format!("Error: {}", e), true),
+                }
+            }
+        }
+    }
+    let with = |r: &geniuz::db::KeepResult| match r.images.len() {
+        0 => String::new(),
+        1 => format!(", with image {}", r.images[0]),
+        n => format!(", with {} images: {}", n, r.images.join(" ")),
+    };
     // A memory's time is when it was kept, never a time the caller gives (Jack, 8 Nov):
     // something about the past is said in the gist and content.
-    match db.keep_with_backend(content, gist, thread, backend) {
-        Ok(result) if result.embedded => (format!("Kept ({})", db.address(&result.uuid)), false),
+    match db.keep_with_images(content, gist, thread, &attach, backend) {
+        Ok(result) if result.embedded => (format!("Kept ({}){}", db.address(&result.uuid), with(&result)), false),
         // State, not instruction. This server exposes three tools and none of
         // them runs the CLI, so telling the caller to run `backfill` is a
         // command it may be unable to follow — while some hosts have a shell
@@ -240,8 +295,8 @@ fn execute_keep(
         // run it or relay it; the server cannot see the caller's capabilities.
         Ok(result) => (
             format!(
-                "Kept ({}), without an embedding for now: found by keywords until 'geniuz backfill' runs.",
-                db.address(&result.uuid)
+                "Kept ({}){}, without an embedding for now: found by keywords until 'geniuz backfill' runs.",
+                db.address(&result.uuid), with(&result)
             ),
             false,
         ),
@@ -583,7 +638,7 @@ fn execute_recall_all(reg: &Registry, backend: Option<&dyn EmbeddingBackend>, ar
         .iter()
         .map(|h| {
             let score = h.entry.score.map(|s| format!(" ({:.3})", s)).unwrap_or_default();
-            let line = format!("{} | {} | {} | {}{}", h.address(), h.folder.name, crate::shorten_ts(&h.entry.created_at), h.entry.gist, score);
+            let line = format!("{} | {} | {} | {}{}{}", h.address(), h.folder.name, crate::shorten_ts(&h.entry.created_at), h.entry.gist, score, if full { h.entry.image_mark_opened() } else { h.entry.image_mark() });
             let content = full
                 .then(|| DatabaseManager::open_existing(&h.folder.db_path.to_string_lossy()).ok()?.get_full_content(&h.entry.memory_uuid).ok().flatten())
                 .flatten();
@@ -598,6 +653,55 @@ fn execute_recall_all(reg: &Registry, backend: Option<&dyn EmbeddingBackend>, ar
     }
     lines.push(format!("searched: {} · {}", geniuz::dig::count(found.searched, "folder", "folders"), geniuz::dig::count(found.memories, "memory", "memories")));
     (lines.join("\n"), false)
+}
+
+/// `recall` with `image`: the image itself, as an image, with a line saying what
+/// it is. None when the call doesn't ask for one. The folder is the one named, or
+/// the one in a FOLDER:IMAGE address.
+fn recall_image(reg: &Registry, args: &Value) -> Option<Value> {
+    let asked = args.get("image").and_then(|i| i.as_str()).map(str::trim).filter(|s| !s.is_empty())?;
+    let refuse = |text: String| Some(json!({ "content": [{ "type": "text", "text": text }], "isError": true }));
+    let mut args = args.clone();
+    if let Some((folder, _)) = asked.split_once(':') {
+        if args.get("folder").and_then(|f| f.as_str()).map(str::trim).is_none_or(str::is_empty) {
+            args["folder"] = json!(folder.trim());
+        }
+    }
+    let db = match open_for_call(reg, &args) {
+        Ok(db) => db,
+        Err(e) => return refuse(format!("Error: {}", e)),
+    };
+    let (info, data) = match db.image(asked) {
+        Ok(Some(found)) => found,
+        Ok(None) => return refuse(format!(
+            "No image {} in that folder. An image's ID is shown after 'image' on a recall line.",
+            asked.to_uppercase()
+        )),
+        Err(e) => return refuse(format!("Error: {}", e)),
+    };
+    // Unavailable: there is nothing to look at, and that is worth knowing, not an error.
+    if info.unavailable {
+        return Some(json!({
+            "content": [{ "type": "text", "text": format!("Image {} is unavailable.", &info.image_uuid[..8]) }],
+            "isError": false
+        }));
+    }
+    let shown_in = db.memories_showing(&info.image_uuid).unwrap_or_default();
+    let replaced = info.replaced_at.as_deref()
+        .map(|at| format!(" · replaced {} by the folder's owner, so it may differ from what an earlier reader saw", crate::shorten_ts(at)))
+        .unwrap_or_default();
+    use base64::Engine;
+    Some(json!({
+        "content": [
+            { "type": "text", "text": format!(
+                "Image {} · {} x {} · {} KB · kept {}{} · shown in: {}",
+                &info.image_uuid[..8], info.width, info.height, info.bytes.div_ceil(1024),
+                crate::shorten_ts(&info.created_at), replaced, shown_in.join(" ")
+            ) },
+            { "type": "image", "data": base64::engine::general_purpose::STANDARD.encode(&data), "mimeType": info.media_type }
+        ],
+        "isError": false
+    }))
 }
 
 fn call_tool(
@@ -756,9 +860,12 @@ fn scope(db: &DatabaseManager, window: &Window, mode: &str) -> String {
 }
 
 fn format_entries(entries: &[MemoryEntry], full: bool, db: &DatabaseManager) -> String {
+    let mut entries = entries.to_vec();
+    db.mark_images(&mut entries);
     let mut lines = Vec::new();
-    for e in entries {
-        let head = entry_line(e);
+    for e in &entries {
+        // Read in full, a memory also says when an image it showed is unavailable.
+        let head = if full { format!("{}{}", entry_line(e), e.unavailable_note()) } else { entry_line(e) };
         if full {
             let content = db.get_full_content(&e.memory_uuid)
                 .ok().flatten().unwrap_or_default();
@@ -782,7 +889,7 @@ fn entry_line(e: &MemoryEntry) -> String {
     if let Some(s) = e.score {
         suffix.push_str(&format!(" ({:.3})", s));
     }
-    format!("{} | {} | {}{}", &e.memory_uuid[..8], ts, e.gist, suffix)
+    format!("{} | {} | {}{}{}", &e.memory_uuid[..8], ts, e.gist, suffix, e.image_mark())
 }
 
 #[cfg(test)]
@@ -815,6 +922,8 @@ mod tests {
             parent_uuid: parent.map(String::from),
             content: None,
             score,
+            images: Vec::new(),
+            images_unavailable: 0,
         }
     }
 
@@ -900,6 +1009,50 @@ mod tests {
         assert!(out.ends_with(&format!("searched: thread {reply} · root {root} · 2 memories · all time · oldest first")), "{out}");
         let (out, is_err) = execute_recall(&db, &json!({}));
         assert!(!is_err && out.contains("elsewhere"), "no query means recent: {out}");
+    }
+
+    #[test]
+    fn a_note_keeps_an_image_by_path_then_by_id_and_recall_hands_it_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = Registry::new(dir.path());
+        reg.ensure_default().unwrap();
+        let shot = dir.path().join("shot.png");
+        image::RgbImage::from_fn(320, 200, |x, y| image::Rgb([(x % 255) as u8, (y % 255) as u8, 40])).save(&shot).unwrap();
+
+        let (out, is_error) = call_tool(&reg, None, "keep", &json!({
+            "folder": "My memory", "content": "the login error", "gist": "bug: login", "images": [shot.to_str().unwrap()]
+        }));
+        assert!(!is_error && out.contains(", with image "), "{out}");
+        let id = out.split(", with image ").nth(1).unwrap()[..8].to_string();
+        assert!(shot.exists(), "the file is only read");
+
+        // A second note shows the same image by its ID; nothing is stored twice.
+        let (out, is_error) = call_tool(&reg, None, "keep", &json!({
+            "folder": "My memory", "content": "still broken", "gist": "bug: login, again", "images": [id]
+        }));
+        assert!(!is_error && out.contains(&format!(", with image {id}")), "{out}");
+
+        let (out, _) = call_tool(&reg, None, "recall", &json!({ "folder": "My memory" }));
+        assert_eq!(out.matches(&format!(" · image {id}")).count(), 2, "{out}");
+
+        let got = recall_image(&reg, &json!({ "folder": "My memory", "image": id })).unwrap();
+        assert_eq!(got["isError"], false);
+        assert_eq!(got["content"][1]["type"], "image");
+        assert_eq!(got["content"][1]["mimeType"], "image/webp");
+        assert!(got["content"][1]["data"].as_str().unwrap().starts_with("UklGR"), "WebP, as Base64");
+        assert!(got["content"][0]["text"].as_str().unwrap().contains("320 x 200"));
+
+        // What isn't a file or an image here keeps nothing, and says why.
+        let before = reg.find("My memory").unwrap().stats().unwrap().0;
+        for bad in [json!(["/no/such.png"]), json!(["FFFFFFFF"]), json!("shot.png"), json!([7])] {
+            let (out, is_error) = call_tool(&reg, None, "keep", &json!({
+                "folder": "My memory", "content": "x", "gist": "x", "images": bad
+            }));
+            assert!(is_error, "{out}");
+        }
+        assert_eq!(reg.find("My memory").unwrap().stats().unwrap().0, before, "nothing kept");
+        assert_eq!(recall_image(&reg, &json!({ "folder": "My memory", "image": "FFFFFFFF" })).unwrap()["isError"], true);
+        assert!(recall_image(&reg, &json!({ "folder": "My memory" })).is_none(), "no image asked for: the usual recall");
     }
 
     #[test]
@@ -1214,9 +1367,14 @@ pub fn serve() {
                 let arguments = request.params.get("arguments")
                     .cloned().unwrap_or(json!({}));
 
-                let (text, is_error) = call_tool(&reg, backend.as_deref(), tool_name, &arguments);
-
-                tool_result(id, &text, is_error)
+                // An image comes back as an image, which the text-only path can't carry.
+                match (tool_name == "recall").then(|| recall_image(&reg, &arguments)).flatten() {
+                    Some(result) => success(id, result),
+                    None => {
+                        let (text, is_error) = call_tool(&reg, backend.as_deref(), tool_name, &arguments);
+                        tool_result(id, &text, is_error)
+                    }
+                }
             }
 
             _ => error_response(id, -32601, &format!("Method not found: {}", request.method)),
@@ -1292,8 +1450,43 @@ fn config_paths() -> Vec<std::path::PathBuf> {
 fn geniuz_binary_path() -> String {
     // Use the currently running binary's path
     std::env::current_exe()
-        .map(|p| p.to_string_lossy().to_string())
+        .map(|p| launcher_for(&p).to_string_lossy().to_string())
         .unwrap_or_else(|_| "geniuz".to_string())
+}
+
+/// The file another program should start. The install script puts the program at
+/// `geniuz.bin` beside a small `geniuz` launcher that tells it where its bundled
+/// library is. A build from before 5.1.0 can't find that library when `geniuz.bin`
+/// is started directly, and stops (Lunar, 10 Nov 2026: every connection `mcp
+/// install` wrote on Linux was dead). Later builds find it themselves, and the
+/// launcher is still the name a person knows, so it is still the one written.
+fn launcher_for(exe: &std::path::Path) -> std::path::PathBuf {
+    if exe.extension().and_then(|e| e.to_str()) == Some("bin") {
+        let launcher = exe.with_extension("");
+        if launcher.is_file() {
+            return launcher;
+        }
+    }
+    exe.to_path_buf()
+}
+
+#[cfg(test)]
+mod launcher_tests {
+    use super::launcher_for;
+
+    #[test]
+    fn a_connection_names_the_launcher_not_the_program_behind_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("geniuz.bin");
+        std::fs::write(&program, b"").unwrap();
+        // No launcher beside it: the program itself is all there is.
+        assert_eq!(launcher_for(&program), program);
+        let launcher = dir.path().join("geniuz");
+        std::fs::write(&launcher, b"").unwrap();
+        assert_eq!(launcher_for(&program), launcher);
+        // An ordinary install has no .bin and is left alone.
+        assert_eq!(launcher_for(&launcher), launcher);
+    }
 }
 
 /// macOS runs a quarantined app from a random path that disappears when it quits,

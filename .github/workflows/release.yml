@@ -56,7 +56,14 @@ jobs:
           echo "ORT_PREFER_DYNAMIC_LINK=1" >> $GITHUB_ENV
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: |
+          # Linux: an rpath of $ORIGIN/../lib, so the system's loader finds the
+          # bundled ONNX Runtime beside the program even when it is started
+          # without the launcher script. install.sh still installs the launcher.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/../lib'
+          fi
+          cargo build --release --target ${{ matrix.target }}
 
       - name: Package and checksum
         run: |

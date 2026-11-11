@@ -165,6 +165,7 @@ export async function mount(container) {
         <div class="smsg__body">
           <div class="smsg__head">${head}
             <time datetime="${su.esc(m.created_at)}" title="${su.esc(su.timeFull(m.created_at))}">${su.esc(su.timeShort(m.created_at))}</time>
+            ${m.images ? `<span class="smsg__images" role="img" aria-label="${m.images === 1 ? 'Has an image' : `Has ${Number(m.images)} images`}" title="${m.images === 1 ? 'Has an image' : `Has ${Number(m.images)} images`}"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="5.3" cy="6.2" r="1.2" fill="currentColor"/><path d="M2.5 12 6.4 8.4l2.4 2.1 2-1.9 2.7 2.6" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>${m.images > 1 ? `<span>${Number(m.images)}</span>` : ''}</span>` : ''}
             ${num ? `<span class="smsg__num">#${num}</span>` : ''}</div>
           ${depth === 0 && parentOf(m) ? `<div class="smsg__re">↳ part of a thread that began earlier</div>` : ''}
           ${text && text !== (m.gist || '').trim() ? `<div class="smsg__text">${su.renderText(text)}</div><button type="button" class="smsg__more" hidden>Read all</button>` : ''}

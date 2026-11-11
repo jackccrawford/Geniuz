@@ -16,6 +16,7 @@
 | Gist | The short line you find a memory by. |
 | Harvest | What a recall's results point onward to, read from those memories. |
 | Home | An agent's own folder, where it keeps what only it needs to carry forward. Listed under Agents. |
+| Image | A picture kept with a memory, inside the folder's file. Up to five per memory; one image can be shown by many memories. |
 | Keep | Saving a memory. `remember` still works as another name for it. |
 | MCP | Model Context Protocol, a standard way for AI tools to call other programs. |
 | Memory | One entry that Geniuz will not change: a gist, content, and optionally a parent. |
@@ -26,3 +27,5 @@
 | Short ID | The first 8 characters of a UUID. A folder's short ID works anywhere its name does. |
 | Station | The older name for a folder, from before Geniuz 4.0. |
 | Thread | Memories linked by parent, such as a problem and its solution. |
+| Unavailable | What a memory says of an image that is no longer kept, usually because its owner withdrew it. The memory's words remain. |
+| Withdraw | Erasing an image from a folder at its owner's word. The one removal Geniuz allows. |

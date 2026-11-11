@@ -368,6 +368,13 @@ class GeniuzService: ObservableObject {
                 self.settleClaudeConnection(entry)
                 self.claudeCodeConnected = claudeCode
                 self.cliOnPath = onPath
+                // Launch at login is set in the dashboard's Settings now, which only
+                // writes the file: macOS has to be told here, when the file changes.
+                // Only from a file that is there: with none, `s` holds the defaults, and
+                // the default (on) must not undo a choice the person made.
+                if FileManager.default.fileExists(atPath: self.settingsPath), s.launchAtLogin != self.settings.launchAtLogin {
+                    self.applyLaunchAtLogin(s.launchAtLogin)
+                }
                 self.settings = s
                 self.onStateChange?()
                 self.checkForUpdateIfDue()
@@ -1097,19 +1104,39 @@ class GeniuzService: ObservableObject {
         }
     }
 
-    /// Open the settings window. Lazy-creates the window on first invocation
-    /// and reuses it on subsequent opens. Activates the app so the window
-    /// receives focus (LSUIElement = true means we're not normally focusable).
+    /// Settings live in one place, the dashboard, as on Windows and Linux (Jack,
+    /// 10 Nov 2026: "having all settings in one place is preferable"). The gear
+    /// opens the dashboard at its Settings page. If the dashboard can't be opened,
+    /// the small About window comes up instead: it is what's useful then.
     func openSettings() {
+        guard let nested = Bundle.main.url(forResource: "Geniuz", withExtension: "app"),
+              let page = URL(string: "geniuz://settings") else {
+            openAbout()
+            return
+        }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        // Handed to this copy of the dashboard by path, not by asking macOS who owns
+        // the scheme: it remembers every temporary place an app once ran from.
+        NSWorkspace.shared.open([page], withApplicationAt: nested, configuration: config) { [weak self] _, error in
+            if error != nil {
+                DispatchQueue.main.async { self?.openAbout() }
+            }
+        }
+    }
+
+    /// The About window: what this copy of Geniuz is and whether it is connected,
+    /// with the two things worth doing when the dashboard won't open. Lazy-created
+    /// and reused. Activates the app so the window receives focus (LSUIElement =
+    /// true means we're not normally focusable).
+    func openAbout() {
         if settingsWindowController == nil {
-            let view = GeniuzSettingsView(service: self)
+            let view = GeniuzAboutView(service: self)
             let hosting = NSHostingController(rootView: view)
             let window = NSWindow(contentViewController: hosting)
             window.styleMask = [.titled, .closable, .resizable]
-            window.title = "Geniuz Settings"
-            // Initial size big enough for all four sections without scrolling.
-            // User can resize from here; minSize prevents shrinking past readable.
-            window.setContentSize(NSSize(width: 420, height: 600))
+            window.title = "About Geniuz"
+            window.setContentSize(NSSize(width: 420, height: 460))
             window.minSize = NSSize(width: 380, height: 320)
             window.center()
             window.isReleasedWhenClosed = false

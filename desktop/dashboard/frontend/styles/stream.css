@@ -87,6 +87,8 @@ html.os-linux .sidebar {
 .smsg__gist { font-size: 15px; color: var(--s-ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .smsg__head time { font-size: 12px; color: var(--s-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .smsg__num { margin-left: auto; flex-shrink: 0; white-space: nowrap; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+.smsg__images { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
+.smsg__images svg { display: block; }
 .smsg__re { margin-top: 2px; font-size: 12.5px; color: var(--s-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .smsg__text {
@@ -226,6 +228,37 @@ html.os-linux .sidebar {
   color: var(--s-ink);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+.memory-modal__images {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.memory-modal__image {
+  margin: 0;
+}
+/* The width and height attributes hold the place while the bytes load. */
+.memory-modal__image img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--s-line);
+  border-radius: 6px;
+}
+.memory-modal__image--withdrawn {
+  padding: 14px 16px;
+  border: 1px dashed var(--s-line);
+  border-radius: 6px;
+}
+.memory-modal__image.memory-modal__image--withdrawn figcaption {
+  margin-top: 0;
+  opacity: 0.85;
+}
+.memory-modal__image figcaption {
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.72;
+  font-variant-numeric: tabular-nums;
 }
 .memory-modal__text code {
   font-size: 13px;

@@ -1089,3 +1089,29 @@ fn a_face_is_one_emoji_and_never_letters() {
     assert!(reg.set_face("Work", "W").is_err());
     assert_eq!(reg.find("Work").unwrap().face, "", "a refused face changes nothing");
 }
+
+/// A moved-away folder refuses new images too, and a file from before images
+/// (no such tables) can still be closed off.
+#[test]
+fn a_moved_folder_refuses_images_and_an_older_file_still_closes() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("memory.db");
+    crate::db::DatabaseManager::new(path.to_str().unwrap()).unwrap();
+    let conn = rusqlite::Connection::open(&path).unwrap();
+    let sql = super::moving::fence_sql(&conn).unwrap();
+    assert!(sql.contains("_images_insert") && sql.contains("_memory_images_insert"), "{sql}");
+    conn.execute_batch(&sql).unwrap();
+    let err = conn
+        .execute("INSERT INTO images (image_uuid, sha256, media_type, width, height, data) VALUES (?1, ?2, 'image/webp', 1, 1, x'00')",
+            rusqlite::params!["A".repeat(36), "b".repeat(64)])
+        .unwrap_err();
+    assert!(err.to_string().contains("moved to another drive"), "{err}");
+
+    let old = dir.path().join("old.db");
+    let conn = rusqlite::Connection::open(&old).unwrap();
+    conn.execute_batch("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT); CREATE TABLE memories (memory_uuid TEXT);").unwrap();
+    let sql = super::moving::fence_sql(&conn).unwrap();
+    assert!(!sql.contains("images"), "{sql}");
+    conn.execute_batch(&sql).unwrap();
+    assert!(conn.execute("INSERT INTO memories VALUES ('x')", []).is_err());
+}

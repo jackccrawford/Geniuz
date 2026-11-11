@@ -67,6 +67,14 @@ export function resolveAddress(address) {
   return invoke('resolve_address', { address });
 }
 
+export function takeStartupNav() {
+  return invoke('take_startup_nav');
+}
+
+export function checkUpdateNow() {
+  return invoke('check_update_now');
+}
+
 export function getShortcuts() {
   return invoke('get_shortcuts');
 }
@@ -92,8 +100,8 @@ export function getRecentMemories(limit = 24, offset = 0, oldestFirst = false) {
  * Save a new memory. `gist` is required (one line; spaces alone don't count). Returns the short
  * (8-char) UUID prefix of the new memory.
  */
-export function rememberMemory(gist, content, folder, parent = null) {
-  return invoke('remember_memory', { gist: gist || null, content, folder: folder || null, parent: parent || null });
+export function rememberMemory(gist, content, folder, parent = null, images = []) {
+  return invoke('remember_memory', { gist: gist || null, content, folder: folder || null, parent: parent || null, images });
 }
 
 export function getActivity(days = 14) {
@@ -130,8 +138,16 @@ export function openPath(path) {
 // -------------------------------------------------------------------------
 
 /**
+ * One image as a `data:` address the page can show.
+ * Returns: string. Rejects if the image is unavailable or isn't in the folder.
+ */
+export function getImage(id, folder = null) {
+  return invoke('get_image', { id, folder });
+}
+
+/**
  * Fetch full details for a single memory by UUID.
- * Returns: { uuid, gist, content, created_at, parent_uuid } | null
+ * Returns: { uuid, gist, content, created_at, parent_uuid, images } | null
  */
 export function getMemoryDetail(uuid, folder = null) {
   return invoke('get_memory_detail', { uuid, folder });
@@ -164,7 +180,17 @@ export function getStatus() {
  *   recent_memories_count }
  */
 export function getSettings() {
-  return invoke('get_settings');
+  return invoke('get_settings').then((s) => { autocorrect = !!s?.autocorrect; return s; });
+}
+
+// Whether autocorrect is on, as last read. Kept here so a form can set its fields
+// as it is drawn, without waiting: a form that waits can finish drawing after the
+// person has moved on, and draw over what they moved on to. Read once when the
+// window opens, and again whenever settings are read or saved. A change made from
+// the command line while the window is open is not seen until then.
+let autocorrect = false;
+export function autocorrectOn() {
+  return autocorrect;
 }
 
 /**
@@ -172,7 +198,7 @@ export function getSettings() {
  * after save (which may differ from the patch if the file rejected a field).
  */
 export function updateSettings(settings) {
-  return invoke('update_settings', { patch: { settings } });
+  return invoke('update_settings', { patch: { settings } }).then((s) => { autocorrect = !!s?.autocorrect; return s; });
 }
 
 /**

@@ -12,6 +12,18 @@ import * as dataSurface from './surfaces/data.js';
 import * as placeholder from './surfaces/placeholder.js';
 import { subscribe, getState, setState, navigate } from './store.js';
 import { openMemory } from './components/memoryModal.js';
+import { openShortcuts } from './components/shortcutsDialog.js';
+
+// Read once as the window opens, so the forms know the autocorrect setting when drawn.
+api.getSettings().catch(() => {});
+
+// A file dropped anywhere must never replace the window: left alone, the web view
+// opens it like a browser would, with no way back. A surface that takes drops
+// (the Keep form) handles its own; everything else is refused here.
+// Only files are refused: dragging words into a text box still works.
+const carriesFiles = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+window.addEventListener('dragover', (e) => { if (carriesFiles(e)) e.preventDefault(); });
+window.addEventListener('drop', (e) => { if (carriesFiles(e)) e.preventDefault(); });
 import { openFolderDialog } from './components/folderDialog.js';
 
 // Tag the document so CSS can target Tauri-specific rules.
@@ -150,6 +162,9 @@ async function wireMenuEvents() {
       case 'tray_settings':
         navigate('settings');
         break;
+      case 'menu_shortcuts':
+        openShortcuts();
+        break;
       case 'menu_export':
         navigate('data');
         break;
@@ -185,6 +200,8 @@ async function wireMenuEvents() {
 
   await listen('menu', (event) => handleNav(event.payload));
   await listen('tray-nav', (event) => handleNav(event.payload));
+  // A page asked for before this was listening (the Mac menu bar's Settings).
+  api.takeStartupNav().then((id) => { if (id) handleNav(id); }).catch(() => {});
 }
 
 // Memories arrive from agents and the command line while the window is open, so

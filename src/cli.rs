@@ -4,6 +4,8 @@ use std::path::PathBuf;
 #[derive(Parser)]
 #[command(
     name = "geniuz",
+    // Help says "geniuz" even where the program file is geniuz.bin behind a launcher.
+    bin_name = "geniuz",
     version,
     about = "Your AI remembers now",
     long_about = "GENIUZ: Your AI remembers now.\n\nYour AI starts every conversation from zero. Geniuz keeps what matters,\nthe calls you made and the reasons behind them, on your own computer,\nwhere any AI you use can find it: Claude Desktop through MCP, or any\nagent that can run a command. A memory is never edited, so the record holds.",
@@ -38,13 +40,52 @@ impl Cli {
     }
 }
 
+/// What sits under `geniuz image` besides looking: only `admin`, and it is hidden.
+/// Taking an image back is the owner's act and a rare one, so the everyday help
+/// doesn't offer it; `geniuz image admin --help` explains it in full.
+#[derive(Subcommand)]
+pub enum ImageCommand {
+    /// For the folder's owner: take an image back, or put another in its place
+    #[command(
+        hide = true,
+        arg_required_else_help = true,
+        after_help = "Kept means kept: a memory can't be changed, and neither can its image. No MCP tool does either.\nThis is the one way through, for the person who owns the folder. An agent runs it\nonly when that person asks, after showing them what the first run prints.\n\n  withdraw  Erases the image: its bytes and its size. A memory that showed it\n            says an image is unavailable, and nothing more.\n  replace   Puts another image in its place, marked replaced with the date:\n            for example the same screenshot with a number blurred.\n\nIt takes two runs. The first changes nothing: it prints the image, the memories\nthat show it, and the line to run next. The second carries --confirm with the\nimage's full ID, and does it.\n\n  geniuz image -f Work admin withdraw 1B2C3D4E\n  geniuz image -f Work admin withdraw 1B2C3D4E --confirm <FULL-ID>\n\nBoth change every memory that shows the image, and an agent that looked at it\nbefore may still hold the old one in its context. Neither can be undone, and\nneither reaches backups, exports, or what an agent already wrote about the image.\n\nThe two runs guard against a slip, not against intent: whoever can run programs\nas you can already reach the folder's file."
+    )]
+    Admin {
+        #[command(subcommand)]
+        action: ImageAdmin,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ImageAdmin {
+    /// Erase an image for good; memories that showed it say an image is unavailable
+    Withdraw {
+        /// The image's ID
+        id: String,
+        /// The image's full ID, as the first run printed it. Without this, nothing changes.
+        #[arg(long, value_name = "FULL-ID")]
+        confirm: Option<String>,
+    },
+    /// Put another image in its place, for every memory that shows it
+    Replace {
+        /// The image's ID
+        id: String,
+        /// The new image, as a file
+        file: String,
+        /// The image's full ID, as the first run printed it. Without this, nothing changes.
+        #[arg(long, value_name = "FULL-ID")]
+        confirm: Option<String>,
+    },
+}
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Keep a memory: what you learned, decided, or discovered
     #[command(
         alias = "remember",
         arg_required_else_help = true,
-        after_help = "Examples:\n  geniuz keep -f Work -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz keep -f LIMEN -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz keep -f Work -c - -g \"piped: from process\"\n\nThe folder and the gist are required: name where it goes, and write the gist for whoever finds it next. `geniuz folder list` lists the folders."
+        after_help = "Examples:\n  geniuz keep -f Work -c \"Token refresh order\" -g \"fix: auth token refresh\"\n  geniuz keep -f LIMEN -c @notes.md -g \"session: review\"\n  echo \"content\" | geniuz keep -f Work -c - -g \"piped: from process\"\n  geniuz keep -f Work -c \"The error after the upgrade\" -g \"bug: login screen\" --image shot.png\n\nThe folder and the gist are required: name where it goes, and write the gist for whoever finds it next. `geniuz folder list` lists the folders."
     )]
     Keep {
         /// Content to save
@@ -58,6 +99,39 @@ pub enum Command {
         /// Thread to a parent memory (UUID prefix)
         #[arg(short, long)]
         parent: Option<String>,
+
+        /// An image to keep with it: a file, or - to read one from a pipe. Repeat for more, up to 5.
+        /// It is stored in the folder, downscaled; the file itself is left as it is
+        #[arg(short, long, value_name = "FILE")]
+        image: Vec<String>,
+
+        /// An image this folder already holds, by its ID, so this memory shows it too
+        #[arg(long, value_name = "ID")]
+        image_id: Vec<String>,
+
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// See the images kept in a folder, or take one out as a file
+    #[command(
+        after_help = "Examples:\n  geniuz image -f Work                     Every image in the folder\n  geniuz image -f Work 1B2C3D4E            One image: its size, and the memories that show it\n  geniuz image -f Work 1B2C3D4E -o shot.webp   Write it to a file\n  geniuz image -f Work 1B2C3D4E --base64   The block a model is handed\n\nTo keep an image: geniuz keep -f Work -c \"what it shows\" -g \"...\" --image shot.png\nThe words are how it's found later: say what the image shows."
+    )]
+    Image {
+        /// The image's ID (8 characters or more). Leave it out to list the folder's images
+        id: Option<String>,
+
+        #[command(subcommand)]
+        admin: Option<ImageCommand>,
+
+        /// Write the image to this file, or - for a pipe
+        #[arg(short, long, value_name = "FILE", requires = "id")]
+        out: Option<String>,
+
+        /// Print it as the Base64 block a model is handed
+        #[arg(long, conflicts_with = "out", requires = "id")]
+        base64: bool,
 
         /// Output as JSON
         #[arg(long)]
@@ -380,7 +454,7 @@ pub enum SettingsCommand {
     },
 
     /// Set a single setting and save
-    #[command(after_help = "Examples:\n  geniuz settings set recent_memories_count 10\n\nValid keys:\n  launch_at_login          true | false\n  autoupdate_enabled       true | false\n  update_check_frequency   daily | weekly | manual\n  recent_memories_count    non-negative integer")]
+    #[command(after_help = "Examples:\n  geniuz settings set recent_memories_count 10\n\nValid keys:\n  launch_at_login          true | false\n  autoupdate_enabled       true | false\n  update_check_frequency   daily | weekly | manual\n  recent_memories_count    non-negative integer\n  autocorrect              true | false   (in the window: correct words as you type; off keeps a memory as typed)")]
     Set {
         /// Setting key
         key: String,

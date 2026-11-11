@@ -86,6 +86,8 @@ struct RecentMemory {
     /// Which folder it came from, when a search covered more than the one on screen.
     folder: Option<String>,
     folder_name: Option<String>,
+    /// How many images it shows, so a list can say so without fetching them.
+    images: usize,
 }
 
 /// One matching line from an Exact search.
@@ -132,6 +134,19 @@ struct MemoryDetail {
     content: Option<String>,
     created_at: String,
     parent_uuid: Option<String>,
+    /// The images it shows, in order. Their bytes are asked for one at a time.
+    images: Vec<ImageRef>,
+}
+
+#[derive(Serialize)]
+struct ImageRef {
+    id: String,
+    width: u32,
+    height: u32,
+    bytes: u64,
+    /// When the folder's owner took it back or put another in its place, if they did.
+    unavailable: bool,
+    replaced_at: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -213,6 +228,46 @@ fn get_update() -> Option<UpdateStatus> {
     Some(UpdateStatus { checked_at, newer })
 }
 
+/// A page asked for from outside the window: the Mac menu bar app opens the
+/// dashboard with `geniuz://settings`. Kept until the page reads it, because on a
+/// cold start the link arrives before the page is listening.
+static PENDING_NAV: std::sync::Mutex<Option<&'static str>> = std::sync::Mutex::new(None);
+
+/// Whether the page has started listening. Before that, a link is held for it;
+/// after, it is delivered and not kept, so a later reload of the page doesn't
+/// jump back to wherever the last link pointed.
+static PAGE_LISTENING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The page a `geniuz://` link names, as the id the page's navigation takes. Only
+/// these four: a link can't make the window do anything else.
+fn nav_for_link(url: &str) -> Option<&'static str> {
+    let rest = url.strip_prefix("geniuz://")?;
+    // Query and fragment off first, then the trailing slash: "settings/?x=1" is Settings.
+    match rest.split(['?', '#']).next()?.trim_end_matches('/') {
+        "settings" => Some("tray_settings"),
+        "status" => Some("tray_status"),
+        "find" => Some("tray_find"),
+        "memories" => Some("tray_recent"),
+        _ => None,
+    }
+}
+
+/// The page asked for before the window was ready, once. The page calls this
+/// when it has started listening, and from then on links reach it directly.
+#[tauri::command]
+fn take_startup_nav() -> Option<&'static str> {
+    PAGE_LISTENING.store(true, std::sync::atomic::Ordering::SeqCst);
+    PENDING_NAV.lock().ok()?.take()
+}
+
+/// Ask now whether a newer Geniuz is out, whatever the schedule says, and report
+/// what the check found. Off the main thread: it waits on GitHub.
+#[tauri::command(async)]
+fn check_update_now() -> Result<Option<UpdateStatus>, String> {
+    geniuz::update::check()?;
+    Ok(get_update())
+}
+
 #[cfg(test)]
 mod update_tests {
     use super::version_newer;
@@ -229,12 +284,17 @@ mod update_tests {
 /// Persist a new memory. `gist` is required: the library refuses one that is
 /// missing or blank, and stores it trimmed. Returns the short (8-char) UUID
 /// prefix of the new memory.
-#[tauri::command]
+///
+/// Off the main thread (`async`): keeping embeds the words and prepares any
+/// images, which takes long enough to freeze the window if it ran there, so the
+/// Keep button could never show that it had been pressed.
+#[tauri::command(async)]
 fn remember_memory(
     gist: Option<String>,
     content: String,
     folder: Option<String>,
     parent: Option<String>,
+    images: Option<Vec<String>>,
 ) -> Result<String, String> {
     // The folder chosen on the page, or the one on screen.
     let db = match folder {
@@ -252,7 +312,24 @@ fn remember_memory(
         ),
         None => None,
     };
-    db.keep(content.trim(), gist.as_deref().unwrap_or(""), parent.as_deref())
+    // Pasted or dropped images arrive as `data:` addresses. Each is prepared by the
+    // same code the command line uses, before anything is kept.
+    let images = images.unwrap_or_default();
+    // Counted before any is decoded: a long list is refused without preparing one.
+    if images.len() > geniuz::pictures::MAX_PER_MEMORY {
+        return Err(format!(
+            "A memory carries at most {} images; this one has {}. Keep the rest in a reply.",
+            geniuz::pictures::MAX_PER_MEMORY, images.len()
+        ));
+    }
+    let mut attach = Vec::new();
+    for (n, url) in images.iter().enumerate() {
+        let picture = geniuz::pictures::from_data_url(url)
+            .and_then(|bytes| geniuz::pictures::prepare(&bytes))
+            .map_err(|e| format!("Image {}: {}", n + 1, e))?;
+        attach.push(geniuz::db::Attach::New(picture));
+    }
+    db.keep_with_images(content.trim(), gist.as_deref().unwrap_or(""), parent.as_deref(), &attach, None)
         .map(|r| r.uuid)
 }
 
@@ -292,6 +369,7 @@ fn get_recent_memories(
     for e in &mut entries {
         e.content = db.get_full_content(&e.memory_uuid).ok().flatten();
     }
+    db.mark_images(&mut entries);
     Ok(entries.into_iter().map(map_recent).collect())
 }
 
@@ -308,14 +386,16 @@ fn get_activity(days: Option<u32>) -> Result<Vec<DailyCount>, String> {
 #[tauri::command]
 fn semantic_search(query: String, limit: Option<u32>) -> Result<Vec<RecentMemory>, String> {
     let db = open_db()?;
-    let entries = db.semantic_search(&query, limit.unwrap_or(20) as usize)?;
+    let mut entries = db.semantic_search(&query, limit.unwrap_or(20) as usize)?;
+    db.mark_images(&mut entries);
     Ok(entries.into_iter().map(map_recent).collect())
 }
 
 #[tauri::command]
 fn keyword_search(query: String, limit: Option<u32>) -> Result<Vec<RecentMemory>, String> {
     let db = open_db()?;
-    let entries = db.keyword_search(&query, limit.unwrap_or(20) as usize)?;
+    let mut entries = db.keyword_search(&query, limit.unwrap_or(20) as usize)?;
+    db.mark_images(&mut entries);
     Ok(entries.into_iter().map(map_recent).collect())
 }
 
@@ -398,6 +478,8 @@ fn find(
                 .semantic_search_with(&query, &window, limit, backend.as_deref())
                 .or_else(|_| db.keyword_search_in(&query, &window, limit))?;
             add_harvest(&db.harvest(&entries, &query));
+            let mut entries = entries;
+            db.mark_images(&mut entries);
             memories.extend(entries.into_iter().map(|e| (e, f)));
         }
         memories.sort_by(|a, b| {
@@ -454,7 +536,33 @@ fn get_memory_detail(uuid: String, folder: Option<String>) -> Result<Option<Memo
         None => open_db()?,
     };
     let entry = db.get_by_uuid_prefix(&uuid)?;
-    Ok(entry.map(map_detail))
+    Ok(entry.map(|e| {
+        let images = db
+            .images_of(&e.memory_uuid)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|i| ImageRef {
+                id: i.image_uuid[..8].to_string(), width: i.width, height: i.height, bytes: i.bytes,
+                unavailable: i.unavailable, replaced_at: i.replaced_at,
+            })
+            .collect();
+        MemoryDetail { images, ..map_detail(e) }
+    }))
+}
+
+/// One image, as a `data:` address the page can show. The bytes never leave the
+/// folder's file except into the window.
+#[tauri::command]
+fn get_image(id: String, folder: Option<String>) -> Result<String, String> {
+    let db = match folder {
+        Some(f) => DatabaseManager::open_existing(&Registry::from_env().find(&f)?.db_path.to_string_lossy())?,
+        None => open_db()?,
+    };
+    let (info, data) = db.image(&id)?.ok_or_else(|| format!("No image {} in this folder.", id.to_uppercase()))?;
+    if info.unavailable {
+        return Err("This image is unavailable.".to_string());
+    }
+    Ok(geniuz::pictures::data_url(&info.media_type, &data))
 }
 
 #[tauri::command]
@@ -466,6 +574,7 @@ fn get_thread_chain(uuid: String, limit: Option<u32>) -> Result<Vec<RecentMemory
     for e in &mut thread.entries {
         e.content = db.get_full_content(&e.memory_uuid).ok().flatten();
     }
+    db.mark_images(&mut thread.entries);
     Ok(thread.entries.into_iter().map(map_recent).collect())
 }
 
@@ -921,6 +1030,7 @@ fn map_recent(e: MemoryEntry) -> RecentMemory {
         parent_uuid: e.parent_uuid,
         folder: None,
         folder_name: None,
+        images: e.images.len(),
     }
 }
 
@@ -931,6 +1041,7 @@ fn map_detail(e: MemoryEntry) -> MemoryDetail {
         content: e.content,
         created_at: e.created_at,
         parent_uuid: e.parent_uuid,
+        images: Vec::new(),
     }
 }
 
@@ -1066,6 +1177,8 @@ fn build_menu(app: &tauri::AppHandle, shortcuts: bool) -> tauri::Result<Menu<tau
         "Help",
         true,
         &[
+            &MenuItem::with_id(app, "menu_shortcuts", "Keyboard Shortcuts", true, None::<&str>)?,
+            &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "menu_about", "About Geniuz", true, None::<&str>)?,
             &MenuItem::with_id(app, "menu_website", "Visit geniuz.life", true, None::<&str>)?,
         ],
@@ -1123,6 +1236,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_link,
             open_update,
+            check_update_now,
+            take_startup_nav,
+            get_image,
             get_app_version,
             get_update,
             view_folder,
@@ -1159,6 +1275,33 @@ pub fn run() {
             let handle = app.handle();
             let menu = build_menu(handle, true)?;
             app.set_menu(menu)?;
+
+            // A link naming a page: go there, now if the page is up, else when it asks.
+            {
+                use tauri::{Emitter, Manager};
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let go = handle.clone();
+                let arrive = move |url: &str| {
+                    let Some(id) = nav_for_link(url) else { return };
+                    let listening = PAGE_LISTENING.load(std::sync::atomic::Ordering::SeqCst);
+                    if !listening {
+                        if let Ok(mut pending) = PENDING_NAV.lock() {
+                            *pending = Some(id);
+                        }
+                    }
+                    if let Some(window) = go.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                        if listening {
+                            let _ = window.emit("tray-nav", id);
+                        }
+                    }
+                };
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    urls.iter().for_each(|u| arrive(u.as_str()));
+                }
+                app.deep_link().on_open_url(move |event| event.urls().iter().for_each(|u| arrive(u.as_str())));
+            }
 
             // The text size chosen last time.
             let size = saved_text_size();
@@ -1404,6 +1547,19 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_link_names_one_of_four_pages_and_nothing_else() {
+        assert_eq!(nav_for_link("geniuz://settings"), Some("tray_settings"));
+        assert_eq!(nav_for_link("geniuz://settings/"), Some("tray_settings"));
+        assert_eq!(nav_for_link("geniuz://status?x=1"), Some("tray_status"));
+        assert_eq!(nav_for_link("geniuz://settings/?x=1"), Some("tray_settings"));
+        assert_eq!(nav_for_link("geniuz://find/#top"), Some("tray_find"));
+        assert_eq!(nav_for_link("geniuz://memories"), Some("tray_recent"));
+        for other in ["geniuz://", "geniuz://delete", "geniuz://settings/../x", "https://settings", "settings"] {
+            assert_eq!(nav_for_link(other), None, "{other}");
+        }
+    }
 
     #[test]
     fn text_size_steps_up_and_down_and_stops_at_the_ends() {

@@ -8,9 +8,11 @@ When an AI tool connects, Geniuz tells it what to do: recall at the start of a c
 
 ## What a memory is
 
-A memory has two parts: a **gist**, which is how you find it later, and **content**, which is the full detail. It can also have a **parent**, which links it to an earlier memory to form a thread.
+A memory has two parts: a **gist**, which is how you find it later, and **content**, which is the full detail. It can also have a **parent**, which links it to an earlier memory to form a thread, and up to five **images**.
 
 Memories are stored in the `memories` table of [`schema/schema.sql`](../schema/schema.sql). Database triggers refuse any update, delete or replace, including from other tools that open the file. Changing the past takes a deliberate step: dropping the trigger.
+
+Images are stored beside them in the same file: the bytes in `images`, and which memory shows which image in `memory_images`. An image is kept once and can be shown by many memories. The same triggers guard them, with one way through: the folder's owner can withdraw or replace an image (see [Using it](using-it.md)). A withdrawn image's bytes are erased from the file, and the memory's words are untouched. If another program has the folder open at that moment, a copy of the old bytes can stay in the file's log until Geniuz is next closed and opened; the command says so when that happens.
 
 ## What a folder is
 

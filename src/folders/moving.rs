@@ -61,7 +61,7 @@ impl Registry {
                 // has been lost, because the -wal file moves with the directory.
                 drop(lock);
                 std::fs::rename(&dir, &target)
-                    .map_err(|e| format!("Couldn't move {}: {}", dir.display(), e))?;
+                    .map_err(|e| format!("Couldn't move {}: {}{}", dir.display(), e, held_open_hint(&e, false)))?;
                 None
             }
         };
@@ -79,6 +79,20 @@ impl Registry {
             }
         }
         Ok(Relocated { folder: self.find(&folder.uuid)?, left_behind })
+    }
+}
+
+/// "Access is denied" on Windows, when a folder's directory is renamed, most
+/// often means some other program has a file in it open: Windows won't rename a
+/// directory in use. `finishes_later` is for the step after the move is recorded,
+/// where running the move again is not the remedy.
+fn held_open_hint(e: &std::io::Error, finishes_later: bool) -> &'static str {
+    if !(cfg!(windows) && e.kind() == std::io::ErrorKind::PermissionDenied) {
+        ""
+    } else if finishes_later {
+        "\n  Most often this means another program has the folder open. Close the Geniuz window and any AI app connected to Geniuz; the move finishes the next time Geniuz runs after that."
+    } else {
+        "\n  Most often this means another program has the folder open. Close the Geniuz window and any AI app connected to Geniuz, then run the move again. If it still fails, check that you can write to both places."
     }
 }
 
@@ -129,9 +143,20 @@ pub(super) fn fenced(conn: &Connection) -> bool {
 }
 
 /// Triggers that refuse every change to a store's contents, in the file itself.
-pub(super) fn fence_sql() -> String {
+/// Only tables the file has: one last opened by an older Geniuz has no image
+/// tables yet, and a trigger on a missing table would stop the whole move.
+///
+/// Fails if the file can't be asked which tables it has: guessing "none" would
+/// close off only part of it, and the retired original could still take writes.
+pub(super) fn fence_sql(conn: &Connection) -> Result<String, String> {
     let mut sql = String::new();
-    for table in ["memories", "memory_embeddings", "embedding_meta", "_meta"] {
+    for table in ["memories", "memory_embeddings", "embedding_meta", "_meta", "images", "memory_images"] {
+        let exists: i64 = conn
+            .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1", [table], |r| r.get(0))
+            .map_err(|e| format!("Couldn't read the folder's tables: {}", e))?;
+        if exists == 0 {
+            continue;
+        }
         for op in ["insert", "update", "delete"] {
             sql.push_str(&format!(
                 "CREATE TRIGGER {f}_{t}_{o} BEFORE {o} ON {t} BEGIN SELECT RAISE(ABORT, 'This folder has moved to another drive'); END;\n",
@@ -141,7 +166,7 @@ pub(super) fn fence_sql() -> String {
             ));
         }
     }
-    sql
+    Ok(sql)
 }
 
 /// Move across drives. Every step can be interrupted without losing a memory or
@@ -190,7 +215,16 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
         }
         let copied = staging.join(entry.file_name());
         std::fs::copy(&path, &copied).map_err(|e| format!("Couldn't copy {}: {}", path.display(), e))?;
-        std::fs::File::open(&copied)
+        // Windows refuses to flush a file opened only to read ("Access is denied"),
+        // which stopped every move across drives there, so there it is opened for
+        // writing. Elsewhere it is opened to read, as before: a read-only file in
+        // the folder, which the copy keeps read-only, must not stop the move.
+        let opened = if cfg!(windows) {
+            std::fs::OpenOptions::new().write(true).open(&copied)
+        } else {
+            std::fs::File::open(&copied)
+        };
+        opened
             .and_then(|f| f.sync_all())
             .map_err(|e| format!("Couldn't save {}: {}", copied.display(), e))?;
     }
@@ -198,7 +232,8 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
     verify_copy(&staging.join(DB_FILE), folder, expected)
         .map_err(|e| format!("{} The original is untouched; the partial copy is at {}.", e, staging.display()))?;
 
-    lock.execute_batch(&format!("{}COMMIT;", fence_sql()))
+    let fence = fence_sql(&lock).map_err(|e| format!("Couldn't close off the original: {}. Nothing moved.", e))?;
+    lock.execute_batch(&format!("{}COMMIT;", fence))
         .map_err(|e| format!("Couldn't close off the original: {}. Nothing moved.", e))?;
     drop(lock);
     let committed = staging.join(MOVE_COMMITTED);
@@ -209,7 +244,7 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     let retired = archive.join(format!("{}{}{}", folder.uuid, MOVED_MARK, stamp));
     std::fs::rename(dir, &retired)
-        .map_err(|e| format!("Couldn't retire {}: {}. Geniuz will finish this next time it runs.", dir.display(), e))?;
+        .map_err(|e| format!("Couldn't retire {}: {}. Geniuz will finish this next time it runs.{}", dir.display(), e, held_open_hint(&e, true)))?;
     drop(owner);
     publish(&staging, &dest.join(&folder.uuid))
         .map_err(|e| format!("{} Geniuz will finish this next time it runs.", e))?;

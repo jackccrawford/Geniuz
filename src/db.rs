@@ -161,7 +161,7 @@ impl DatabaseManager {
     /// wants to say something about the past, they may do so in gist and content, but
     /// not in created_at"). Order matters more than the time.
     pub fn keep(&self, content: &str, gist: &str, parent: Option<&str>) -> Result<KeepResult, String> {
-        self.keep_inner(content, gist, parent, None, None)
+        self.keep_inner(content, gist, parent, None, None, &[])
     }
 
     /// Keep a memory, optionally reusing an embedding backend already loaded.
@@ -169,7 +169,17 @@ impl DatabaseManager {
         &self, content: &str, gist: &str, parent: Option<&str>,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,
     ) -> Result<KeepResult, String> {
-        self.keep_inner(content, gist, parent, None, backend)
+        self.keep_inner(content, gist, parent, None, backend, &[])
+    }
+
+    /// Keep a memory with images. Each is a new image (already prepared by
+    /// `pictures::prepare`) or one this folder already holds, named by its ID.
+    /// The memory, any new images and their links are written together or not at all.
+    pub fn keep_with_images(
+        &self, content: &str, gist: &str, parent: Option<&str>, attach: &[Attach],
+        backend: Option<&dyn crate::embedding::EmbeddingBackend>,
+    ) -> Result<KeepResult, String> {
+        self.keep_inner(content, gist, parent, None, backend, attach)
     }
 
     /// For tests only: keep a memory with a chosen time, so windows and ordering can
@@ -181,14 +191,47 @@ impl DatabaseManager {
         created_at: Option<&str>,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,
     ) -> Result<KeepResult, String> {
-        self.keep_inner(content, gist, parent, created_at, backend)
+        self.keep_inner(content, gist, parent, created_at, backend, &[])
     }
 
     fn keep_inner(
         &self, content: &str, gist: &str, parent: Option<&str>,
         created_at: Option<&str>,
         backend: Option<&dyn crate::embedding::EmbeddingBackend>,
+        attach: &[Attach],
     ) -> Result<KeepResult, String> {
+        if attach.len() > crate::pictures::MAX_PER_MEMORY {
+            return Err(format!(
+                "A memory carries at most {} images; this one has {}. Keep the rest in a reply.",
+                crate::pictures::MAX_PER_MEMORY, attach.len()
+            ));
+        }
+        // An image named by its ID has to be in this folder already. Found before
+        // anything is written, so a wrong ID keeps nothing.
+        let mut named: Vec<Option<String>> = Vec::with_capacity(attach.len());
+        for a in attach {
+            named.push(match a {
+                Attach::New(_) => None,
+                Attach::Existing(id) => {
+                    let full = self.resolve_image(id)?.ok_or_else(|| format!(
+                        "No image {} in this folder. An image is shared between memories of one folder; \
+                         to use it in another, keep the image there.",
+                        id.trim().to_uppercase()
+                    ))?;
+                    // A withdrawn image has no bytes: a new memory would point at nothing.
+                    let withdrawn: Option<String> = self.conn()?
+                        .query_row("SELECT withdrawn_at FROM images WHERE image_uuid = ?1", [&full], |r| r.get(0))
+                        .map_err(|e| format!("Failed to read image: {}", e))?;
+                    if withdrawn.is_some() {
+                        return Err(format!(
+                            "Image {} is unavailable, so a new memory can't show it.",
+                            &full[..8]
+                        ));
+                    }
+                    Some(full)
+                }
+            });
+        }
         if content.trim().is_empty() {
             return Err("Content cannot be empty".to_string());
         }
@@ -305,9 +348,49 @@ impl DatabaseManager {
                 rusqlite::params![&uuid, blob],
             ).map_err(|e| format!("Failed to cache embedding: {}", e))?;
         }
+        // Images last, in the same transaction: the link needs its memory to exist.
+        // The same bytes are stored once, whether they were kept before or appear
+        // twice in this memory.
+        let mut images: Vec<String> = Vec::new();
+        for (a, named) in attach.iter().zip(named) {
+            let image_uuid = match (a, named) {
+                (_, Some(id)) => id,
+                (Attach::New(p), None) => {
+                    let had: Option<String> = tx
+                        .query_row("SELECT image_uuid FROM images WHERE sha256 = ?1", [&p.sha256], |r| r.get(0))
+                        .optional()
+                        .map_err(|e| format!("Failed to look up image: {}", e))?;
+                    match had {
+                        Some(id) => id,
+                        None => {
+                            let id = uuid::Uuid::new_v4().to_string().to_uppercase();
+                            tx.execute(
+                                &format!("INSERT INTO images (image_uuid, sha256, media_type, width, height, created_at, data) \
+                                          VALUES (?1, ?2, ?3, ?4, ?5, {NOW_UTC}, ?6)"),
+                                rusqlite::params![&id, &p.sha256, crate::pictures::MEDIA_TYPE, p.width, p.height, &p.data],
+                            ).map_err(|e| format!("Failed to keep image: {}", e))?;
+                            id
+                        }
+                    }
+                }
+                (Attach::Existing(_), None) => unreachable!("an existing image is resolved above"),
+            };
+            if images.contains(&image_uuid) {
+                continue;
+            }
+            tx.execute(
+                "INSERT INTO memory_images (memory_uuid, image_uuid, position) VALUES (?1, ?2, ?3)",
+                rusqlite::params![&uuid, &image_uuid, images.len() as i64],
+            ).map_err(|e| format!("Failed to join image to memory: {}", e))?;
+            images.push(image_uuid);
+        }
         tx.commit().map_err(|e| format!("Failed to commit: {}", e))?;
 
-        Ok(KeepResult { uuid: uuid[..8].to_string(), embedded: embedding.is_some() })
+        Ok(KeepResult {
+            uuid: uuid[..8].to_string(),
+            embedded: embedding.is_some(),
+            images: images.iter().map(|i| i[..8].to_string()).collect(),
+        })
     }
 
     // =========================================================================
@@ -337,6 +420,8 @@ impl DatabaseManager {
             Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
+                images: Vec::new(),
+                images_unavailable: 0,
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
@@ -362,6 +447,8 @@ impl DatabaseManager {
             Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
+                images: Vec::new(),
+                images_unavailable: 0,
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
 
@@ -385,6 +472,8 @@ impl DatabaseManager {
             Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: row.get(4)?, score: None,
+                images: Vec::new(),
+                images_unavailable: 0,
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
 
@@ -456,6 +545,8 @@ impl DatabaseManager {
             Ok(((created_at.clone(), rowid), MemoryEntry {
                 memory_uuid: uuid.clone(), gist: row.get(1)?, created_at,
                 parent_uuid: parent.filter(|p| p != &uuid), content: row.get(4)?, score: None,
+                images: Vec::new(),
+                images_unavailable: 0,
             }))
         }).map_err(|e| format!("Query failed: {}", e))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
@@ -490,6 +581,8 @@ impl DatabaseManager {
                 parent_uuid: display_parent,
                 content: row.get(4).map_err(|e| e.to_string())?,
                 score: None,
+                images: Vec::new(),
+                images_unavailable: 0,
             }))
         } else {
             Ok(None)
@@ -550,6 +643,8 @@ impl DatabaseManager {
             Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
+                images: Vec::new(),
+                images_unavailable: 0,
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
 
@@ -601,6 +696,8 @@ impl DatabaseManager {
             .into_iter().map(|r| MemoryEntry {
                 memory_uuid: r.memory_uuid, gist: r.gist, created_at: r.created_at,
                 parent_uuid: None, content: None, score: Some(r.score),
+                images: Vec::new(),
+                images_unavailable: 0,
             }).collect();
 
         // The embedding cache carries no lineage, so semantic hits came back
@@ -716,6 +813,8 @@ impl DatabaseManager {
                 gist: row.get(1).map_err(|e| e.to_string())?,
                 created_at: row.get(2).map_err(|e| e.to_string())?,
                 parent_uuid: display_parent, content: None, score: None,
+                images: Vec::new(),
+                images_unavailable: 0,
             }, n));
         }
         // Enough to fill the page after sorting by names held; more would
@@ -766,6 +865,8 @@ impl DatabaseManager {
             Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
+                images: Vec::new(),
+                images_unavailable: 0,
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
 
@@ -792,6 +893,8 @@ impl DatabaseManager {
                 Ok(MemoryEntry {
                     memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                     parent_uuid: display_parent, content: None, score: None,
+                    images: Vec::new(),
+                    images_unavailable: 0,
                 })
             },
         ).optional().map_err(|e| format!("Query failed: {}", e))?;
@@ -925,6 +1028,8 @@ impl DatabaseManager {
                 parent_uuid: row.get(3)?,
                 content: row.get(4)?,
                 score: None,
+                images: Vec::new(),
+                images_unavailable: 0,
             })
         }).map_err(|e| format!("Query failed: {}", e))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
@@ -975,6 +1080,8 @@ impl DatabaseManager {
             Ok(MemoryEntry {
                 memory_uuid: uuid, gist: row.get(1)?, created_at: row.get(2)?,
                 parent_uuid: display_parent, content: None, score: None,
+                images: Vec::new(),
+                images_unavailable: 0,
             })
         }).map_err(|e| format!("Query failed: {}", e))?
             .collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())?;
@@ -1205,6 +1312,298 @@ pub struct Thread {
 pub struct KeepResult {
     pub uuid: String,
     pub embedded: bool,
+    /// Short IDs of the images kept with it, in order. Empty for most memories.
+    pub images: Vec<String>,
+}
+
+/// An image to keep with a memory.
+#[derive(Debug, Clone)]
+pub enum Attach {
+    /// New bytes, prepared by `pictures::prepare`.
+    New(crate::pictures::Picture),
+    /// One this folder already holds, by its ID (8 characters or more) or FOLDER:IMAGE address.
+    Existing(String),
+}
+
+/// An image without its bytes.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ImageInfo {
+    pub image_uuid: String,
+    pub media_type: String,
+    pub width: u32,
+    pub height: u32,
+    pub bytes: u64,
+    /// What a Claude model spends to look at it.
+    pub tokens: u32,
+    pub created_at: String,
+    /// How many memories show it.
+    pub used_by: u32,
+    /// True once the folder's owner has taken it back: its bytes and size are gone.
+    pub unavailable: bool,
+    /// When that was. Kept in the file for the owner, and told to no reader.
+    #[serde(skip_serializing)]
+    pub withdrawn_at: Option<String>,
+    /// When the folder's owner last put another image in its place, if they did.
+    pub replaced_at: Option<String>,
+}
+
+/// What `geniuz image admin` asks before it acts, and reports after.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ImageChange {
+    pub image: ImageInfo,
+    /// Short IDs of the memories that show it, oldest first.
+    pub memories: Vec<String>,
+    /// Whether the old bytes were folded out of the write-ahead log as well as the file.
+    pub erased_from_log: bool,
+}
+
+const IMAGE_INFO_COLUMNS: &str = "image_uuid, media_type, width, height, bytes, tokens, created_at, used_by, withdrawn_at, replaced_at";
+
+fn image_info_row(r: &rusqlite::Row) -> rusqlite::Result<ImageInfo> {
+    Ok(ImageInfo {
+        image_uuid: r.get(0)?, media_type: r.get(1)?, width: r.get(2)?, height: r.get(3)?,
+        bytes: r.get(4)?, tokens: r.get(5)?, created_at: r.get(6)?, used_by: r.get(7)?,
+        withdrawn_at: r.get(8)?, replaced_at: r.get(9)?,
+        unavailable: r.get::<_, Option<String>>(8)?.is_some(),
+    })
+}
+
+impl MemoryEntry {
+    /// What a list line says about a memory's images: nothing for most, else
+    /// ` · image 1B2C3D4E` or ` · 2 images: 1B2C3D4E 5F6A7B8C`. The ID is what
+    /// `geniuz image <ID>` and the MCP recall take to show it.
+    pub fn image_mark(&self) -> String {
+        match self.images.len() {
+            0 => String::new(),
+            1 => format!(" · image {}", self.images[0]),
+            n => format!(" · {} images: {}", n, self.images.join(" ")),
+        }
+    }
+
+    /// The same, for where one memory is opened and read: it also says, in a few
+    /// words and nothing more, when an image it showed is unavailable.
+    pub fn image_mark_opened(&self) -> String {
+        format!("{}{}", self.image_mark(), self.unavailable_note())
+    }
+
+    /// " · 1 image unavailable", or nothing.
+    pub fn unavailable_note(&self) -> String {
+        match self.images_unavailable {
+            0 => String::new(),
+            1 => " · 1 image unavailable".to_string(),
+            n => format!(" · {} images unavailable", n),
+        }
+    }
+}
+
+impl DatabaseManager {
+    /// An image's full ID from its first characters or its FOLDER:IMAGE address.
+    /// None when this folder has no such image; an error when several match.
+    pub fn resolve_image(&self, partial: &str) -> Result<Option<String>, String> {
+        let partial = partial.trim();
+        // An address naming another folder is not an image here, as with memories.
+        if let Some((folder, _)) = partial.rsplit_once(':') {
+            let here: Option<String> = self.conn()?
+                .query_row("SELECT value FROM _meta WHERE key = 'folder_uuid'", [], |r| r.get(0))
+                .ok();
+            if here.is_some_and(|h| !h.to_uppercase().starts_with(&folder.trim().to_uppercase())) {
+                return Ok(None);
+            }
+        }
+        let partial = partial.rsplit_once(':').map(|(_, i)| i).unwrap_or(partial).trim().to_uppercase();
+        if partial.len() < 8 || partial.len() > 36 || !partial.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+            return Ok(None);
+        }
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare("SELECT image_uuid FROM images WHERE substr(image_uuid, 1, 8) = ?1 AND image_uuid LIKE ?2 LIMIT 5")
+            .map_err(|e| format!("Image lookup failed: {}", e))?;
+        let found: Vec<String> = stmt
+            .query_map(rusqlite::params![&partial[..8], format!("{}%", partial)], |r| r.get(0))
+            .map_err(|e| format!("Image lookup failed: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Image lookup failed: {}", e))?;
+        match found.len() {
+            0 => Ok(None),
+            1 => Ok(found.into_iter().next()),
+            _ => Err(format!("More than one image starts with {}. Use more of its ID.", partial)),
+        }
+    }
+
+    /// Fill in `images` for these memories: one query for the lot. A folder
+    /// with no image tables (opened read-only by an older file) leaves them empty.
+    pub fn mark_images(&self, entries: &mut [MemoryEntry]) {
+        if entries.is_empty() {
+            return;
+        }
+        // A file with no image tables has no images: quiet. Anything else that goes
+        // wrong is said, so attachments are never hidden without a word.
+        let complain = |what: &dyn std::fmt::Display| {
+            let what = what.to_string();
+            if !what.contains("no such table") {
+                eprintln!("[geniuz] Couldn't read which memories have images: {}", what);
+            }
+        };
+        let conn = match self.conn() { Ok(c) => c, Err(e) => return complain(&e) };
+        let marks = vec!["?"; entries.len()].join(",");
+        let mut stmt = match conn.prepare(&format!(
+            "SELECT mi.memory_uuid, substr(mi.image_uuid, 1, 8), i.withdrawn_at IS NOT NULL \
+             FROM memory_images mi JOIN images i ON i.image_uuid = mi.image_uuid \
+             WHERE mi.memory_uuid IN ({marks}) ORDER BY mi.position"
+        )) { Ok(s) => s, Err(e) => return complain(&e) };
+        let ids: Vec<&str> = entries.iter().map(|e| e.memory_uuid.as_str()).collect();
+        let rows = match stmt.query_map(rusqlite::params_from_iter(ids), |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, bool>(2)?))) {
+            Ok(r) => r, Err(e) => return complain(&e),
+        };
+        // A withdrawn image is counted and not named: a list line says nothing of it.
+        let mut by: std::collections::HashMap<String, (Vec<String>, u32)> = std::collections::HashMap::new();
+        for (m, i, gone) in rows.flatten() {
+            let slot = by.entry(m).or_default();
+            if gone { slot.1 += 1 } else { slot.0.push(i) }
+        }
+        for e in entries.iter_mut() {
+            (e.images, e.images_unavailable) = by.remove(&e.memory_uuid).unwrap_or_default();
+        }
+    }
+
+    /// The images a memory shows, in order, without their bytes.
+    pub fn images_of(&self, memory: &str) -> Result<Vec<ImageInfo>, String> {
+        let Some(full) = self.resolve_uuid(memory)? else { return Ok(Vec::new()) };
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT {IMAGE_INFO_COLUMNS} FROM image_info WHERE image_uuid IN \
+                 (SELECT image_uuid FROM memory_images WHERE memory_uuid = ?1) \
+                 ORDER BY (SELECT position FROM memory_images mi WHERE mi.memory_uuid = ?1 AND mi.image_uuid = image_info.image_uuid)"
+            ))
+            .map_err(|e| format!("Failed to read images: {}", e))?;
+        let rows = stmt
+            .query_map([&full], image_info_row)
+            .map_err(|e| format!("Failed to read images: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to read images: {}", e))?;
+        Ok(rows)
+    }
+
+    /// Every image kept in this folder, newest first, without their bytes. One
+    /// that was withdrawn is not listed.
+    pub fn images(&self) -> Result<Vec<ImageInfo>, String> {
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare(&format!("SELECT {IMAGE_INFO_COLUMNS} FROM image_info WHERE withdrawn_at IS NULL ORDER BY created_at DESC, image_uuid"))
+            .map_err(|e| format!("Failed to read images: {}", e))?;
+        let rows = stmt
+            .query_map([], image_info_row)
+            .map_err(|e| format!("Failed to read images: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to read images: {}", e))?;
+        Ok(rows)
+    }
+
+    /// One image with its bytes.
+    pub fn image(&self, id: &str) -> Result<Option<(ImageInfo, Vec<u8>)>, String> {
+        let Some(full) = self.resolve_image(id)? else { return Ok(None) };
+        let conn = self.conn()?;
+        let info = conn
+            .query_row(&format!("SELECT {IMAGE_INFO_COLUMNS} FROM image_info WHERE image_uuid = ?1"), [&full], image_info_row)
+            .map_err(|e| format!("Failed to read image: {}", e))?;
+        // A withdrawn image has no bytes: the caller reads `withdrawn_at` and says so.
+        let data: Option<Vec<u8>> = conn
+            .query_row("SELECT data FROM images WHERE image_uuid = ?1", [&full], |r| r.get(0))
+            .map_err(|e| format!("Failed to read image: {}", e))?;
+        Ok(Some((info, data.unwrap_or_default())))
+    }
+
+    /// Take an image back: erase its bytes, hash and size and keep the row, so a
+    /// memory that showed it can say an image is unavailable. At the owner's word.
+    pub fn withdraw_image(&self, id: &str) -> Result<ImageChange, String> {
+        self.change_image(id, None)
+    }
+
+    /// Put another image in an image's place, for every memory that shows it.
+    /// For the folder's owner only.
+    pub fn replace_image(&self, id: &str, with: &crate::pictures::Picture) -> Result<ImageChange, String> {
+        self.change_image(id, Some(with))
+    }
+
+    fn change_image(&self, id: &str, with: Option<&crate::pictures::Picture>) -> Result<ImageChange, String> {
+        let full = self.resolve_image(id)?
+            .ok_or_else(|| format!("No image {} in this folder.", id.trim().to_uppercase()))?;
+        let conn = self.conn()?;
+        let was = conn
+            .query_row(&format!("SELECT {IMAGE_INFO_COLUMNS} FROM image_info WHERE image_uuid = ?1"), [&full], image_info_row)
+            .map_err(|e| format!("Failed to read image: {}", e))?;
+        if was.withdrawn_at.is_some() {
+            return Err(format!(
+                "Image {} is already unavailable, and stays that way: keep a new image in a reply instead.",
+                &full[..8]
+            ));
+        }
+        if let Some(p) = with {
+            let other: Option<String> = conn
+                .query_row("SELECT image_uuid FROM images WHERE sha256 = ?1", [&p.sha256], |r| r.get(0))
+                .optional()
+                .map_err(|e| format!("Failed to look up image: {}", e))?;
+            match other {
+                Some(o) if o == full => return Err("That is the same image: nothing to replace.".to_string()),
+                Some(o) => return Err(format!(
+                    "That image is already in this folder as {}. An image is stored once; withdraw this one instead.",
+                    &o[..8]
+                )),
+                None => {}
+            }
+        }
+        // Freed pages are overwritten with zeros, not left for a later write to
+        // cover: this is what makes the old bytes unrecoverable from the file.
+        conn.execute_batch("PRAGMA secure_delete = ON;")
+            .map_err(|e| format!("Couldn't prepare to erase: {}", e))?;
+        let tx = conn.unchecked_transaction().map_err(|e| format!("Failed to begin transaction: {}", e))?;
+        // The trigger lets one named image through, for this transaction only.
+        tx.execute("INSERT OR REPLACE INTO _meta (key, value) VALUES ('image_change_allowed', ?1)", [&full])
+            .map_err(|e| format!("Couldn't change the image: {}", e))?;
+        match with {
+            None => tx.execute(
+                &format!("UPDATE images SET data = NULL, sha256 = NULL, width = 0, height = 0, withdrawn_at = {NOW_UTC} WHERE image_uuid = ?1"),
+                [&full],
+            ),
+            Some(p) => tx.execute(
+                &format!("UPDATE images SET data = ?2, sha256 = ?3, width = ?4, height = ?5, media_type = ?6, replaced_at = {NOW_UTC} WHERE image_uuid = ?1"),
+                rusqlite::params![&full, &p.data, &p.sha256, p.width, p.height, crate::pictures::MEDIA_TYPE],
+            ),
+        }
+        .map_err(|e| format!("Couldn't change the image: {}", e))?;
+        tx.execute("DELETE FROM _meta WHERE key = 'image_change_allowed'", [])
+            .map_err(|e| format!("Couldn't change the image: {}", e))?;
+        tx.commit().map_err(|e| format!("Failed to commit: {}", e))?;
+        // The old bytes may still sit in the write-ahead log from when the image
+        // was kept. Folding the log into the file and emptying it removes them. A
+        // reader holding the log open can prevent that; say so rather than claim it.
+        let erased_from_log = conn
+            .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| r.get::<_, i64>(0))
+            .map(|busy| busy == 0)
+            .unwrap_or(false);
+        let image = conn
+            .query_row(&format!("SELECT {IMAGE_INFO_COLUMNS} FROM image_info WHERE image_uuid = ?1"), [&full], image_info_row)
+            .map_err(|e| format!("Failed to read image: {}", e))?;
+        let memories = self.memories_showing(&full)?;
+        Ok(ImageChange { image, memories, erased_from_log })
+    }
+
+    /// The short IDs of the memories that show an image, oldest first.
+    pub fn memories_showing(&self, image: &str) -> Result<Vec<String>, String> {
+        let Some(full) = self.resolve_image(image)? else { return Ok(Vec::new()) };
+        let conn = self.conn()?;
+        let mut stmt = conn
+            .prepare("SELECT substr(mi.memory_uuid, 1, 8) FROM memory_images mi JOIN memories m ON m.memory_uuid = mi.memory_uuid \
+                      WHERE mi.image_uuid = ?1 ORDER BY m.created_at, m.rowid")
+            .map_err(|e| format!("Failed to read image: {}", e))?;
+        let rows = stmt
+            .query_map([&full], |r| r.get(0))
+            .map_err(|e| format!("Failed to read image: {}", e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| format!("Failed to read image: {}", e))?;
+        Ok(rows)
+    }
 }
 
 impl DatabaseManager {
@@ -1222,6 +1621,7 @@ impl DatabaseManager {
     }
 }
 
+#[derive(Clone)]
 pub struct MemoryEntry {
     pub memory_uuid: String,
     pub gist: String,
@@ -1229,6 +1629,12 @@ pub struct MemoryEntry {
     pub parent_uuid: Option<String>,
     pub content: Option<String>,
     pub score: Option<f32>,
+    /// Short IDs of the images it shows, in order. Filled by `mark_images`, since
+    /// most memories have none and most readers don't ask.
+    pub images: Vec<String>,
+    /// How many images it showed that are no longer kept. Left out of list lines;
+    /// said, without more, where the memory itself is opened.
+    pub images_unavailable: u32,
 }
 
 // =============================================================================
@@ -1292,6 +1698,195 @@ mod tests {
         let db = DatabaseManager::new(db_path.to_str().unwrap())
             .expect("DatabaseManager::new on fresh path");
         (db, dir)
+    }
+
+    fn picture(seed: u8) -> crate::pictures::Picture {
+        let im = image::RgbImage::from_fn(300, 200, |x, y| image::Rgb([(x % 251) as u8, (y % 241) as u8, seed]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(im)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        crate::pictures::prepare(&png).unwrap()
+    }
+
+    #[test]
+    fn a_memory_keeps_its_images_in_order_and_gives_them_back() {
+        let (db, _dir) = fresh_db();
+        let (a, b) = (picture(1), picture(2));
+        let kept = db
+            .keep_with_images("two shots", "two shots", None, &[Attach::New(a.clone()), Attach::New(b.clone())], Some(&MockBackend))
+            .unwrap();
+        assert_eq!(kept.images.len(), 2);
+        let shown = db.images_of(&kept.uuid).unwrap();
+        assert_eq!(shown.len(), 2);
+        assert_eq!(&shown[0].image_uuid[..8], kept.images[0]);
+        assert_eq!(&shown[1].image_uuid[..8], kept.images[1]);
+        assert_eq!((shown[0].width, shown[0].height, shown[0].media_type.as_str()), (300, 200, "image/webp"));
+        assert_eq!(shown[0].tokens, 11 * 8);
+        let (info, data) = db.image(&kept.images[0]).unwrap().unwrap();
+        assert_eq!(data, a.data);
+        assert_eq!(info.bytes as usize, a.data.len());
+        // A memory without images still answers, with none.
+        let plain = db.keep_with_backend("words", "words", None, Some(&MockBackend)).unwrap();
+        assert!(plain.images.is_empty());
+        assert!(db.images_of(&plain.uuid).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_same_image_serves_many_memories_and_is_stored_once() {
+        let (db, _dir) = fresh_db();
+        let a = picture(7);
+        let first = db.keep_with_images("first", "first", None, &[Attach::New(a.clone())], Some(&MockBackend)).unwrap();
+        // The same bytes again, and twice in one memory: still one image.
+        let second = db
+            .keep_with_images("second", "second", None, &[Attach::New(a.clone()), Attach::New(a.clone())], Some(&MockBackend))
+            .unwrap();
+        // And by its ID, as a reply would, with the folder's address form.
+        let third = db
+            .keep_with_images("third", "third", Some(&first.uuid), &[Attach::Existing(format!("abcd1234:{}", first.images[0].to_lowercase()))], Some(&MockBackend))
+            .unwrap();
+        assert_eq!(second.images, first.images);
+        assert_eq!(third.images, first.images);
+        let all = db.images().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].used_by, 3);
+        assert_eq!(db.memories_showing(&first.images[0]).unwrap(), vec![first.uuid.clone(), second.uuid.clone(), third.uuid.clone()]);
+    }
+
+    #[test]
+    fn a_wrong_image_id_keeps_nothing() {
+        let (db, _dir) = fresh_db();
+        let err = db
+            .keep_with_images("words", "words", None, &[Attach::New(picture(3)), Attach::Existing("DEADBEEF".into())], Some(&MockBackend))
+            .unwrap_err();
+        assert!(err.contains("No image DEADBEEF"), "{err}");
+        assert!(db.recent(10).unwrap().is_empty(), "the memory must not be kept without its image");
+        assert!(db.images().unwrap().is_empty(), "nor the image without its memory");
+        let many: Vec<Attach> = (0..6).map(|i| Attach::New(picture(i))).collect();
+        assert!(db.keep_with_images("w", "w", None, &many, Some(&MockBackend)).unwrap_err().contains("at most 5"));
+        let five: Vec<Attach> = (0..5).map(|i| Attach::New(picture(i))).collect();
+        assert_eq!(db.keep_with_images("w", "w", None, &five, Some(&MockBackend)).unwrap().images.len(), 5);
+    }
+
+    #[test]
+    fn the_file_itself_refuses_to_change_or_remove_an_image() {
+        let (db, _dir) = fresh_db();
+        let kept = db.keep_with_images("shot", "shot", None, &[Attach::New(picture(9))], Some(&MockBackend)).unwrap();
+        let conn = db.conn().unwrap();
+        for sql in [
+            "UPDATE images SET data = x'00'",
+            "DELETE FROM images",
+            "UPDATE memory_images SET position = 5",
+            "DELETE FROM memory_images",
+            "INSERT OR REPLACE INTO images SELECT * FROM images",
+            "INSERT INTO memory_images VALUES ('00000000-0000-0000-0000-000000000000', (SELECT image_uuid FROM images), 0)",
+        ] {
+            assert!(conn.execute(sql, []).is_err(), "should be refused: {sql}");
+        }
+        assert_eq!(db.images_of(&kept.uuid).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn the_owner_can_withdraw_an_image_and_its_bytes_leave_the_file() {
+        let (db, dir) = fresh_db();
+        let p = picture(11);
+        let a = db.keep_with_images("first", "first", None, &[Attach::New(p.clone())], Some(&MockBackend)).unwrap();
+        let b = db.keep_with_images("second", "second", None, &[Attach::Existing(a.images[0].clone())], Some(&MockBackend)).unwrap();
+        // Any 24 bytes from the middle of the image, to look for afterwards.
+        let needle = p.data[p.data.len() / 2..p.data.len() / 2 + 24].to_vec();
+        let holds = |bytes: &[u8]| bytes.windows(needle.len()).any(|w| w == needle.as_slice());
+        let on_disk = || {
+            let mut all = std::fs::read(dir.path().join("memory.db")).unwrap();
+            all.extend(std::fs::read(dir.path().join("memory.db-wal")).unwrap_or_default());
+            all
+        };
+        assert!(holds(&on_disk()), "the image is in the file before it is withdrawn");
+
+        let change = db.withdraw_image(&a.images[0]).unwrap();
+        assert!(change.image.withdrawn_at.is_some() && change.image.unavailable);
+        assert_eq!((change.image.bytes, change.image.width, change.image.height), (0, 0, 0), "its size went with it");
+        // A reader is told it is unavailable, and not when that happened.
+        let told = serde_json::to_value(&change.image).unwrap();
+        assert_eq!(told["unavailable"], true);
+        assert!(told.get("withdrawn_at").is_none(), "{told}");
+        assert_eq!(change.memories, vec![a.uuid.clone(), b.uuid.clone()]);
+        assert!(change.erased_from_log);
+        assert!(!holds(&on_disk()), "no trace of the bytes in the file or its log");
+
+        // The row and its links stay, so both memories still point at it, as unavailable.
+        let shown = db.images_of(&b.uuid).unwrap();
+        assert_eq!(shown.len(), 1);
+        assert!(shown[0].unavailable);
+        // A list line no longer names it; an opened memory says one thing and no more.
+        let mut listed = db.recent(10).unwrap();
+        db.mark_images(&mut listed);
+        assert!(listed.iter().all(|e| e.images.is_empty() && e.image_mark().is_empty() && e.images_unavailable == 1));
+        assert_eq!(listed[0].image_mark_opened(), " · 1 image unavailable");
+        assert!(db.images().unwrap().is_empty(), "nor does the folder's list of images");
+        let (info, data) = db.image(&a.images[0]).unwrap().unwrap();
+        assert!(data.is_empty() && info.withdrawn_at.is_some());
+        // It stays withdrawn, and can't be shown by a new memory as if it were there:
+        // refused with the reason, and by the file itself if something gets past that.
+        assert!(db.withdraw_image(&a.images[0]).unwrap_err().contains("unavailable"));
+        let err = db.keep_with_images("late", "late", None, &[Attach::Existing(a.images[0].clone())], Some(&MockBackend)).unwrap_err();
+        assert!(err.contains("is unavailable"), "{err}");
+        assert_eq!(db.recent(10).unwrap().len(), 2, "the refused memory was not kept");
+        {
+            let conn = db.conn().unwrap();
+            let full = db.resolve_image(&a.images[0]).unwrap().unwrap();
+            conn.execute("INSERT INTO memories (memory_uuid, payload, created_at, parent_uuid) VALUES (?1, ?2, datetime('now'), ?1)",
+                rusqlite::params!["CCCCCCCC-0000-0000-0000-000000000001", r#"{"content":"x","gist":"x"}"#]).unwrap();
+            assert!(conn.execute("INSERT INTO memory_images VALUES ('CCCCCCCC-0000-0000-0000-000000000001', ?1, 0)", [&full]).is_err());
+        }
+        assert!(db.replace_image(&a.images[0], &picture(12)).unwrap_err().contains("unavailable"));
+        // The same bytes kept again are a new image: the hash went with the bytes.
+        let again = db.keep_with_images("again", "again", None, &[Attach::New(p)], Some(&MockBackend)).unwrap();
+        assert_ne!(again.images[0], a.images[0]);
+        // And the door is shut behind the change.
+        let conn = db.conn().unwrap();
+        assert!(conn.execute("UPDATE images SET width = 1", []).is_err());
+        assert_eq!(conn.query_row("SELECT count(*) FROM _meta WHERE key = 'image_change_allowed'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
+
+    #[test]
+    fn the_owner_can_replace_an_image_for_every_memory_that_shows_it() {
+        let (db, _dir) = fresh_db();
+        let a = db.keep_with_images("first", "first", None, &[Attach::New(picture(21))], Some(&MockBackend)).unwrap();
+        let b = db.keep_with_images("second", "second", None, &[Attach::Existing(a.images[0].clone())], Some(&MockBackend)).unwrap();
+        let other = db.keep_with_images("other", "other", None, &[Attach::New(picture(22))], Some(&MockBackend)).unwrap();
+        let new = picture(23);
+        let change = db.replace_image(&a.images[0], &new).unwrap();
+        assert!(change.image.replaced_at.is_some() && change.image.withdrawn_at.is_none());
+        assert_eq!(change.memories.len(), 2);
+        // Same ID, new bytes, for both memories.
+        assert_eq!(db.image(&a.images[0]).unwrap().unwrap().1, new.data);
+        assert_eq!(db.images_of(&b.uuid).unwrap()[0].image_uuid[..8], a.images[0]);
+        // The same image, or one the folder already holds, is refused with the reason.
+        assert!(db.replace_image(&a.images[0], &new).unwrap_err().contains("same image"));
+        let err = db.replace_image(&a.images[0], &picture(22)).unwrap_err();
+        assert!(err.contains(&other.images[0]), "{err}");
+        assert!(db.replace_image("FFFFFFFF", &new).unwrap_err().contains("No image FFFFFFFF"));
+        // The permission names one image: another can't ride along.
+        let conn = db.conn().unwrap();
+        conn.execute("INSERT INTO _meta (key, value) VALUES ('image_change_allowed', ?1)", [db.resolve_image(&a.images[0]).unwrap().unwrap()]).unwrap();
+        assert!(conn.execute("UPDATE images SET width = 9 WHERE image_uuid = ?1", [db.resolve_image(&other.images[0]).unwrap().unwrap()]).is_err());
+        assert!(conn.execute("UPDATE images SET created_at = '2000-01-01 00:00:00'", []).is_err(), "when it was kept never changes");
+    }
+
+    #[test]
+    fn a_folder_from_before_images_gains_the_tables_when_opened() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("memory.db");
+        {
+            let db = DatabaseManager::new(path.to_str().unwrap()).unwrap();
+            db.keep_with_backend("old", "old", None, Some(&MockBackend)).unwrap();
+            let conn = db.conn().unwrap();
+            conn.execute_batch("DROP VIEW image_info; DROP VIEW memory_image; DROP TABLE memory_images; DROP TABLE images;").unwrap();
+        }
+        let db = DatabaseManager::open_existing(path.to_str().unwrap()).unwrap();
+        let kept = db.keep_with_images("new", "new", None, &[Attach::New(picture(4))], Some(&MockBackend)).unwrap();
+        assert_eq!(db.images_of(&kept.uuid).unwrap().len(), 1);
+        assert_eq!(db.recent(10).unwrap().len(), 2);
     }
 
     /// A reply links to a memory in this folder, or is refused with the reason.

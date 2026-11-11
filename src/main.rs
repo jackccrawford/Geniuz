@@ -148,6 +148,30 @@ pub fn resolve_db_path() -> Result<PathBuf, String> {
     geniuz::folders::Registry::from_env().resolve(flag, env_db.as_deref(), cwd.as_deref())
 }
 
+/// An image's bytes, from a file or (for `-`) the pipe. The file is only read, and
+/// through a cap: something far larger than an image is refused while it is being
+/// read, not after all of it is in memory.
+fn read_image(source: &str) -> Result<Vec<u8>, String> {
+    if source == "-" {
+        use std::io::IsTerminal;
+        if std::io::stdin().is_terminal() {
+            return Err("No image on the pipe.\n  Use one of:\n    --image path/to/shot.png\n    cat shot.png | geniuz keep -f <folder> -c \"...\" -g \"...\" --image -".to_string());
+        }
+        return geniuz::pictures::read_capped(std::io::stdin().lock()).map_err(|e| format!("The image on the pipe: {}", e));
+    }
+    let file = std::fs::File::open(source).map_err(|e| {
+        // macOS names screenshots with a narrow no-break space before AM/PM, which
+        // looks like a space and isn't one: a hand-typed name misses the file.
+        let hint = if e.kind() == std::io::ErrorKind::NotFound && (source.contains(" AM") || source.contains(" PM")) {
+            "\n  Mac screenshot names hold an unusual space before AM or PM: drag the file in, or use tab completion."
+        } else {
+            ""
+        };
+        format!("Couldn't read {}: {}{}", source, e, hint)
+    })?;
+    geniuz::pictures::read_capped(file).map_err(|e| format!("{}: {}", source, e))
+}
+
 pub fn get_db() -> Result<db::DatabaseManager, String> {
     // An explicit file path may name a store to be created, as it always could.
     if explicit_db_env().is_some_and(|s| !s.is_empty()) && IN_FOLDER.get().and_then(|f| f.as_deref()).is_none() {
@@ -241,6 +265,7 @@ fn recall_thread(
             e.content = db.get_full_content(&e.memory_uuid).ok().flatten();
         }
     }
+    db.mark_images(&mut thread.entries);
     let label = format!("thread {} · root {}", id.trim().to_uppercase(), &thread.root[..8.min(thread.root.len())]);
     let shown = if thread.entries.len() < thread.total {
         format!("oldest {} shown", thread.entries.len())
@@ -254,6 +279,8 @@ fn recall_thread(
             let mut v = serde_json::json!({ "uuid": &e.memory_uuid[..8], "gist": e.gist, "created_at": e.created_at });
             if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8.min(p.len())]); }
             if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+                    if e.images_unavailable > 0 && e.content.is_some() { v["images_unavailable"] = serde_json::json!(e.images_unavailable); }
+            if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
             v
         }).collect();
         return Ok(serde_json::to_string_pretty(&serde_json::json!({
@@ -270,7 +297,8 @@ fn recall_thread(
     for e in &thread.entries {
         let parent = e.parent_uuid.as_deref()
             .map(|p| format!(" <- {}", &p[..8.min(p.len())])).unwrap_or_default();
-        lines.push(format!("{} | {} | {}{}", &e.memory_uuid[..8], shorten_ts(&e.created_at), e.gist, parent));
+        let mark = if e.content.is_some() { e.image_mark_opened() } else { e.image_mark() };
+        lines.push(format!("{} | {} | {}{}{}", &e.memory_uuid[..8], shorten_ts(&e.created_at), e.gist, parent, mark));
         if let Some(ref content) = e.content {
             for line in content.lines() {
                 lines.push(format!("           {}", line));
@@ -333,7 +361,9 @@ fn recall_all(
                 "created_at": h.entry.created_at,
             });
             if let Some(s) = h.entry.score { v["score"] = serde_json::json!(format!("{:.3}", s)); }
+            if !h.entry.images.is_empty() { v["images"] = serde_json::json!(h.entry.images); }
             if let Some(c) = content(h) { v["content"] = serde_json::json!(c); }
+            if h.entry.images_unavailable > 0 && v.get("content").is_some() { v["images_unavailable"] = serde_json::json!(h.entry.images_unavailable); }
             v
         }).collect();
         return serde_json::to_string_pretty(&serde_json::json!({
@@ -346,8 +376,10 @@ fn recall_all(
     let mut lines = Vec::new();
     for h in &found.hits {
         let score = h.entry.score.map(|s| format!(" ({:.3})", s)).unwrap_or_default();
-        lines.push(format!("{} | {} | {} | {}{}", h.address(), h.folder.name, shorten_ts(&h.entry.created_at), h.entry.gist, score));
-        if let Some(c) = content(h) {
+        let words = content(h);
+        let mark = if words.is_some() { h.entry.image_mark_opened() } else { h.entry.image_mark() };
+        lines.push(format!("{} | {} | {} | {}{}{}", h.address(), h.folder.name, shorten_ts(&h.entry.created_at), h.entry.gist, score, mark));
+        if let Some(c) = words {
             lines.extend(c.lines().map(|l| format!("           {}", l)));
             lines.push(String::new());
         }
@@ -594,7 +626,12 @@ fn run(cli: Cli) -> Result<String, String> {
             Ok(lines.join("\n"))
         }
 
-        Command::Keep { content, gist, parent, json } => {
+        Command::Keep { content, gist, parent, image, image_id, json } => {
+            // One pipe can carry the words or one image, not both.
+            let piped = image.iter().filter(|i| i.as_str() == "-").count();
+            if piped > 1 || (piped == 1 && content == "-") {
+                return Err("Only one thing can come from the pipe: the content (-c -) or one image (--image -). Give the others as files.".to_string());
+            }
             // Resolve content: @file or stdin
             let resolved = if content == "-" {
                 use std::io::{IsTerminal, Read};
@@ -623,7 +660,19 @@ fn run(cli: Cli) -> Result<String, String> {
             };
 
             let db = get_db_to_keep()?;
-            let result = db.keep(&resolved, &gist, parent.as_deref())?;
+            // Every image is read and prepared before anything is kept, so a file
+            // that can't be read keeps nothing.
+            let mut attach: Vec<db::Attach> = Vec::new();
+            for source in &image {
+                attach.push(db::Attach::New(geniuz::pictures::prepare(&read_image(source)?)
+                    .map_err(|e| if source == "-" { e } else { format!("{}: {}", source, e) })?));
+            }
+            attach.extend(image_id.iter().map(|id| db::Attach::Existing(id.clone())));
+            let result = if attach.is_empty() {
+                db.keep(&resolved, &gist, parent.as_deref())?
+            } else {
+                db.keep_with_images(&resolved, &gist, parent.as_deref(), &attach, None)?
+            };
 
             let address = db.address(&result.uuid);
             if json {
@@ -631,19 +680,177 @@ fn run(cli: Cli) -> Result<String, String> {
                     "ok": true, "action": "remember", "uuid": result.uuid, "address": address,
                     "embedded": result.embedded,
                 });
+                if !result.images.is_empty() {
+                    out["images"] = serde_json::json!(result.images);
+                }
                 // Said in the JSON too, so a script knows the fix; absent when there's none.
                 if !result.embedded {
                     out["note"] = "Found by keywords only for now: run 'geniuz backfill' later to make it searchable by meaning.".into();
                 }
                 Ok(serde_json::to_string_pretty(&out).unwrap())
-            } else if result.embedded {
-                Ok(format!("✅ Kept {}", address))
             } else {
-                Ok(format!(
-                    "✅ Kept {} (found by keywords only for now: run 'geniuz backfill' later)",
-                    address
-                ))
+                let with = match result.images.len() {
+                    0 => String::new(),
+                    1 => format!(", with image {}", result.images[0]),
+                    n => format!(", with {} images: {}", n, result.images.join(" ")),
+                };
+                if result.embedded {
+                    Ok(format!("✅ Kept {}{}", address, with))
+                } else {
+                    Ok(format!(
+                        "✅ Kept {}{} (found by keywords only for now: run 'geniuz backfill' later)",
+                        address, with
+                    ))
+                }
             }
+        }
+
+        Command::Image { admin: Some(cli::ImageCommand::Admin { action }), .. } => {
+            // Named with -f only, as keeping is: this changes a folder for good. With
+            // no -f, say that; with one, whatever went wrong finding it is the answer.
+            let db = if IN_FOLDER.get().and_then(|f| f.as_deref()).is_none() {
+                return Err("Name the folder with -f <folder>: `geniuz image -f <folder> admin ...`.".to_string());
+            } else {
+                get_db_to_keep()?
+            };
+            let (id, file, confirm) = match &action {
+                cli::ImageAdmin::Withdraw { id, confirm } => (id, None, confirm),
+                cli::ImageAdmin::Replace { id, file, confirm } => (id, Some(file), confirm),
+            };
+            let Some((info, _)) = db.image(id)? else {
+                return Err(format!("No image {} in this folder. `geniuz image -f <folder>` lists them.", id.to_uppercase()));
+            };
+            let short = info.image_uuid[..8].to_string();
+            if info.unavailable {
+                return Err(format!("Image {short} is already unavailable, and stays that way: keep a new image in a reply instead."));
+            }
+            // Read and prepare the new image first, so a file that can't be read changes nothing.
+            let with = match file {
+                Some(f) => Some(geniuz::pictures::prepare(&read_image(f)?).map_err(|e| format!("{}: {}", f, e))?),
+                None => None,
+            };
+            let shown_in = db.memories_showing(&info.image_uuid)?;
+            let doing = if with.is_some() { "replace" } else { "withdraw" };
+            // Two runs. The first only says what would change, so whoever asked can be
+            // shown it; the second must carry the image's whole ID, which no list line
+            // prints, so it can't be done in one step from a short ID alone.
+            let Some(confirm) = confirm else {
+                let folder = IN_FOLDER.get().and_then(|f| f.clone()).unwrap_or_default();
+                let tail = match file { Some(f) => format!(" {f}"), None => String::new() };
+                return Ok(format!(
+                    "Nothing was changed. This would {doing} image {short} ({} x {}, kept {}), shown in {} {}: {}\n  \
+                     Every one of them changes. An agent that looked at it before may still hold the old image.\n  \
+                     It can't be undone, and it doesn't reach backups, exports, or what was already written about the image.\n\
+                     To go ahead, once the folder's owner has seen this:\n  \
+                     geniuz image -f {folder} admin {doing} {short}{tail} --confirm {}",
+                    info.width, info.height, shorten_ts(&info.created_at), shown_in.len(),
+                    if shown_in.len() == 1 { "memory" } else { "memories" }, shown_in.join(" "), info.image_uuid
+                ));
+            };
+            if !confirm.trim().eq_ignore_ascii_case(&info.image_uuid) {
+                return Err("--confirm takes the image's full ID, and that isn't it. Nothing was changed. Run it without --confirm to see the full ID.".to_string());
+            }
+            let change = match &with {
+                Some(p) => db.replace_image(&info.image_uuid, p)?,
+                None => db.withdraw_image(&info.image_uuid)?,
+            };
+            let log = if change.erased_from_log {
+                ""
+            } else {
+                "\n  Another program had the folder open, so a copy of the old bytes may remain in its log until Geniuz is next closed and opened."
+            };
+            let n = change.memories.len();
+            let memories = if n == 1 { "memory" } else { "memories" };
+            Ok(match with {
+                Some(_) => format!("Replaced image {short}: {} x {}, in {n} {memories}.{log}", change.image.width, change.image.height),
+                None => format!("Withdrew image {short}: it is erased from this folder. It is no longer listed, and {n} {memories} now {} an image is unavailable.{log}", if n == 1 { "says" } else { "say" }),
+            })
+        }
+
+        Command::Image { id, out, base64, json, .. } => {
+            let db = get_db()?;
+            let kb = |b: u64| if b < 1024 { format!("{} bytes", b) } else { format!("{} KB", (b + 512) / 1024) };
+            let Some(id) = id else {
+                let all = db.images()?;
+                if json {
+                    return Ok(serde_json::to_string_pretty(&serde_json::json!({ "images": all })).unwrap());
+                }
+                if all.is_empty() {
+                    return Ok("No images in this folder yet.\n  To keep one: geniuz keep -f <folder> -c \"what it shows\" -g \"...\" --image <file>".to_string());
+                }
+                let mut lines = Vec::new();
+                for i in &all {
+                    let state = match &i.replaced_at {
+                        Some(at) => format!("  replaced {}", shorten_ts(at)),
+                        None => String::new(),
+                    };
+                    lines.push(format!(
+                        "{}  {} x {}  {}  {}  in {} {}{}",
+                        &i.image_uuid[..8], i.width, i.height, kb(i.bytes), shorten_ts(&i.created_at),
+                        i.used_by, if i.used_by == 1 { "memory" } else { "memories" }, state
+                    ));
+                }
+                return Ok(lines.join("\n"));
+            };
+            let Some((info, data)) = db.image(&id)? else {
+                return Err(format!("No image {} in this folder. `geniuz image -f <folder>` lists them.", id.to_uppercase()));
+            };
+            if info.unavailable {
+                // There are no bytes to give, and no more to say than that.
+                if json {
+                    return Ok(serde_json::to_string_pretty(&serde_json::json!({ "image_uuid": info.image_uuid, "unavailable": true })).unwrap());
+                }
+                let said = format!("Image {} is unavailable.", &info.image_uuid[..8]);
+                return if base64 || out.is_some() { Err(said) } else { Ok(said) };
+            }
+            let shown_in = db.memories_showing(&info.image_uuid)?;
+            if base64 {
+                use base64::Engine;
+                return Ok(serde_json::json!({
+                    "type": "image",
+                    "source": { "type": "base64", "media_type": info.media_type, "data": base64::engine::general_purpose::STANDARD.encode(&data) }
+                }).to_string());
+            }
+            if let Some(out) = out {
+                if out == "-" {
+                    use std::io::{IsTerminal, Write};
+                    if std::io::stdout().is_terminal() {
+                        return Err("An image's bytes would fill the terminal. Send them somewhere: `-o shot.webp`, or `-o - > shot.webp`.".to_string());
+                    }
+                    std::io::stdout().write_all(&data).map_err(|e| format!("Couldn't write the image: {}", e))?;
+                    return Ok(String::new());
+                }
+                // Created only if nothing is there, in one step: checking first and
+                // writing after could follow a link or lose a race with another program.
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&out).map_err(|e| {
+                    if e.kind() == std::io::ErrorKind::AlreadyExists {
+                        format!("{} already exists, and Geniuz won't write over it. Choose another name.", out)
+                    } else {
+                        format!("Couldn't write {}: {}", out, e)
+                    }
+                })?;
+                if let Err(e) = file.write_all(&data) {
+                    // Not left half-written: a second try would be refused as "already exists".
+                    drop(file);
+                    let _ = std::fs::remove_file(&out);
+                    return Err(format!("Couldn't write {}: {}", out, e));
+                }
+                return Ok(format!("Wrote {} ({} x {}, {})", out, info.width, info.height, kb(info.bytes)));
+            }
+            if json {
+                let mut v = serde_json::to_value(&info).unwrap();
+                v["memories"] = serde_json::json!(shown_in);
+                return Ok(serde_json::to_string_pretty(&v).unwrap());
+            }
+            let replaced = info.replaced_at.as_deref()
+                .map(|at| format!("\n  Replaced {} by the folder's owner: it may differ from what an earlier reader saw.", shorten_ts(at)))
+                .unwrap_or_default();
+            Ok(format!(
+                "Image {}\n  {} x {}, {}, {}\n  A model spends about {} tokens to look at it.\n  Kept {}{}\n  Shown in: {}\n  To take it out: geniuz image {} -o <file>.webp",
+                &info.image_uuid[..8], info.width, info.height, kb(info.bytes), info.media_type, info.tokens,
+                shorten_ts(&info.created_at), replaced, shown_in.join(" "), &info.image_uuid[..8]
+            ))
         }
 
         Command::Recall { query, all, thread, grep, random, keyword, full, limit, since, until, json } => {
@@ -745,6 +952,7 @@ fn run(cli: Cli) -> Result<String, String> {
                     db.semantic_search_in(q, &window, limit)?
                 }
             };
+            db.mark_images(&mut entries);
 
             if full {
                 for entry in &mut entries {
@@ -762,8 +970,10 @@ fn run(cli: Cli) -> Result<String, String> {
                         "created_at": e.created_at,
                     });
                     if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8]); }
+                    if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
                     if let Some(s) = e.score { v["score"] = serde_json::json!(format!("{:.3}", s)); }
                     if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+                    if e.images_unavailable > 0 && e.content.is_some() { v["images_unavailable"] = serde_json::json!(e.images_unavailable); }
                     v
                 }).collect();
                 let mut out = serde_json::json!({
@@ -795,7 +1005,9 @@ fn run(cli: Cli) -> Result<String, String> {
                 if let Some(s) = e.score {
                     suffix.push_str(&format!(" ({:.3})", s));
                 }
-                lines.push(format!("{} | {} | {}{}", uuid_short, ts, e.gist, suffix));
+                // Read with its words, a memory also says when an image it showed is unavailable.
+                let mark = if e.content.is_some() { e.image_mark_opened() } else { e.image_mark() };
+                lines.push(format!("{} | {} | {}{}{}", uuid_short, ts, e.gist, suffix, mark));
                 if let Some(ref content) = e.content {
                     for line in content.lines() {
                         lines.push(format!("           {}", line));
@@ -823,6 +1035,7 @@ fn run(cli: Cli) -> Result<String, String> {
             let window = geniuz::window::Window::parse(since.as_deref(), until.as_deref())?;
             let db = get_db()?;
             let mut entries = db.recent_in(&window, limit)?;
+            db.mark_images(&mut entries);
 
             if full {
                 for entry in &mut entries {
@@ -840,7 +1053,9 @@ fn run(cli: Cli) -> Result<String, String> {
                         "created_at": e.created_at,
                     });
                     if let Some(ref p) = e.parent_uuid { v["parent"] = serde_json::json!(&p[..8]); }
+                    if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
                     if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+                    if e.images_unavailable > 0 && e.content.is_some() { v["images_unavailable"] = serde_json::json!(e.images_unavailable); }
                     v
                 }).collect();
                 return Ok(serde_json::to_string_pretty(&serde_json::json!({
@@ -866,7 +1081,9 @@ fn run(cli: Cli) -> Result<String, String> {
                 if let Some(ref p) = e.parent_uuid {
                     suffix.push_str(&format!(" <- {}", &p[..8.min(p.len())]));
                 }
-                lines.push(format!("{} | {} | {}{}", uuid_short, ts, e.gist, suffix));
+                // Read with its words, a memory also says when an image it showed is unavailable.
+                let mark = if e.content.is_some() { e.image_mark_opened() } else { e.image_mark() };
+                lines.push(format!("{} | {} | {}{}{}", uuid_short, ts, e.gist, suffix, mark));
                 if let Some(ref content) = e.content {
                     for line in content.lines() {
                         lines.push(format!("           {}", line));
@@ -933,7 +1150,8 @@ fn run(cli: Cli) -> Result<String, String> {
                     cursor = pos.clone();
                     last_seen = Some(e.memory_uuid.clone());
                 }
-                let entries: Vec<_> = found.into_iter().map(|(_, e)| e).collect();
+                let mut entries: Vec<_> = found.into_iter().map(|(_, e)| e).collect();
+                db.mark_images(&mut entries);
 
                 if !entries.is_empty() {
                     for e in &entries {
@@ -962,7 +1180,9 @@ fn run(cli: Cli) -> Result<String, String> {
                                 "created_at": &e.created_at,
                             });
                             if let Some(p) = parent_short { v["parent"] = serde_json::json!(p); }
+                            if !e.images.is_empty() { v["images"] = serde_json::json!(e.images); }
                             if let Some(ref c) = e.content { v["content"] = serde_json::json!(c); }
+                    if e.images_unavailable > 0 && e.content.is_some() { v["images_unavailable"] = serde_json::json!(e.images_unavailable); }
                             println!("{}", serde_json::to_string(&v).unwrap());
                         } else {
                             let uuid_short = &e.memory_uuid[..8.min(e.memory_uuid.len())];
@@ -971,7 +1191,7 @@ fn run(cli: Cli) -> Result<String, String> {
                             if let Some(ref p) = e.parent_uuid {
                                 suffix.push_str(&format!(" <- {}", &p[..8.min(p.len())]));
                             }
-                            println!("+ {} | {} | {}{}", uuid_short, ts, e.gist, suffix);
+                            println!("+ {} | {} | {}{}{}", uuid_short, ts, e.gist, suffix, e.image_mark());
                         }
                     }
                 }
@@ -1033,6 +1253,17 @@ fn run(cli: Cli) -> Result<String, String> {
                 format!("Memories: {}", memories),
                 format!("Searchable by meaning: {} of {}", embeddings, memories),
             ];
+            // Said only when there are some: most folders hold words alone.
+            // A folder from before images has no such table: quiet. Anything else is said.
+            let images = db.images().unwrap_or_else(|e| {
+                if !e.contains("no such table") { eprintln!("[geniuz] Couldn't count this folder's images: {}", e); }
+                Vec::new()
+            });
+            if !images.is_empty() {
+                let bytes: u64 = images.iter().map(|i| i.bytes).sum();
+                let size = if bytes < 1_048_576 { format!("{} KB", (bytes + 512) / 1024) } else { format!("{:.1} MB", bytes as f64 / 1_048_576.0) };
+                lines.push(format!("Images: {}, {}", images.len(), size));
+            }
             if embeddings < memories {
                 lines.push("Run 'geniuz backfill' to make the rest searchable by meaning.".to_string());
             } else if memories > 0 {
@@ -1122,6 +1353,8 @@ mod watch_exec_tests {
             parent_uuid: None,
             content: Some(content.into()),
             score: None,
+            images: Vec::new(),
+            images_unavailable: 0,
         };
         let (cmd, vars) = watch_exec_command(template, &e);
         let out = std::process::Command::new("sh").arg("-c").arg(&cmd).envs(vars).output().unwrap();

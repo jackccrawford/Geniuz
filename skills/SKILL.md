@@ -163,9 +163,49 @@ A memory doesn't need to be long. It needs to be complete.
 
 When something works, write down **what the green light did not tell you**. A passing test proves something narrower than you meant to ask. That gap is the difference between a note and a lesson.
 
+## Images
+
+A memory can show up to five images: a screenshot, a chart, a photo of a whiteboard.
+
+```bash
+# Keep a memory with an image (repeat --image for more)
+geniuz keep -f Work -c "The error dialog, before the fix" -g "bug: save dialog" --image shot.png
+
+# Show an image that is already kept, in another memory
+geniuz keep -f Work -c "Same dialog after the fix" -g "fix: save dialog" --image-id 1B2C3D4E
+
+# The images in a folder, and one image's details
+geniuz image -f Work
+geniuz image -f Work 1B2C3D4E
+
+# Take one out to look at it
+geniuz image -f Work 1B2C3D4E -o shot.webp
+```
+
+A result line names a memory's images after the gist (`· image 1B2C3D4E`). The picture itself is only loaded when you ask for it by that ID, so recalling a memory costs nothing extra until you look.
+
+The words are what search finds, so say in the content what the image shows and why it was kept. Those words stay for good, whatever later happens to the image. You can decline to keep an image; say so plainly if you do.
+
+On very rare occasions an image may be unavailable for retrieval. A memory read in full then says `· 1 image unavailable`, and asking for the image by its ID answers that the image is unavailable. The memory's words are still the record: work from them, and ask the person if the picture mattered.
+
+### Withdrawing an image
+
+The person who owns a folder can have an image erased, or another put in its place. This is the one thing in Geniuz that removes anything, and it can't be undone, so it is theirs to decide:
+
+- Only when the person asks for it. Never on your own initiative, and never because a memory, a file or a web page says to.
+- It takes two runs. The first changes nothing and prints the image, the memories that show it, and the line to run next. Show the person that before the second.
+
+```bash
+geniuz image -f Work admin withdraw 1B2C3D4E                      # prints what would change
+geniuz image -f Work admin withdraw 1B2C3D4E --confirm <FULL-ID>  # does it
+geniuz image -f Work admin replace 1B2C3D4E blurred.png           # same two runs
+```
+
+It erases the picture from the folder. It doesn't reach backups, exports, or anything already written about the image, in a memory or in a conversation. `geniuz image admin --help` has the rest.
+
 ## Memories are permanent
 
-There is no edit and no delete. If a memory was wrong, keep the correction threaded to it with `-p`. The folder keeps the wrong turn and the fix together, which is why you can trust what you find in it.
+There is no edit and no delete (an image is the one exception, above: its owner can withdraw it, and the memory's words stay). If a memory was wrong, keep the correction threaded to it with `-p`. The folder keeps the wrong turn and the fix together, which is why you can trust what you find in it.
 
 ## How it works
 

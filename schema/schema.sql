@@ -95,3 +95,105 @@ CREATE TABLE IF NOT EXISTS embedding_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Images kept with memories (5.1). One row per distinct image, already downscaled
+-- and stored as WebP, in the folder's own file: no loose files. `data` is last on
+-- purpose: SQLite reads a row left to right, so listing sizes and dimensions never
+-- touches the bytes. `sha256` is of the stored bytes; the same bytes kept twice
+-- are stored once.
+--
+-- The folder's owner can take an image back (`geniuz image admin`): withdrawn, its
+-- bytes, hash and size are erased and the row stays, so a memory that showed it
+-- can say an image is unavailable, and no more than that; replaced, the bytes
+-- change and the row says when. Done at the owner's word, never as an MCP tool.
+CREATE TABLE IF NOT EXISTS images (
+    image_uuid   TEXT PRIMARY KEY NOT NULL CHECK(length(image_uuid) = 36),
+    sha256       TEXT UNIQUE CHECK(sha256 IS NULL OR length(sha256) = 64),
+    media_type   TEXT NOT NULL,
+    width        INTEGER NOT NULL,
+    height       INTEGER NOT NULL,
+    created_at   TEXT NOT NULL DEFAULT(strftime('%Y-%m-%d %H:%M:%S', 'now')),
+    withdrawn_at TEXT,
+    replaced_at  TEXT,
+    data         BLOB,
+    -- Bytes and hash together, and absent only once withdrawn.
+    CHECK((data IS NULL) = (sha256 IS NULL)),
+    CHECK((data IS NULL) = (withdrawn_at IS NOT NULL)),
+    CHECK(data IS NULL OR length(data) >= 1),
+    -- A withdrawn image keeps no size: that went with the bytes.
+    CHECK((withdrawn_at IS NULL AND width > 0 AND height > 0) OR (withdrawn_at IS NOT NULL AND width = 0 AND height = 0))
+);
+
+-- Which memories show which images, and in what order. One image can serve many
+-- memories; one memory can carry many images. (parent_uuid stays what it is: a
+-- reply to a memory.)
+CREATE TABLE IF NOT EXISTS memory_images (
+    memory_uuid TEXT NOT NULL CHECK(length(memory_uuid) = 36),
+    image_uuid  TEXT NOT NULL CHECK(length(image_uuid) = 36),
+    position    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (memory_uuid, image_uuid)
+) WITHOUT ROWID;
+
+CREATE INDEX IF NOT EXISTS idx_images_uuid_prefix ON images(substr(image_uuid, 1, 8));
+CREATE INDEX IF NOT EXISTS idx_memory_images_image ON memory_images(image_uuid);
+
+-- Kept means kept, for images as for memories. The one way through is the
+-- owner's: `geniuz image admin` names a single image in `_meta` for the length of
+-- its own transaction, changes it, and removes the name. Which image it is and
+-- when it was kept never change.
+CREATE TRIGGER IF NOT EXISTS prevent_image_update BEFORE UPDATE ON images
+WHEN NEW.image_uuid IS NOT OLD.image_uuid
+  OR NEW.created_at IS NOT OLD.created_at
+  OR NOT EXISTS (SELECT 1 FROM _meta WHERE key = 'image_change_allowed' AND value = OLD.image_uuid)
+BEGIN
+    SELECT RAISE(ABORT, 'Images are immutable, update is not permitted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_image_delete BEFORE DELETE ON images
+BEGIN
+    SELECT RAISE(ABORT, 'Images are immutable, delete is not permitted');
+END;
+
+-- As prevent_memory_replace: INSERT OR REPLACE deletes without firing DELETE triggers.
+CREATE TRIGGER IF NOT EXISTS prevent_image_replace BEFORE INSERT ON images
+WHEN EXISTS(SELECT 1 FROM images WHERE image_uuid = NEW.image_uuid OR sha256 = NEW.sha256)
+BEGIN
+    SELECT RAISE(ABORT, 'Images are immutable, replacing an existing image is not permitted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_memory_image_update BEFORE UPDATE ON memory_images
+BEGIN
+    SELECT RAISE(ABORT, 'Images are immutable, update is not permitted');
+END;
+
+CREATE TRIGGER IF NOT EXISTS prevent_memory_image_delete BEFORE DELETE ON memory_images
+BEGIN
+    SELECT RAISE(ABORT, 'Images are immutable, delete is not permitted');
+END;
+
+-- A link joins a memory and an image that are both in this folder, once. Not an
+-- image that was withdrawn: it has no bytes, so a new memory can't show it.
+CREATE TRIGGER IF NOT EXISTS memory_image_must_exist BEFORE INSERT ON memory_images
+WHEN NOT EXISTS (SELECT 1 FROM memories WHERE memory_uuid = NEW.memory_uuid)
+  OR NOT EXISTS (SELECT 1 FROM images WHERE image_uuid = NEW.image_uuid AND withdrawn_at IS NULL)
+  OR EXISTS (SELECT 1 FROM memory_images WHERE memory_uuid = NEW.memory_uuid AND image_uuid = NEW.image_uuid)
+BEGIN
+    SELECT RAISE(ABORT, 'That memory or image is not in this folder, or they are already joined');
+END;
+
+-- Everything about an image except its bytes. `tokens` is what a Claude model
+-- spends to look at it: one per 28 x 28 pixel patch.
+CREATE VIEW IF NOT EXISTS image_info AS
+SELECT i.image_uuid, i.media_type, i.width, i.height,
+    COALESCE(length(i.data), 0) AS bytes,
+    ((i.width + 27) / 28) * ((i.height + 27) / 28) AS tokens,
+    i.created_at,
+    (SELECT count(*) FROM memory_images mi WHERE mi.image_uuid = i.image_uuid) AS used_by,
+    i.withdrawn_at, i.replaced_at
+FROM images i;
+
+-- One row per memory-and-image pair, with no bytes. Order by position to show them.
+CREATE VIEW IF NOT EXISTS memory_image AS
+SELECT mi.memory_uuid, mi.position, i.image_uuid, i.media_type, i.width, i.height,
+    COALESCE(length(i.data), 0) AS bytes, i.withdrawn_at, i.replaced_at
+FROM memory_images mi JOIN images i ON i.image_uuid = mi.image_uuid;

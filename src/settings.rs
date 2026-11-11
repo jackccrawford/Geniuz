@@ -48,6 +48,14 @@ pub struct Settings {
     #[serde(default = "default_recent_memories_count")]
     pub recent_memories_count: u32,
 
+    /// Whether the system may correct words as a person types a memory or a
+    /// folder's description in the window. Off unless asked for: the reader is an
+    /// AI, which understands a typo at once, and what is recorded should be what was
+    /// typed (Jack, 10 Nov 2026). With it on, macOS can also change the last word on
+    /// the click meant for Keep, and that click is spent on the correction.
+    #[serde(default)]
+    pub autocorrect: bool,
+
     /// Fields this version doesn't know (written by another app or a newer
     /// version), kept as they were so saving never drops them.
     #[serde(flatten, default, skip_serializing_if = "serde_json::Map::is_empty")]
@@ -95,6 +103,7 @@ impl Default for Settings {
             autoupdate_enabled: default_autoupdate_enabled(),
             update_check_frequency: UpdateFrequency::default(),
             recent_memories_count: default_recent_memories_count(),
+            autocorrect: false,
             extra: serde_json::Map::new(),
         }
     }
@@ -187,6 +196,11 @@ impl Settings {
                 self.recent_memories_count = v;
                 Ok(v.to_string())
             }
+            "autocorrect" => {
+                let v = parse_bool(value)?;
+                self.autocorrect = v;
+                Ok(v.to_string())
+            }
             _ => Err(format!("unknown setting '{}'", key)),
         }
     }
@@ -198,6 +212,7 @@ impl Settings {
             "autoupdate_enabled" => Ok(self.autoupdate_enabled.to_string()),
             "update_check_frequency" => Ok(self.update_check_frequency.as_str().to_string()),
             "recent_memories_count" => Ok(self.recent_memories_count.to_string()),
+            "autocorrect" => Ok(self.autocorrect.to_string()),
             _ => Err(format!("unknown setting '{}'", key)),
         }
     }
@@ -206,11 +221,12 @@ impl Settings {
     /// helpful for debugging.
     pub fn list(&self) -> String {
         format!(
-            "launch_at_login = {}\nautoupdate_enabled = {}\nupdate_check_frequency = {}\nrecent_memories_count = {}",
+            "launch_at_login = {}\nautoupdate_enabled = {}\nupdate_check_frequency = {}\nrecent_memories_count = {}\nautocorrect = {}",
             self.launch_at_login,
             self.autoupdate_enabled,
             self.update_check_frequency.as_str(),
             self.recent_memories_count,
+            self.autocorrect,
         )
     }
 }
@@ -270,7 +286,7 @@ mod tests {
     #[test]
     fn list_shows_every_setting() {
         let out = Settings::default().list();
-        for key in ["launch_at_login", "autoupdate_enabled", "update_check_frequency", "recent_memories_count"] {
+        for key in ["launch_at_login", "autoupdate_enabled", "update_check_frequency", "recent_memories_count", "autocorrect"] {
             assert!(out.contains(key), "{key} missing from:\n{out}");
         }
     }
@@ -284,6 +300,13 @@ mod tests {
         assert_eq!(s.get("autoupdate_enabled").unwrap(), "false");
         s.set("update_check_frequency", "weekly").unwrap();
         assert_eq!(s.get("update_check_frequency").unwrap(), "weekly");
+        // Off unless asked for, and it goes both ways.
+        assert_eq!(s.get("autocorrect").unwrap(), "false");
+        s.set("autocorrect", "true").unwrap();
+        assert_eq!(s.get("autocorrect").unwrap(), "true");
+        s.set("autocorrect", "false").unwrap();
+        assert_eq!(s.get("autocorrect").unwrap(), "false");
+        assert!(s.set("autocorrect", "sometimes").is_err());
     }
 
     #[test]

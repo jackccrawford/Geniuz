@@ -44,7 +44,7 @@ pub fn search_across(reg: &Registry, search: &Search, window: &Window, limit: us
     let mut out = Across { hits: Vec::new(), searched: 0, memories: 0, skipped: Vec::new() };
     for folder in reg.scan().folders {
         let found = crate::db::DatabaseManager::open_existing(&folder.db_path.to_string_lossy()).and_then(|db| {
-            let entries = match search {
+            let mut entries = match search {
                 Search::Recent => db.recent_in(window, limit),
                 Search::Keyword(q) => db.keyword_search_in(q, window, limit),
                 // As in one folder: failing to search by meaning falls back to words.
@@ -52,6 +52,7 @@ pub fn search_across(reg: &Registry, search: &Search, window: &Window, limit: us
                     .semantic_search_with(q, window, limit, *backend)
                     .or_else(|_| db.keyword_search_in(q, window, limit)),
             }?;
+            db.mark_images(&mut entries);
             Ok((entries, db.count_in(window)?))
         });
         match found {
