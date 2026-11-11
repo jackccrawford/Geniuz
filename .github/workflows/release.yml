@@ -56,7 +56,13 @@ jobs:
           echo "ORT_PREFER_DYNAMIC_LINK=1" >> $GITHUB_ENV
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: |
+          # Linux: the program looks for its bundled library in ../lib beside
+          # itself, so it starts without the launcher script setting a path.
+          if [ "${{ runner.os }}" = "Linux" ]; then
+            export RUSTFLAGS='-C link-arg=-Wl,-rpath,$ORIGIN/../lib'
+          fi
+          cargo build --release --target ${{ matrix.target }}
 
       - name: Package and checksum
         run: |
