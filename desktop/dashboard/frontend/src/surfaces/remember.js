@@ -51,7 +51,13 @@ export function replyTo({ uuid, folder, gist }) {
   navigate('remember');
 }
 
+// Lets go of the image previews of the form that was here before: a browser keeps
+// each one until told otherwise, and a form left by going to another page never
+// reaches Cancel or Keep.
+let releasePreviews = null;
+
 export async function mount(container) {
+  if (releasePreviews) { releasePreviews(); releasePreviews = null; }
   const root = document.createElement('main');
   root.className = 'main';
 
@@ -224,6 +230,7 @@ export async function mount(container) {
     sayImages('');
     drawImages();
   };
+  releasePreviews = () => picked.forEach((p) => URL.revokeObjectURL(p.url));
   const asDataUrl = (file) => new Promise((resolve, reject) => {
     const r = new FileReader();
     r.onload = () => resolve(r.result);
