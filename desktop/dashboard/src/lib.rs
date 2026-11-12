@@ -1101,6 +1101,15 @@ fn build_menu(app: &tauri::AppHandle, shortcuts: bool) -> tauri::Result<Menu<tau
             &PredefinedMenuItem::close_window(app, Some("Close"))?,
         ],
     )?;
+    // On Windows and Linux, Close hides the window to the tray and the app keeps
+    // running, so the window needs its own way to quit (Jack, 12 Nov 2026: quitting
+    // from the dock left the tray icon behind). A plain item: the built-in Quit is
+    // dropped on Linux. The Mac has Quit in the app menu.
+    #[cfg(not(target_os = "macos"))]
+    {
+        file_menu.append(&PredefinedMenuItem::separator(app)?)?;
+        file_menu.append(&MenuItem::with_id(app, "menu_quit", "Quit Geniuz", true, None::<&str>)?)?;
+    }
 
     // Folders: the same order as the sidebar, with the first nine a keystroke away.
     let list = list_folders();
@@ -1519,6 +1528,7 @@ pub fn run() {
             // webview natively and never reach this handler.
             let id = event.id().0.as_str();
             match id {
+                "menu_quit" => app.exit(0),
                 // Help items act here, not in JS. The webview route did
                 // nothing: window.alert() is not shown by the Tauri webview,
                 // and opening the site went through open_path, which the

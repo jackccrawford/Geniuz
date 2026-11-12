@@ -159,7 +159,7 @@ The gist is how your future self finds this memory. The content is what makes it
 
 A memory doesn't need to be long. It needs to be complete.
 
-**Anything longer than a sentence: use a file (`-c @note.md`) or stdin (`-c -`).** The inline form is the one a shell quietly corrupts — backticks get evaluated, quotes get eaten, newlines collapse — and you cannot take back what was kept.
+**Anything longer than a sentence: use a file (`-c @note.md`) or stdin (`-c -`).** The inline form is the one a shell quietly corrupts — backticks get evaluated, quotes get eaten, newlines collapse — and you cannot take back what was kept. From Windows PowerShell 5.1, always use one of these two: it passes text with double quotes to `geniuz` split apart. Prefer the file for anything beyond plain ASCII, since PowerShell 5.1 can pipe accents and dashes as `?`.
 
 When something works, write down **what the green light did not tell you**. A passing test proves something narrower than you meant to ask. That gap is the difference between a note and a lesson.
 
