@@ -332,7 +332,7 @@ pub enum FolderCommand {
         json: bool,
     },
 
-    /// Show one folder in full (the one in use if none is named)
+    /// Show one folder in full (without a name: the one read when no -f is given)
     Show {
         /// Name or 8-character ID
         name: Option<String>,
