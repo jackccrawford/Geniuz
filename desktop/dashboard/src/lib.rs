@@ -590,7 +590,14 @@ fn get_status() -> Result<StatusReport, String> {
     } else {
         (embedding_count as f64 / memory_count as f64) * 100.0
     };
-    let embedding_model = db.get_embedding_model().ok().flatten();
+    // Only `geniuz backfill` records the model; memories embedded as they were kept
+    // never did, so every folder but the first showed "—" with a warning while search
+    // worked (12 Nov 2026). The model searches use is this build's, so name it.
+    let embedding_model = db
+        .get_embedding_model()
+        .ok()
+        .flatten()
+        .or_else(|| (embedding_count > 0).then(|| geniuz::embedding::model_id().to_string()));
     let data_dir = geniuz::data_dir().to_string_lossy().into_owned();
     let data_dir_bytes = dir_size(&geniuz::data_dir()).unwrap_or(0);
 
