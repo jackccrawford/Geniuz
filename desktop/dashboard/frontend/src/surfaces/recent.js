@@ -211,6 +211,9 @@ export async function mount(container) {
   // anything (Jack, 11 Nov 2026: "really need some indicator that there is an image").
   // Each is fetched as its row nears the screen, once, and kept while this list stands:
   // a new visit asks again, so an image its owner replaced is not shown stale for long.
+  // At most THUMBS_KEPT are held; the oldest goes first, so a long scroll through a big
+  // folder doesn't hold every picture it passed (a row already drawn keeps its own).
+  const THUMBS_KEPT = 120;
   const thumbs = new Map();
   const dropThumb = (img) => {
     const row = img.parentElement;
@@ -221,6 +224,7 @@ export async function mount(container) {
     const id = img.dataset.thumb;
     api.getImage(id).then((url) => {
       thumbs.set(id, url);
+      if (thumbs.size > THUMBS_KEPT) thumbs.delete(thumbs.keys().next().value);
       if (img.isConnected) img.src = url;
     }).catch(() => dropThumb(img));
   };
