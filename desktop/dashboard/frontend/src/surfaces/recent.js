@@ -15,7 +15,12 @@ import * as su from '../stream-ui.js';
 import { openMemory } from '../components/memoryModal.js';
 import { openFolderDialog } from '../components/folderDialog.js';
 
+// Stops the last list's watchers when a new list is drawn, so a list that has been
+// replaced holds nothing.
+let stopThumbs = null;
+
 export async function mount(container) {
+  if (stopThumbs) { stopThumbs(); stopThumbs = null; }
   container.innerHTML = `<div class="surface-loading">Loading your memory…</div>`;
 
   // A page at a time, so a folder of thousands is all reachable. The first page
@@ -169,6 +174,7 @@ export async function mount(container) {
             ${num ? `<span class="smsg__num">#${num}</span>` : ''}</div>
           ${depth === 0 && parentOf(m) ? `<div class="smsg__re">↳ part of a thread that began earlier</div>` : ''}
           ${text && text !== (m.gist || '').trim() ? `<div class="smsg__text">${su.renderText(text)}</div><button type="button" class="smsg__more" hidden>Read all</button>` : ''}
+          ${(m.image_ids || []).length ? `<div class="smsg__thumbs">${m.image_ids.slice(0, 5).map((id) => `<img class="smsg__thumb" data-thumb="${su.esc(id)}" alt="">`).join('')}</div>` : ''}
           ${count && !opened ? `<button type="button" class="smsg__replies" data-twisty="${su.esc(m.uuid)}">${count} ${count === 1 ? 'reply' : 'replies'}</button>` : ''}
         </div>
       </article>`;
@@ -201,6 +207,39 @@ export async function mount(container) {
   };
 
   const stream = document.createElement('div');
+  // A memory's images, shown small in its row, so a picture is seen without opening
+  // anything (Jack, 11 Nov 2026: "really need some indicator that there is an image").
+  // Each is fetched as its row nears the screen, once, and kept while this list stands:
+  // a new visit asks again, so an image its owner replaced is not shown stale for long.
+  // At most THUMBS_KEPT are held; the oldest goes first, so a long scroll through a big
+  // folder doesn't hold every picture it passed (a row already drawn keeps its own).
+  const THUMBS_KEPT = 120;
+  const thumbs = new Map();
+  const dropThumb = (img) => {
+    const row = img.parentElement;
+    img.remove(); // one that can't be had leaves no empty box,
+    if (row && !row.children.length) row.remove(); // and a row of none leaves no gap
+  };
+  const fetchThumb = (img) => {
+    const id = img.dataset.thumb;
+    api.getImage(id).then((url) => {
+      thumbs.set(id, url);
+      if (thumbs.size > THUMBS_KEPT) thumbs.delete(thumbs.keys().next().value);
+      if (img.isConnected) img.src = url;
+    }).catch(() => dropThumb(img));
+  };
+  const nearScreen = new IntersectionObserver((seen) => {
+    for (const s of seen) if (s.isIntersecting) { nearScreen.unobserve(s.target); fetchThumb(s.target); }
+  }, { root: body, rootMargin: '400px 0px' });
+  const newRows = new MutationObserver(() => {
+    for (const img of stream.querySelectorAll('img[data-thumb]:not([data-seen])')) {
+      img.dataset.seen = '1';
+      const have = thumbs.get(img.dataset.thumb);
+      if (have) img.src = have; else nearScreen.observe(img);
+    }
+  });
+  newRows.observe(stream, { childList: true, subtree: true });
+  stopThumbs = () => { nearScreen.disconnect(); newRows.disconnect(); thumbs.clear(); };
   stream.className = 'stream';
   // The memory last read, kept across redraws (another page, a tree opening).
   let readUuid = null;

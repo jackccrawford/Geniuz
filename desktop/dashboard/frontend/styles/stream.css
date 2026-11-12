@@ -89,6 +89,14 @@ html.os-linux .sidebar {
 .smsg__num { margin-left: auto; flex-shrink: 0; white-space: nowrap; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
 .smsg__images { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; font-size: 11px; color: var(--s-muted); font-variant-numeric: tabular-nums; }
 .smsg__images svg { display: block; }
+/* A memory's images, small, under its words. The box has a size before the picture
+   arrives, so the list doesn't jump as rows scroll in. */
+.smsg__thumbs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.smsg__thumb {
+  display: block; width: 108px; height: 72px; object-fit: cover;
+  border-radius: 6px; border: 1px solid var(--s-line); background: var(--s-paper-2);
+}
+.smsg--child .smsg__thumb { width: 84px; height: 56px; }
 .smsg__re { margin-top: 2px; font-size: 12.5px; color: var(--s-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .smsg__text {

@@ -88,6 +88,8 @@ struct RecentMemory {
     folder_name: Option<String>,
     /// How many images it shows, so a list can say so without fetching them.
     images: usize,
+    /// Their short IDs, in order, so a list row can show them small.
+    image_ids: Vec<String>,
 }
 
 /// One matching line from an Exact search.
@@ -1031,6 +1033,7 @@ fn map_recent(e: MemoryEntry) -> RecentMemory {
         folder: None,
         folder_name: None,
         images: e.images.len(),
+        image_ids: e.images,
     }
 }
 
