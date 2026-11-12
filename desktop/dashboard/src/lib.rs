@@ -1356,8 +1356,15 @@ pub fn run() {
                     // hairlines the design relies on have something to
                     // contrast against. Pure white would make 4%-white
                     // surfaces and 8%-black hairlines invisible.
+                    //
+                    // The web view only, never the GTK window: the window's colour also
+                    // paints the menu bar, and under a dark GTK theme its white labels
+                    // vanished on this grey (galaxy, 12 Nov 2026). The window itself is
+                    // opaque on Linux (tauri.linux.conf.json), so GTK draws the menu bar
+                    // in the system's own light or dark.
                     use tauri::webview::Color;
-                    if let Err(e) = window.set_background_color(Some(Color(228, 228, 232, 255))) {
+                    let webview: &tauri::Webview<_> = window.as_ref();
+                    if let Err(e) = webview.set_background_color(Some(Color(228, 228, 232, 255))) {
                         eprintln!("[geniuz] linux background not applied: {e}");
                     }
                     // Tag <html> with `os-linux` once the page is loaded
