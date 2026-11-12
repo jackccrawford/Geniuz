@@ -1681,7 +1681,7 @@ dependencies = [
 
 [[package]]
 name = "geniuz"
-version = "5.1.0"
+version = "5.1.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1707,7 +1707,7 @@ dependencies = [
 
 [[package]]
 name = "geniuz-dashboard"
-version = "5.1.0"
+version = "5.1.1"
 dependencies = [
  "chrono",
  "geniuz",
