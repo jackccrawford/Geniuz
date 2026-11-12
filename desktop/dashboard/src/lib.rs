@@ -1392,7 +1392,10 @@ pub fn run() {
                 let tray_find = MenuItem::with_id(handle, "tray_find", "Find…", true, None::<&str>)?;
                 let tray_status = MenuItem::with_id(handle, "tray_status", "Status", true, None::<&str>)?;
                 let tray_settings = MenuItem::with_id(handle, "tray_settings", "Settings…", true, None::<&str>)?;
-                let tray_quit = PredefinedMenuItem::quit(handle, Some("Quit Geniuz"))?;
+                // A plain item, not PredefinedMenuItem::quit: the menu library has no
+                // built-in Quit on Linux and drops it without a word, so the Linux tray
+                // had no way out (seen on lunar, 11 Nov 2026). Handled below.
+                let tray_quit = MenuItem::with_id(handle, "tray_quit", "Quit Geniuz", true, None::<&str>)?;
 
                 let tray_menu = Menu::with_items(
                     handle,
@@ -1461,6 +1464,10 @@ pub fn run() {
                                     let _ = geniuz::update::open(&geniuz::update::link_to_open(&found.url));
                                 });
                             }
+                            return;
+                        }
+                        if id == "tray_quit" {
+                            app.exit(0);
                             return;
                         }
                         let Some(window) = app.get_webview_window("main") else { return };
