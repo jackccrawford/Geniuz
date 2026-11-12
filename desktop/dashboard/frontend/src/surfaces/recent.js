@@ -15,6 +15,9 @@ import * as su from '../stream-ui.js';
 import { openMemory } from '../components/memoryModal.js';
 import { openFolderDialog } from '../components/folderDialog.js';
 
+// Pictures already fetched for list rows, by folder and image, across redraws.
+const thumbs = new Map();
+
 export async function mount(container) {
   container.innerHTML = `<div class="surface-loading">Loading your memory…</div>`;
 
@@ -169,6 +172,7 @@ export async function mount(container) {
             ${num ? `<span class="smsg__num">#${num}</span>` : ''}</div>
           ${depth === 0 && parentOf(m) ? `<div class="smsg__re">↳ part of a thread that began earlier</div>` : ''}
           ${text && text !== (m.gist || '').trim() ? `<div class="smsg__text">${su.renderText(text)}</div><button type="button" class="smsg__more" hidden>Read all</button>` : ''}
+          ${(m.image_ids || []).length ? `<div class="smsg__thumbs">${m.image_ids.slice(0, 5).map((id) => `<img class="smsg__thumb" data-thumb="${su.esc(id)}" alt="">`).join('')}</div>` : ''}
           ${count && !opened ? `<button type="button" class="smsg__replies" data-twisty="${su.esc(m.uuid)}">${count} ${count === 1 ? 'reply' : 'replies'}</button>` : ''}
         </div>
       </article>`;
@@ -201,6 +205,28 @@ export async function mount(container) {
   };
 
   const stream = document.createElement('div');
+  // A memory's images, shown small in its row, so a picture is seen without opening
+  // anything (Jack, 11 Nov 2026: "really need some indicator that there is an image").
+  // Each is fetched when its row nears the screen, once, and kept for redraws.
+  const thumbKey = (id) => `${folder?.uuid || ''}:${id}`;
+  const fetchThumb = (img) => {
+    const id = img.dataset.thumb;
+    api.getImage(id).then((url) => {
+      if (thumbs.size >= 60) thumbs.delete(thumbs.keys().next().value);
+      thumbs.set(thumbKey(id), url);
+      if (img.isConnected) img.src = url;
+    }).catch(() => img.remove()); // one that can't be had leaves no empty box
+  };
+  const nearScreen = new IntersectionObserver((seen) => {
+    for (const s of seen) if (s.isIntersecting) { nearScreen.unobserve(s.target); fetchThumb(s.target); }
+  }, { rootMargin: '400px' });
+  new MutationObserver(() => {
+    for (const img of stream.querySelectorAll('img[data-thumb]:not([data-seen])')) {
+      img.dataset.seen = '1';
+      const have = thumbs.get(thumbKey(img.dataset.thumb));
+      if (have) img.src = have; else nearScreen.observe(img);
+    }
+  }).observe(stream, { childList: true, subtree: true });
   stream.className = 'stream';
   // The memory last read, kept across redraws (another page, a tree opening).
   let readUuid = null;
