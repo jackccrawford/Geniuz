@@ -1,0 +1,18 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "Geniuz",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 480,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "transparent": false,
+        "decorations": true,
+        "dragDropEnabled": false
+      }
+    ]
+  }
+}

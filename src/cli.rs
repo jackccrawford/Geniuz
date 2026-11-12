@@ -321,7 +321,7 @@ pub enum Command {
 
 #[derive(Subcommand)]
 pub enum FolderCommand {
-    /// List your folders. The one in use is marked with *
+    /// List your folders. * marks the one read when no -f is given
     List {
         /// List archived folders instead
         #[arg(long)]

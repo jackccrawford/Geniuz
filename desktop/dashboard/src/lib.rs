@@ -590,7 +590,14 @@ fn get_status() -> Result<StatusReport, String> {
     } else {
         (embedding_count as f64 / memory_count as f64) * 100.0
     };
-    let embedding_model = db.get_embedding_model().ok().flatten();
+    // Only `geniuz backfill` records the model; memories embedded as they were kept
+    // never did, so every folder but the first showed "—" with a warning while search
+    // worked (12 Nov 2026). The model searches use is this build's, so name it.
+    let embedding_model = db
+        .get_embedding_model()
+        .ok()
+        .flatten()
+        .or_else(|| (embedding_count > 0).then(|| geniuz::embedding::model_id().to_string()));
     let data_dir = geniuz::data_dir().to_string_lossy().into_owned();
     let data_dir_bytes = dir_size(&geniuz::data_dir()).unwrap_or(0);
 
@@ -1094,6 +1101,15 @@ fn build_menu(app: &tauri::AppHandle, shortcuts: bool) -> tauri::Result<Menu<tau
             &PredefinedMenuItem::close_window(app, Some("Close"))?,
         ],
     )?;
+    // On Windows and Linux, Close hides the window to the tray and the app keeps
+    // running, so the window needs its own way to quit (Jack, 12 Nov 2026: quitting
+    // from the dock left the tray icon behind). A plain item: the built-in Quit is
+    // dropped on Linux. The Mac has Quit in the app menu.
+    #[cfg(not(target_os = "macos"))]
+    {
+        file_menu.append(&PredefinedMenuItem::separator(app)?)?;
+        file_menu.append(&MenuItem::with_id(app, "menu_quit", "Quit Geniuz", true, None::<&str>)?)?;
+    }
 
     // Folders: the same order as the sidebar, with the first nine a keystroke away.
     let list = list_folders();
@@ -1356,8 +1372,15 @@ pub fn run() {
                     // hairlines the design relies on have something to
                     // contrast against. Pure white would make 4%-white
                     // surfaces and 8%-black hairlines invisible.
+                    //
+                    // The web view only, never the GTK window: the window's colour also
+                    // paints the menu bar, and under a dark GTK theme its white labels
+                    // vanished on this grey (galaxy, 12 Nov 2026). The window itself is
+                    // opaque on Linux (tauri.linux.conf.json), so GTK draws the menu bar
+                    // in the system's own light or dark.
                     use tauri::webview::Color;
-                    if let Err(e) = window.set_background_color(Some(Color(228, 228, 232, 255))) {
+                    let webview: &tauri::Webview<_> = window.as_ref();
+                    if let Err(e) = webview.set_background_color(Some(Color(228, 228, 232, 255))) {
                         eprintln!("[geniuz] linux background not applied: {e}");
                     }
                     // Tag <html> with `os-linux` once the page is loaded
@@ -1385,7 +1408,10 @@ pub fn run() {
                 let tray_find = MenuItem::with_id(handle, "tray_find", "Find…", true, None::<&str>)?;
                 let tray_status = MenuItem::with_id(handle, "tray_status", "Status", true, None::<&str>)?;
                 let tray_settings = MenuItem::with_id(handle, "tray_settings", "Settings…", true, None::<&str>)?;
-                let tray_quit = PredefinedMenuItem::quit(handle, Some("Quit Geniuz"))?;
+                // A plain item, not PredefinedMenuItem::quit: the menu library has no
+                // built-in Quit on Linux and drops it without a word, so the Linux tray
+                // had no way out (seen on lunar, 11 Nov 2026). Handled below.
+                let tray_quit = MenuItem::with_id(handle, "tray_quit", "Quit Geniuz", true, None::<&str>)?;
 
                 let tray_menu = Menu::with_items(
                     handle,
@@ -1456,6 +1482,10 @@ pub fn run() {
                             }
                             return;
                         }
+                        if id == "tray_quit" {
+                            app.exit(0);
+                            return;
+                        }
                         let Some(window) = app.get_webview_window("main") else { return };
                         match id {
                             "tray_open" => {
@@ -1498,6 +1528,7 @@ pub fn run() {
             // webview natively and never reach this handler.
             let id = event.id().0.as_str();
             match id {
+                "menu_quit" => app.exit(0),
                 // Help items act here, not in JS. The webview route did
                 // nothing: window.alert() is not shown by the Tauri webview,
                 // and opening the site went through open_path, which the
