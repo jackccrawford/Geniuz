@@ -1023,6 +1023,24 @@ fn get_data_dir() -> String {
     geniuz::data_dir().to_string_lossy().into_owned()
 }
 
+/// Open a Geniuz folder's directory in the file manager. Done here, not through
+/// the opener plugin's page-side command: that one is scoped to $HOME/**, a glob
+/// that skips hidden directories, so a folder kept under any dot-directory but
+/// ~/.geniuz was refused ("unable to open path", Jack, 12 Nov 2026). Only a
+/// directory Geniuz itself knows is opened: its home, or one holding a folder.
+#[tauri::command]
+fn open_folder_dir(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let asked = std::fs::canonicalize(&path).map_err(|_| format!("That folder isn't there any more: {path}"))?;
+    let same = |p: &std::path::Path| std::fs::canonicalize(p).map(|c| c == asked).unwrap_or(false);
+    let known = same(&geniuz::data_dir())
+        || Registry::from_env().scan().folders.iter().any(|f| f.db_path.parent().is_some_and(|d| same(d)));
+    if !known {
+        return Err(format!("Not a Geniuz folder: {path}"));
+    }
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_path(asked.to_string_lossy(), None::<&str>).map_err(|e| format!("Couldn't open {path}: {e}"))
+}
+
 // -------------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------------
@@ -1254,6 +1272,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             open_link,
+            open_folder_dir,
             open_update,
             check_update_now,
             take_startup_nav,

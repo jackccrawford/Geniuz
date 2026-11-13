@@ -89,7 +89,7 @@ export async function mount(container) {
     try {
       await api.openPath(chosen.location);
     } catch (e) {
-      flashFeedback(locFeedback, `Couldn't open: ${e?.message || String(e)}`, true);
+      flashFeedback(locFeedback, e?.message || String(e), true);
     }
   });
 
@@ -221,6 +221,19 @@ function flashFeedback(el, msg, isError = false) {
   el.textContent = msg;
   el.style.color = isError ? 'var(--status-bad)' : 'var(--ink-2)';
   clearTimeout(el.__t);
+  el.style.cursor = '';
+  el.title = '';
+  el.onclick = null;
+  // An error stays until the next action, and a click copies it: one that vanished
+  // in two seconds couldn't be read, let alone reported (Jack, 12 Nov 2026).
+  if (isError) {
+    el.style.cursor = 'pointer';
+    el.title = 'Click to copy';
+    el.onclick = async () => {
+      try { await navigator.clipboard.writeText(msg); el.textContent = `${msg} (copied)`; } catch { /* stays readable */ }
+    };
+    return;
+  }
   el.__t = setTimeout(() => {
     el.textContent = '';
     el.style.color = 'var(--ink-3)';

@@ -112,6 +112,7 @@ export async function mount(container) {
   function flashSaved() {
     flashEl.textContent = 'Saved';
     flashEl.style.color = 'var(--ink-2)';
+    flashEl.style.cursor = ''; flashEl.title = ''; flashEl.onclick = null;
     if (savedFlashTimer) clearTimeout(savedFlashTimer);
     savedFlashTimer = setTimeout(() => { flashEl.textContent = ''; }, 2400);
   }
@@ -120,7 +121,13 @@ export async function mount(container) {
     flashEl.textContent = `Couldn't save: ${msg}`;
     flashEl.style.color = 'var(--status-bad)';
     if (savedFlashTimer) clearTimeout(savedFlashTimer);
-    savedFlashTimer = setTimeout(() => { flashEl.textContent = ''; }, 5000);
+    // Stays until the next save, and a click copies it (as on Data & export).
+    const text = flashEl.textContent;
+    flashEl.style.cursor = 'pointer';
+    flashEl.title = 'Click to copy';
+    flashEl.onclick = async () => {
+      try { await navigator.clipboard.writeText(text); flashEl.textContent = `${text} (copied)`; } catch { /* stays readable */ }
+    };
   }
 
   // ---- render --------------------------------------------------------------

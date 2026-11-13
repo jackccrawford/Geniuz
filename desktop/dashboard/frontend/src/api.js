@@ -130,7 +130,7 @@ export function getDataDir() {
 }
 
 export function openPath(path) {
-  return invoke('plugin:opener|open_path', { path });
+  return invoke('open_folder_dir', { path });
 }
 
 // -------------------------------------------------------------------------
