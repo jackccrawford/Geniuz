@@ -144,7 +144,7 @@ fn base_tool_definitions() -> Value {
             },
             {
                 "name": "recall",
-                "description": "Search your memories by meaning. Use this at the START of every conversation to check what you already know about the topic or the user. Also use it whenever you need context from previous sessions. The search finds related memories even when the words are different: 'budget priorities' finds memories about 'retention focus, $40K'. Use this proactively and often.",
+                "description": "Finds notes kept in earlier chats, by meaning: 'budget priorities' finds a note about 'retention focus, $40K' though the words differ. With no query it shows the most recent notes, which is a quick way to see what is already known when a conversation starts.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
