@@ -26,7 +26,8 @@ struct GeniuzMenu: View {
             }
 
             Divider()
-            if !service.cliOnPath && !service.runningFromTemporaryLocation { commandRow }
+            // Only once the launch check has run: before it, "not installed" is just "not known".
+            if service.cliChecked && !service.cliOnPath && !service.runningFromTemporaryLocation { commandRow }
             quitRow
         }
         .frame(width: 360)
@@ -359,7 +360,7 @@ struct GeniuzMenu: View {
         return "Claude Desktop not connected"
     }
 
-    // MARK: - Quit row (Mac convention: last menu-style item)
+    // MARK: - Command row (only when the quiet install at launch wasn't possible)
 
     /// Shown until `geniuz` works in Terminal. It used to be only in the About window,
     /// behind a right-click on the gear, where nobody found it (Jack, 13 Nov 2026).
@@ -380,6 +381,8 @@ struct GeniuzMenu: View {
         .buttonStyle(.plain)
         .help("Lets you and your agents type geniuz in Terminal. macOS may ask for your password once.")
     }
+
+    // MARK: - Quit row (Mac convention: last menu-style item)
 
     private var quitRow: some View {
         Button(action: { NSApplication.shared.terminate(nil) }) {

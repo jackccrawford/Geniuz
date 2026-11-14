@@ -83,6 +83,40 @@ do {
     check(!i.alreadyInstalled(), "old link: a dead link is not 'installed'")
     check(i.install() == .linked(dir: "\(h)/.local/bin") && dest("\(h)/.local/bin/geniuz") == bundled, "old link: replaced")
 }
+// 9. Our comment left behind without the PATH line is not "installed", and the line is added again.
+do {
+    let h = home("markeronly"); try! "\(CommandInstaller.marker)\n".write(toFile: "\(h)/.zshenv", atomically: true, encoding: .utf8)
+    try! fm.createDirectory(atPath: "\(h)/.local/bin", withIntermediateDirectories: true)
+    try! fm.createSymbolicLink(atPath: "\(h)/.local/bin/geniuz", withDestinationPath: bundled)
+    let i = CommandInstaller(home: h, bundled: bundled, shell: "/bin/zsh", pathDirs: ["/usr/bin"], systemDirs: [])
+    check(!i.alreadyInstalled(), "comment only: not installed")
+    check(i.install() == .linkedAndPathAdded(dir: "\(h)/.local/bin", file: "\(h)/.zshenv"), "comment only: line added")
+}
+// 10. The person removed our line after we added it once: it is not put back, and nothing is created.
+do {
+    let h = home("removed")
+    var i = CommandInstaller(home: h, bundled: bundled, shell: "/bin/zsh", pathDirs: ["/usr/bin"], systemDirs: [])
+    i.mayAddPathLine = false
+    check(i.install() == .notPossible, "line removed by the person: not possible")
+    check(!fm.fileExists(atPath: "\(h)/.zshenv") && !fm.fileExists(atPath: "\(h)/.local"), "line removed by the person: nothing written")
+}
+// 11. A startup file that can't be read as text is left byte for byte.
+do {
+    let h = home("binary"); let bytes = Data([0xFF, 0xFE, 0x00, 0xC3, 0x28])
+    fm.createFile(atPath: "\(h)/.zshenv", contents: bytes)
+    let i = CommandInstaller(home: h, bundled: bundled, shell: "/bin/zsh", pathDirs: ["/usr/bin"], systemDirs: [])
+    check(i.install() == .notPossible, "unreadable startup file: not possible")
+    check(fm.contents(atPath: "\(h)/.zshenv") == bytes, "unreadable startup file: unchanged")
+    check(!fm.fileExists(atPath: "\(h)/.local"), "unreadable startup file: no link made")
+}
+// 12. A system-wide link counts only if its folder is on the PATH.
+do {
+    let h = home("system"); let sys = "\(h)/sysbin"; try! fm.createDirectory(atPath: sys, withIntermediateDirectories: true)
+    try! fm.createSymbolicLink(atPath: "\(sys)/geniuz", withDestinationPath: bundled)
+    check(!CommandInstaller(home: h, bundled: bundled, shell: "/bin/zsh", pathDirs: ["/usr/bin"], systemDirs: [sys]).alreadyInstalled(), "system link off the PATH: not installed")
+    check(CommandInstaller(home: h, bundled: bundled, shell: "/bin/zsh", pathDirs: ["/usr/bin", sys], systemDirs: [sys]).alreadyInstalled(), "system link on the PATH: installed")
+    check(CommandInstaller(home: h, bundled: bundled, shell: "/bin/zsh", pathDirs: nil, systemDirs: [sys]).alreadyInstalled(), "system link, PATH unknown: taken at its word")
+}
 print(failed == 0 ? "ALL PASSED" : "\(failed) FAILED"); exit(failed == 0 ? 0 : 1)
 SWIFT
 swiftc -O -o "$T/t" Geniuz/CommandInstaller.swift "$T/main.swift"

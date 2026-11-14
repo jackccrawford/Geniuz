@@ -26,6 +26,9 @@ struct CommandInstaller {
     let pathDirs: [String]?
     /// System-wide folders an earlier install may have linked into. A test passes none.
     var systemDirs = ["/usr/local/bin", "/opt/homebrew/bin"]
+    /// False once this app has added its PATH line before: if the person has since
+    /// taken the line out, that is their answer, and it isn't put back.
+    var mayAddPathLine = true
 
     static let marker = "# Added by Geniuz, so `geniuz` works in Terminal. Safe to remove."
     static let pathLine = "export PATH=\"$HOME/.local/bin:$PATH\""
@@ -56,12 +59,14 @@ struct CommandInstaller {
     /// Whether `geniuz` already works in a new Terminal window through a link of ours.
     func alreadyInstalled() -> Bool {
         let fm = FileManager.default
+        // A system-wide link counts only where Terminal looks: Homebrew's folder isn't
+        // on every PATH. With the PATH unknown, a link there is taken at its word.
         for dir in systemDirs where fm.isExecutableFile(atPath: "\(dir)/geniuz") {
-            return true
+            if pathDirs?.contains(dir) ?? true { return true }
         }
         guard fm.isExecutableFile(atPath: "\(localBin)/geniuz") else { return false }
         if pathDirs?.contains(localBin) ?? false { return true }
-        return startupFile.map(hasMarker) ?? false
+        return startupFile.map(hasOurLine) ?? false
     }
 
     func install() -> Outcome {
@@ -77,14 +82,22 @@ struct CommandInstaller {
         // A startup file that is a link (a dotfiles setup) or can't be written is theirs to manage.
         if (try? fm.destinationOfSymbolicLink(atPath: file)) != nil { return .notPossible }
         if fm.fileExists(atPath: file) && !fm.isWritableFile(atPath: file) { return .notPossible }
+        // A file that is there but can't be read as text is never rewritten: taking it
+        // for empty would replace someone's shell setup with two lines.
+        var existing = ""
+        if fm.fileExists(atPath: file) {
+            guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { return .notPossible }
+            existing = text
+        }
+        let lineIsThere = hasOurLine(file)
+        guard lineIsThere || mayAddPathLine else { return .notPossible }
         do {
             try fm.createDirectory(atPath: localBin, withIntermediateDirectories: true)
         } catch {
             return .notPossible
         }
         guard link(in: localBin) else { return .notPossible }
-        if hasMarker(file) { return .linkedPathAlreadyAdded(dir: localBin, file: file) }
-        let existing = (try? String(contentsOfFile: file, encoding: .utf8)) ?? ""
+        if lineIsThere { return .linkedPathAlreadyAdded(dir: localBin, file: file) }
         let gap = existing.isEmpty || existing.hasSuffix("\n") ? "" : "\n"
         let added = existing + gap + "\n\(Self.marker)\n\(Self.pathLine)\n"
         do {
@@ -95,8 +108,11 @@ struct CommandInstaller {
         return .linkedAndPathAdded(dir: localBin, file: file)
     }
 
-    private func hasMarker(_ file: String) -> Bool {
-        (try? String(contentsOfFile: file, encoding: .utf8))?.contains(Self.marker) ?? false
+    /// Our PATH line itself, not only the comment above it: a comment left behind
+    /// after the line was removed puts nothing on the PATH.
+    private func hasOurLine(_ file: String) -> Bool {
+        guard let text = try? String(contentsOfFile: file, encoding: .utf8) else { return false }
+        return text.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == Self.pathLine }
     }
 
     /// Replace an old link, but never a real file that isn't ours.
