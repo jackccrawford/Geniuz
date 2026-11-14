@@ -26,6 +26,7 @@ struct GeniuzMenu: View {
             }
 
             Divider()
+            if !service.cliOnPath && !service.runningFromTemporaryLocation { commandRow }
             quitRow
         }
         .frame(width: 360)
@@ -359,6 +360,26 @@ struct GeniuzMenu: View {
     }
 
     // MARK: - Quit row (Mac convention: last menu-style item)
+
+    /// Shown until `geniuz` works in Terminal. It used to be only in the About window,
+    /// behind a right-click on the gear, where nobody found it (Jack, 13 Nov 2026).
+    private var commandRow: some View {
+        Button(action: { service.installCommand() }) {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 12))
+                Text(service.cliInstallFailed ? "Couldn't install the geniuz command. Try again" : "Install the geniuz command for Terminal")
+                    .font(.system(size: 12))
+                Spacer()
+            }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Lets you and your agents type geniuz in Terminal. macOS may ask for your password once.")
+    }
 
     private var quitRow: some View {
         Button(action: { NSApplication.shared.terminate(nil) }) {

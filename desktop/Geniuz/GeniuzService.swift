@@ -157,6 +157,8 @@ class GeniuzService: ObservableObject {
     @Published var restartRequired: Bool = false
     @Published var cliOnPath: Bool = false
     @Published var cliInstallFailed: Bool = false
+    /// Set on the refresh queue only: the quiet link is tried once per launch.
+    private var triedQuietLink = false
     @Published var settings: GeniuzSettings = GeniuzSettings()
     @Published var availableUpdate: AvailableUpdate?
     /// The result of the last check people asked for, shown under the button.
@@ -353,7 +355,14 @@ class GeniuzService: ObservableObject {
             let entry = self.readClaudeEntry(runIt: !self.verifiedThisLaunch)
             self.verifiedThisLaunch = true
             let claudeCode = self.checkClaudeCodeConnected()
-            let onPath = self.checkCliOnPath()
+            var onPath = self.checkCliOnPath()
+            // The Mac has no installer to do this, so the app does it itself: once per
+            // launch, and only where no password is needed (a folder of the person's own
+            // that is already on their PATH). Otherwise the menu offers it, one click.
+            if !onPath && !self.triedQuietLink && !self.runningFromTemporaryLocation {
+                self.triedQuietLink = true
+                if self.linkIntoUserPath(self.geniuzBinaryPath) { onPath = self.checkCliOnPath() }
+            }
             let s = self.loadSettings()
 
             DispatchQueue.main.async {
