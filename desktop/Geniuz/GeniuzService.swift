@@ -1223,10 +1223,16 @@ enum ApplicationsMover {
         alert.addButton(withTitle: "Replace")
         alert.addButton(withTitle: "Keep Both")
         guard alert.runModal() == .alertFirstButtonReturn else { return true }
+        // The dialog may have sat open a while. Look again before anything goes to the
+        // Trash: if Geniuz.app is no longer that same older copy (replaced by hand,
+        // removed, updated), there is nothing here to do.
+        guard olderCopyVersion == older else { return true }
         let duplicate = Bundle.main.bundleURL
         do {
             try move()
             // This copy has done its job: one Geniuz in Applications, not two of the same.
+            // If it can't be trashed, the replacement still happened, and a second copy
+            // of the same version is harmless: it never asks this again.
             try? FileManager.default.trashItem(at: duplicate, resultingItemURL: nil)
             run("/usr/bin/open", ["-n", destination])
         } catch {
