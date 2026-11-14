@@ -1023,6 +1023,29 @@ fn get_data_dir() -> String {
     geniuz::data_dir().to_string_lossy().into_owned()
 }
 
+/// Whether `asked` (already canonical) is Geniuz's home or the directory of one of
+/// its folders' databases. Hidden or not makes no difference.
+fn is_geniuz_dir(asked: &std::path::Path, home: &std::path::Path, dbs: &[std::path::PathBuf]) -> bool {
+    let same = |p: &std::path::Path| std::fs::canonicalize(p).map(|c| c == asked).unwrap_or(false);
+    same(home) || dbs.iter().any(|db| db.parent().is_some_and(|d| same(d)))
+}
+
+/// Open a Geniuz folder's directory in the file manager. Done here, not through
+/// the opener plugin's page-side command: that one is scoped to $HOME/**, a glob
+/// that skips hidden directories, so a folder kept under any dot-directory but
+/// ~/.geniuz was refused ("unable to open path", Jack, 12 Nov 2026). Only a
+/// directory Geniuz itself knows is opened: its home, or one holding a folder.
+#[tauri::command]
+fn open_folder_dir(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let asked = std::fs::canonicalize(&path).map_err(|_| format!("That folder isn't there any more: {path}"))?;
+    let dbs: Vec<std::path::PathBuf> = Registry::from_env().scan().folders.into_iter().map(|f| f.db_path).collect();
+    if !is_geniuz_dir(&asked, &geniuz::data_dir(), &dbs) {
+        return Err(format!("Not a Geniuz folder: {path}"));
+    }
+    use tauri_plugin_opener::OpenerExt;
+    app.opener().open_path(asked.to_string_lossy(), None::<&str>).map_err(|e| format!("Couldn't open {path}: {e}"))
+}
+
 // -------------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------------
@@ -1254,6 +1277,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .invoke_handler(tauri::generate_handler![
             open_link,
+            open_folder_dir,
             open_update,
             check_update_now,
             take_startup_nav,
@@ -1581,6 +1605,25 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_folder_under_a_hidden_directory_opens_and_a_stranger_does_not() {
+        let tmp = std::env::temp_dir().join(format!("geniuz-open-dir-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let home = tmp.join(".geniuz");
+        let hidden = tmp.join(".relay-to-geniuz").join("agents").join("96A3AC4E");
+        let other = tmp.join("Documents");
+        for d in [&home, &hidden, &other] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let dbs = vec![hidden.join("memory.db")];
+        let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap();
+        assert!(is_geniuz_dir(&canon(&hidden), &home, &dbs), "a folder kept under a dot-directory");
+        assert!(is_geniuz_dir(&canon(&home), &home, &dbs), "Geniuz's own home");
+        assert!(!is_geniuz_dir(&canon(&other), &home, &dbs), "a directory Geniuz doesn't know");
+        assert!(!is_geniuz_dir(&canon(&tmp), &home, &dbs), "a parent of a folder is not the folder");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 
     #[test]
     fn a_link_names_one_of_four_pages_and_nothing_else() {

@@ -7,6 +7,7 @@
 
 import * as api from '../api.js';
 import * as fmt from '../format.js';
+import { clearFeedback, showError, showNote } from '../feedback.js';
 
 export async function mount(container) {
   container.innerHTML = `<div class="surface-loading">Loading your data…</div>`;
@@ -89,7 +90,7 @@ export async function mount(container) {
     try {
       await api.openPath(chosen.location);
     } catch (e) {
-      flashFeedback(locFeedback, `Couldn't open: ${e?.message || String(e)}`, true);
+      showError(locFeedback, e?.message || String(e));
     }
   });
 
@@ -97,9 +98,9 @@ export async function mount(container) {
     if (!chosen) return;
     try {
       await navigator.clipboard.writeText(chosen.location);
-      flashFeedback(locFeedback, 'Copied.');
+      showNote(locFeedback, 'Copied.');
     } catch (e) {
-      flashFeedback(locFeedback, `Couldn't copy: ${e?.message || String(e)}`, true);
+      showError(locFeedback, `Couldn't copy: ${e?.message || String(e)}`);
     }
   });
 
@@ -128,7 +129,7 @@ export async function mount(container) {
   let asked = 0;
   let exporting = false; // the button stays disabled while an export runs, whatever is picked
   const show = async () => {
-    if (!exporting) exportResult.textContent = '';
+    if (!exporting) clearFeedback(exportResult);
     if (!chosen) {
       locPath.textContent = '(no folder)';
       locStats.textContent = '';
@@ -180,12 +181,12 @@ export async function mount(container) {
       }
     } catch (e) {
       exportResult.style.cssText = `margin-top:var(--s-3);font-size:var(--fs-micro);color:var(--status-bad);`;
-      exportResult.textContent = `Couldn't open save panel: ${e?.message || String(e)}`;
+      showError(exportResult, `Couldn't open save panel: ${e?.message || String(e)}`);
       return;
     }
     if (!targetPath) {
       // User cancelled or dialog unavailable.
-      exportResult.textContent = '';
+      clearFeedback(exportResult);
       exportResult.style.cssText = 'margin-top:var(--s-3);font-size:var(--fs-micro);';
       return;
     }
@@ -193,6 +194,7 @@ export async function mount(container) {
     exporting = true;
     exportBtn.disabled = true;
     exportResult.style.cssText = 'margin-top:var(--s-3);font-size:var(--fs-micro);color:var(--ink-3);';
+    clearFeedback(exportResult);
     exportResult.textContent = `Exporting ${folder.name}…`;
 
     try {
@@ -202,7 +204,7 @@ export async function mount(container) {
       exportResult.innerHTML = `Exported ${escapeHtml(folder.name)}, ${escapeHtml(num)} ${escapeHtml(unit)} (${escapeHtml(String(bytes))} bytes), to <span class="data-card__path">${escapeHtml(targetPath)}</span>`;
     } catch (e) {
       exportResult.style.cssText = `margin-top:var(--s-3);font-size:var(--fs-micro);color:var(--status-bad);`;
-      exportResult.textContent = `Export failed: ${e?.message || String(e)}`;
+      showError(exportResult, `Export failed: ${e?.message || String(e)}`);
     } finally {
       exporting = false;
       exportBtn.disabled = !chosen;
@@ -215,17 +217,6 @@ export async function mount(container) {
 }
 
 // ---- helpers --------------------------------------------------------------
-
-function flashFeedback(el, msg, isError = false) {
-  if (!el) return;
-  el.textContent = msg;
-  el.style.color = isError ? 'var(--status-bad)' : 'var(--ink-2)';
-  clearTimeout(el.__t);
-  el.__t = setTimeout(() => {
-    el.textContent = '';
-    el.style.color = 'var(--ink-3)';
-  }, 2400);
-}
 
 // Suggest <Desktop>/geniuz-<NAME>-<ID>-<stamp>.db, so the file says which folder
 // is inside. The Desktop comes from the system (Tauri's path API), wherever the

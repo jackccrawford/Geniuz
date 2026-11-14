@@ -7,6 +7,7 @@
 
 import * as api from '../api.js';
 import { openShortcuts } from '../components/shortcutsDialog.js';
+import { clearFeedback, showError, showNote } from '../feedback.js';
 
 export async function mount(container) {
   container.innerHTML = `<div class="surface-loading">Loading settings…</div>`;
@@ -32,18 +33,19 @@ export async function mount(container) {
 
   // ---- local state ---------------------------------------------------------
   let edited = { ...saved };
-  let savedFlashTimer = null;
 
   function dirty() {
     return JSON.stringify(edited) !== JSON.stringify(saved);
   }
 
   function update(patch) {
+    clearFeedback(flashEl); // an earlier error is about an earlier attempt
     edited = { ...edited, ...patch };
     render();
   }
 
   async function onSave() {
+    clearFeedback(flashEl);
     saveBtn.disabled = true;
     discardBtn.disabled = true;
     try {
@@ -61,6 +63,7 @@ export async function mount(container) {
   }
 
   function onDiscard() {
+    clearFeedback(flashEl);
     edited = { ...saved };
     render();
   }
@@ -110,17 +113,11 @@ export async function mount(container) {
   body.appendChild(actionBar);
 
   function flashSaved() {
-    flashEl.textContent = 'Saved';
-    flashEl.style.color = 'var(--ink-2)';
-    if (savedFlashTimer) clearTimeout(savedFlashTimer);
-    savedFlashTimer = setTimeout(() => { flashEl.textContent = ''; }, 2400);
+    showNote(flashEl, 'Saved');
   }
 
   function flashError(msg) {
-    flashEl.textContent = `Couldn't save: ${msg}`;
-    flashEl.style.color = 'var(--status-bad)';
-    if (savedFlashTimer) clearTimeout(savedFlashTimer);
-    savedFlashTimer = setTimeout(() => { flashEl.textContent = ''; }, 5000);
+    showError(flashEl, `Couldn't save: ${msg}`);
   }
 
   // ---- render --------------------------------------------------------------

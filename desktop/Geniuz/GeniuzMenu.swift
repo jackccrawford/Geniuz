@@ -26,6 +26,8 @@ struct GeniuzMenu: View {
             }
 
             Divider()
+            // Only once the launch check has run: before it, "not installed" is just "not known".
+            if service.cliChecked && !service.cliOnPath && !service.runningFromTemporaryLocation { commandRow }
             quitRow
         }
         .frame(width: 360)
@@ -356,6 +358,28 @@ struct GeniuzMenu: View {
         if service.claudeConfigUnreadable { return "Claude Desktop's settings file couldn't be read, so Geniuz left it alone." }
         if !service.claudeFound { return "Geniuz will connect when Claude Desktop is installed." }
         return "Claude Desktop not connected"
+    }
+
+    // MARK: - Command row (only when the quiet install at launch wasn't possible)
+
+    /// Shown until `geniuz` works in Terminal. It used to be only in the About window,
+    /// behind a right-click on the gear, where nobody found it (Jack, 13 Nov 2026).
+    private var commandRow: some View {
+        Button(action: { service.installCommand() }) {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal")
+                    .font(.system(size: 12))
+                Text(service.cliInstallFailed ? "Couldn't install the geniuz command. Try again" : "Install the geniuz command for Terminal")
+                    .font(.system(size: 12))
+                Spacer()
+            }
+            .foregroundColor(.secondary)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Lets you and your agents type geniuz in Terminal. macOS may ask for your password once.")
     }
 
     // MARK: - Quit row (Mac convention: last menu-style item)

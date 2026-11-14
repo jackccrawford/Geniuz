@@ -157,6 +157,10 @@ class GeniuzService: ObservableObject {
     @Published var restartRequired: Bool = false
     @Published var cliOnPath: Bool = false
     @Published var cliInstallFailed: Bool = false
+    /// True once `cliOnPath` holds an answer rather than its starting value.
+    @Published var cliChecked: Bool = false
+    /// Set on the refresh queue only: the quiet link is tried once per launch.
+    private var triedQuietLink = false
     @Published var settings: GeniuzSettings = GeniuzSettings()
     @Published var availableUpdate: AvailableUpdate?
     /// The result of the last check people asked for, shown under the button.
@@ -353,7 +357,14 @@ class GeniuzService: ObservableObject {
             let entry = self.readClaudeEntry(runIt: !self.verifiedThisLaunch)
             self.verifiedThisLaunch = true
             let claudeCode = self.checkClaudeCodeConnected()
-            let onPath = self.checkCliOnPath()
+            var onPath = self.checkCliOnPath()
+            // The Mac has no installer to do this, so the app does it itself, once per
+            // launch and with no password (see CommandInstaller). Only when that isn't
+            // possible does the menu offer it, one click.
+            if !onPath && !self.triedQuietLink && !self.runningFromTemporaryLocation {
+                self.triedQuietLink = true
+                if self.installCommandQuietly() { onPath = self.checkCliOnPath() }
+            }
             let s = self.loadSettings()
 
             DispatchQueue.main.async {
@@ -368,6 +379,7 @@ class GeniuzService: ObservableObject {
                 self.settleClaudeConnection(entry)
                 self.claudeCodeConnected = claudeCode
                 self.cliOnPath = onPath
+                self.cliChecked = true
                 // Launch at login is set in the dashboard's Settings now, which only
                 // writes the file: macOS has to be told here, when the file changes.
                 // Only from a file that is there: with none, `s` holds the defaults, and
@@ -608,20 +620,48 @@ class GeniuzService: ObservableObject {
         // locations, so these are the only paths worth checking for "did the
         // install work." A `which geniuz` spawn would match shell semantics
         // more broadly but won't inherit the user's login PATH under sandbox.
-        let fm = FileManager.default
-        return fm.isExecutableFile(atPath: "/usr/local/bin/geniuz")
-            || fm.isExecutableFile(atPath: "/opt/homebrew/bin/geniuz")
-            || fm.isExecutableFile(atPath: "\(realHome)/.local/bin/geniuz")
+        // A link in ~/.local/bin only counts if that folder is on the PATH, or our
+        // line adding it is in the shell's startup file (CommandInstaller).
+        commandInstaller().alreadyInstalled()
     }
 
-    /// A folder on the person's PATH that's theirs needs no password. Otherwise macOS
-    /// asks for one, in its own dialog. No Terminal either way.
+    /// The PATH a new Terminal window would have, asked of the shell once per launch.
+    private lazy var terminalPath: [String]? = loginShellPath()
+    private let terminalPathLock = NSLock()
+
+    private func commandInstaller() -> CommandInstaller {
+        terminalPathLock.lock()
+        let path = terminalPath
+        terminalPathLock.unlock()
+        var installer = CommandInstaller(home: realHome, bundled: geniuzBinaryPath, shell: userShell, pathDirs: path)
+        installer.mayAddPathLine = !UserDefaults.standard.bool(forKey: Self.addedPathLineKey)
+        return installer
+    }
+
+    /// Set once this app has added its PATH line to a startup file, so that a person
+    /// who removes the line is not given it back at the next launch.
+    private static let addedPathLineKey = "addedCommandPathLine"
+
+    /// Run the quiet install and remember if it wrote the PATH line.
+    private func installCommandQuietly() -> Bool {
+        let outcome = commandInstaller().install()
+        if case .linkedAndPathAdded = outcome { UserDefaults.standard.set(true, forKey: Self.addedPathLineKey) }
+        return outcome != .notPossible
+    }
+
+    private var userShell: String {
+        if let pw = getpwuid(getuid()), let sh = pw.pointee.pw_shell { return String(cString: sh) }
+        return "/bin/zsh"
+    }
+
+    /// The menu's button, for when the quiet install at launch wasn't possible: tries it
+    /// again, then /usr/local/bin, for which macOS asks for a password in its own dialog.
     func installCommand() {
         guard !runningFromTemporaryLocation else { return }
         let bundled = geniuzBinaryPath
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let ok = self.linkIntoUserPath(bundled) || self.linkWithAdminPrompt(bundled)
+            let ok = self.installCommandQuietly() || self.linkWithAdminPrompt(bundled)
             DispatchQueue.main.async {
                 self.cliInstallFailed = !ok
                 self.cliOnPath = self.checkCliOnPath()
@@ -629,27 +669,15 @@ class GeniuzService: ObservableObject {
         }
     }
 
-    private func linkIntoUserPath(_ bundled: String) -> Bool {
-        let fm = FileManager.default
-        let path = loginShellPath()
-        for dir in ["\(realHome)/.local/bin", "/opt/homebrew/bin"] {
-            guard fm.isWritableFile(atPath: dir), path?.contains(dir) ?? true else { continue }
-            let link = "\(dir)/geniuz"
-            // Replace an old link, but never a real file that isn't ours.
-            if (try? fm.destinationOfSymbolicLink(atPath: link)) != nil {
-                try? fm.removeItem(atPath: link)
-            } else if fm.fileExists(atPath: link) {
-                continue
-            }
-            if (try? fm.createSymbolicLink(atPath: link, withDestinationPath: bundled)) != nil {
-                return true
-            }
-        }
-        return false
-    }
-
     private func linkWithAdminPrompt(_ bundled: String) -> Bool {
-        let command = "mkdir -p /usr/local/bin && ln -sf '\(bundled)' /usr/local/bin/geniuz"
+        // As without a password: an old link is replaced, a real file that isn't ours never is.
+        let fm = FileManager.default
+        let target = "/usr/local/bin/geniuz"
+        if fm.fileExists(atPath: target) && (try? fm.destinationOfSymbolicLink(atPath: target)) == nil {
+            return false
+        }
+        // The shell checks again as root, in case the file appeared in between.
+        let command = "mkdir -p /usr/local/bin && { [ ! -e \(target) ] || [ -L \(target) ]; } && ln -sfn '\(bundled)' \(target)"
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
         process.arguments = ["-e", "do shell script \"\(command)\" with administrator privileges"]
@@ -662,9 +690,20 @@ class GeniuzService: ObservableObject {
 
     /// GUI apps don't read shell profiles, so ask the shell what PATH a terminal would have.
     private func loginShellPath() -> [String]? {
+        // Asked of the person's own shell: a bash user's PATH is not what zsh would say.
+        // A shell this doesn't know how to ask gives nil, "unknown".
+        let shell = userShell
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-ilc", "print -r -- $PATH"]
+        switch (shell as NSString).lastPathComponent {
+        case "zsh":
+            process.executableURL = URL(fileURLWithPath: shell)
+            process.arguments = ["-ilc", "print -r -- $PATH"]
+        case "bash":
+            process.executableURL = URL(fileURLWithPath: shell)
+            process.arguments = ["-lc", "printf '%s\\n' \"$PATH\""]
+        default:
+            return nil
+        }
         let out = Pipe()
         process.standardOutput = out
         process.standardError = FileHandle.nullDevice
