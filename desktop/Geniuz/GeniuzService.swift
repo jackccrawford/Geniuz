@@ -356,12 +356,12 @@ class GeniuzService: ObservableObject {
             self.verifiedThisLaunch = true
             let claudeCode = self.checkClaudeCodeConnected()
             var onPath = self.checkCliOnPath()
-            // The Mac has no installer to do this, so the app does it itself: once per
-            // launch, and only where no password is needed (a folder of the person's own
-            // that is already on their PATH). Otherwise the menu offers it, one click.
+            // The Mac has no installer to do this, so the app does it itself, once per
+            // launch and with no password (see CommandInstaller). Only when that isn't
+            // possible does the menu offer it, one click.
             if !onPath && !self.triedQuietLink && !self.runningFromTemporaryLocation {
                 self.triedQuietLink = true
-                if self.linkIntoUserPath(self.geniuzBinaryPath) { onPath = self.checkCliOnPath() }
+                if self.commandInstaller().install() != .notPossible { onPath = self.checkCliOnPath() }
             }
             let s = self.loadSettings()
 
@@ -617,44 +617,37 @@ class GeniuzService: ObservableObject {
         // locations, so these are the only paths worth checking for "did the
         // install work." A `which geniuz` spawn would match shell semantics
         // more broadly but won't inherit the user's login PATH under sandbox.
-        let fm = FileManager.default
-        return fm.isExecutableFile(atPath: "/usr/local/bin/geniuz")
-            || fm.isExecutableFile(atPath: "/opt/homebrew/bin/geniuz")
-            || fm.isExecutableFile(atPath: "\(realHome)/.local/bin/geniuz")
+        // A link in ~/.local/bin only counts if that folder is on the PATH, or our
+        // line adding it is in the shell's startup file (CommandInstaller).
+        commandInstaller().alreadyInstalled()
     }
 
-    /// A folder on the person's PATH that's theirs needs no password. Otherwise macOS
-    /// asks for one, in its own dialog. No Terminal either way.
+    /// The PATH a new Terminal window would have, asked of the shell once per launch.
+    private lazy var terminalPath: [String]? = loginShellPath()
+    private let terminalPathLock = NSLock()
+
+    private func commandInstaller() -> CommandInstaller {
+        terminalPathLock.lock()
+        let path = terminalPath
+        terminalPathLock.unlock()
+        var shell = "/bin/zsh"
+        if let pw = getpwuid(getuid()), let sh = pw.pointee.pw_shell { shell = String(cString: sh) }
+        return CommandInstaller(home: realHome, bundled: geniuzBinaryPath, shell: shell, pathDirs: path)
+    }
+
+    /// The menu's button, for when the quiet install at launch wasn't possible: tries it
+    /// again, then /usr/local/bin, for which macOS asks for a password in its own dialog.
     func installCommand() {
         guard !runningFromTemporaryLocation else { return }
         let bundled = geniuzBinaryPath
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            let ok = self.linkIntoUserPath(bundled) || self.linkWithAdminPrompt(bundled)
+            let ok = self.commandInstaller().install() != .notPossible || self.linkWithAdminPrompt(bundled)
             DispatchQueue.main.async {
                 self.cliInstallFailed = !ok
                 self.cliOnPath = self.checkCliOnPath()
             }
         }
-    }
-
-    private func linkIntoUserPath(_ bundled: String) -> Bool {
-        let fm = FileManager.default
-        let path = loginShellPath()
-        for dir in ["\(realHome)/.local/bin", "/opt/homebrew/bin"] {
-            guard fm.isWritableFile(atPath: dir), path?.contains(dir) ?? true else { continue }
-            let link = "\(dir)/geniuz"
-            // Replace an old link, but never a real file that isn't ours.
-            if (try? fm.destinationOfSymbolicLink(atPath: link)) != nil {
-                try? fm.removeItem(atPath: link)
-            } else if fm.fileExists(atPath: link) {
-                continue
-            }
-            if (try? fm.createSymbolicLink(atPath: link, withDestinationPath: bundled)) != nil {
-                return true
-            }
-        }
-        return false
     }
 
     private func linkWithAdminPrompt(_ bundled: String) -> Bool {
