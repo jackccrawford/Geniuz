@@ -56,6 +56,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ApplicationsMover.offer()
             return
         }
+        // Finder's "Keep Both" left an older Geniuz.app beside this one: offer to be the
+        // one copy, since the geniuz command and Claude's connection point at that path.
+        if let older = ApplicationsMover.olderCopyVersion, !ApplicationsMover.offerToReplaceOlderCopy(older) {
+            return
+        }
 
         service = GeniuzService()
 

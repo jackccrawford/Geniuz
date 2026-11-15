@@ -1199,6 +1199,53 @@ enum ApplicationsMover {
         return path.contains("/AppTranslocation/") || path.hasPrefix("/Volumes/")
     }
 
+    /// A newer copy beside an older `Geniuz.app` in Applications: Finder's "Keep Both".
+    static var olderCopyVersion: String? {
+        let home = AppCopies.identity(ofAppAt: destination)
+        let mine = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        let replace = AppCopies.shouldReplaceHome(
+            myPath: Bundle.main.bundlePath, myVersion: mine, myBundleID: Bundle.main.bundleIdentifier,
+            homeVersion: FileManager.default.fileExists(atPath: destination) ? home.version : nil,
+            homeBundleID: home.bundleID)
+        return replace ? home.version : nil
+    }
+
+    /// Offer to become the one copy. Returns true if this copy should carry on as it
+    /// is (the person chose to keep both); otherwise it has moved and is quitting.
+    static func offerToReplaceOlderCopy(_ older: String) -> Bool {
+        let mine = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Replace the older Geniuz?"
+        alert.informativeText = "There are two copies of Geniuz in Applications: this one (\(mine)) and an older one (\(older)). "
+            + "Until the older one is replaced, Terminal and your AI keep using it. "
+            + "It goes to the Trash; your memories aren't in it and aren't touched."
+        alert.addButton(withTitle: "Replace")
+        alert.addButton(withTitle: "Keep Both")
+        guard alert.runModal() == .alertFirstButtonReturn else { return true }
+        // The dialog may have sat open a while. Look again before anything goes to the
+        // Trash: if Geniuz.app is no longer that same older copy (replaced by hand,
+        // removed, updated), there is nothing here to do.
+        guard olderCopyVersion == older else { return true }
+        let duplicate = Bundle.main.bundleURL
+        do {
+            try move()
+            // This copy has done its job: one Geniuz in Applications, not two of the same.
+            // If it can't be trashed, the replacement still happened, and a second copy
+            // of the same version is harmless: it never asks this again.
+            try? FileManager.default.trashItem(at: duplicate, resultingItemURL: nil)
+            run("/usr/bin/open", ["-n", destination])
+        } catch {
+            let failed = NSAlert()
+            failed.messageText = "Couldn't replace the older Geniuz"
+            failed.informativeText = "Quit Geniuz, drag the new one to Applications again and choose Replace. Details: \(error.localizedDescription)"
+            failed.runModal()
+            return true
+        }
+        NSApp.terminate(nil)
+        return false
+    }
+
     static func offer() {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()

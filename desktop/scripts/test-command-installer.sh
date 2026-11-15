@@ -117,9 +117,30 @@ do {
     check(CommandInstaller(home: h, bundled: bundled, shell: "/bin/zsh", pathDirs: ["/usr/bin", sys], systemDirs: [sys]).alreadyInstalled(), "system link on the PATH: installed")
     check(CommandInstaller(home: h, bundled: bundled, shell: "/bin/zsh", pathDirs: nil, systemDirs: [sys]).alreadyInstalled(), "system link, PATH unknown: taken at its word")
 }
+// --- AppCopies: two copies of Geniuz in Applications ("Keep Both") ---
+do {
+    let id = "com.managedventures.Geniuz"
+    func ask(_ path: String, _ mine: String, _ home: String?, homeID: String? = id) -> Bool {
+        AppCopies.shouldReplaceHome(myPath: path, myVersion: mine, myBundleID: id, homeVersion: home, homeBundleID: homeID)
+    }
+    check(ask("/Applications/Geniuz 2.app", "5.1.3", "5.1.2"), "keep both: the newer copy offers to replace the older")
+    check(!ask("/Applications/Geniuz.app", "5.1.3", "5.1.3"), "keep both: the real one never asks")
+    check(!ask("/Applications/Geniuz 2.app", "5.1.2", "5.1.3"), "keep both: an older duplicate doesn't replace a newer one")
+    check(!ask("/Applications/Geniuz 2.app", "5.1.3", "5.1.3"), "keep both: same version, nothing to gain")
+    check(!ask("/Applications/Geniuz 2.app", "5.1.3", nil), "keep both: no Geniuz.app there")
+    check(!ask("/Applications/Geniuz 2.app", "5.1.3", "5.1.2", homeID: "com.other.App"), "keep both: a different app called Geniuz.app")
+    check(!ask("/Users/x/Library/Developer/Xcode/DerivedData/G/Build/Products/Debug/Geniuz.app", "5.1.4", "5.1.2"), "keep both: a build run from Xcode is left alone")
+    check(AppCopies.isOlder("5.1.2", than: "5.1.10") && !AppCopies.isOlder("5.1.10", than: "5.1.2"), "versions compare by number, not by text")
+    check(AppCopies.isOlder("5.1", than: "5.1.1") && !AppCopies.isOlder("5.1.0", than: "5.1"), "a missing part counts as zero")
+    let app = "\(root)/Fake.app"; try! fm.createDirectory(atPath: "\(app)/Contents", withIntermediateDirectories: true)
+    (["CFBundleShortVersionString": "5.1.2", "CFBundleIdentifier": id] as NSDictionary).write(toFile: "\(app)/Contents/Info.plist", atomically: true)
+    let got = AppCopies.identity(ofAppAt: app)
+    check(got.version == "5.1.2" && got.bundleID == id, "an app's version and ID are read from its Info.plist")
+    check(AppCopies.identity(ofAppAt: "\(root)/Missing.app").version == nil, "a missing app has no version")
+}
 print(failed == 0 ? "ALL PASSED" : "\(failed) FAILED"); exit(failed == 0 ? 0 : 1)
 SWIFT
-swiftc -O -o "$T/t" Geniuz/CommandInstaller.swift "$T/main.swift"
+swiftc -O -o "$T/t" Geniuz/CommandInstaller.swift Geniuz/AppCopies.swift "$T/main.swift"
 "$T/t" "$T/homes"
 # And for real: a new zsh with that scratch home finds and runs the command.
 H="$T/homes/fresh"; out=$(env -i HOME="$H" PATH=/usr/bin:/bin /bin/zsh -c 'command -v geniuz && geniuz')
