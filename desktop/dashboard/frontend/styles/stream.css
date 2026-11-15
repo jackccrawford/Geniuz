@@ -37,9 +37,14 @@
 html.os-linux .sidebar {
   --ink-1: rgba(250, 244, 232, 0.96);
   --ink-2: rgba(250, 244, 232, 0.76);
-  --ink-3: rgba(250, 244, 232, 0.52);
+  /* Small text (counts, headings) at 0.70: 5.9:1 on the ground and 4.9:1 on a
+     hovered row. At 0.52 it was 4.0:1 and 3.5:1, under the 4.5:1 that WCAG AA
+     asks of text this size. */
+  --ink-3: rgba(250, 244, 232, 0.70);
   --bg-elevated: rgba(255, 255, 255, 0.08);
-  --bg-active: var(--s-teal);
+  /* The open folder's row. White on the brand teal (#2F94A6) is 3.6:1; on this
+     deeper teal it is 5.4:1. */
+  --bg-active: #237483;
   --hairline-1: rgba(255, 255, 255, 0.10);
   --accent: #FFFFFF;
   background: var(--s-ground);
@@ -47,6 +52,8 @@ html.os-linux .sidebar {
   border-right: 0;
 }
 .sidebar-item.is-active { color: #FFFFFF; font-weight: 600; }
+/* Its count, too: the muted tone was 1.9:1 on the open row. */
+.sidebar-item.is-active .sidebar-item__count { color: rgba(255, 255, 255, 0.92); }
 
 /* Solid paper to read on, over the window's vibrancy. */
 #main-host { background: var(--s-paper); }
