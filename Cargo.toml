@@ -75,3 +75,9 @@ tempfile = "3"
 # umask, so the files Geniuz creates are private to their owner (src/private.rs).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# The embed helper's pipe: who owns it and who is at the other end (src/embed_socket.rs).
+# Both are already in the build through `interprocess`, at these versions.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+widestring = "1"

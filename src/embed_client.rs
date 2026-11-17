@@ -61,15 +61,23 @@ fn spawn_server() {
     };
 
     // The helper works out where to listen the same way this program does.
-    let _ = std::process::Command::new(binary)
+    let Ok(mut helper) = std::process::Command::new(binary)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .spawn();
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    else {
+        return;
+    };
 
-    // Wait for server to start listening (up to 5 seconds)
+    // Wait for the helper to start listening (up to 5 seconds), but not for one that
+    // has already given up: a helper that can't have its socket (someone else holds the
+    // name, say) exits at once, and waiting out the five seconds would slow every keep.
     for _ in 0..50 {
         if crate::embed_socket::connect().is_some() {
+            return;
+        }
+        if matches!(helper.try_wait(), Ok(Some(_))) {
             return;
         }
         std::thread::sleep(std::time::Duration::from_millis(100));

@@ -767,6 +767,8 @@ dependencies = [
  "ureq",
  "uuid",
  "webp",
+ "widestring",
+ "windows-sys 0.52.0",
  "winresource",
 ]
 
