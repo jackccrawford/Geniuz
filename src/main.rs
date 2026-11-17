@@ -1224,54 +1224,33 @@ fn run(cli: Cli) -> Result<String, String> {
             }
         }
 
-        Command::Backfill => {
+        Command::Backfill { all } => {
+            if all {
+                let done = geniuz::folders::backfill_all(&geniuz::folders::Registry::from_env());
+                if done.is_empty() {
+                    return Ok("All memories cached.".to_string());
+                }
+                let lines: Vec<String> = done.iter().map(|d| format!(
+                    "[backfill] {}: {} memories, {} gists{}", d.name, d.bodies, d.gists,
+                    if d.failed > 0 { format!(", {} failed", d.failed) } else { String::new() }
+                )).collect();
+                return Ok(lines.join("\n"));
+            }
             let db = get_db()?;
-            db.set_embedding_model(geniuz::embedding::model_id())?;
-
-            let uncached = db.unembedded_memories()?;
-            let ungisted = db.ungisted_memories()?;
-            if uncached.is_empty() && ungisted.is_empty() {
+            let todo = db.unembedded_memories()?.len() + db.ungisted_memories()?.len();
+            if todo == 0 {
                 return Ok("All memories cached.".to_string());
             }
-            if uncached.is_empty() {
-                // Folders from before 5.1.6: every body has its vector, the gists have none yet.
-                println!("[backfill] {} gists to embed...", ungisted.len());
-                let backend = geniuz::embedding::create_backend()?;
-                let mut done = 0;
-                for (uuid, gist) in &ungisted {
-                    if let Ok(emb) = backend.embed(&geniuz::embedding::gist_text(gist)) {
-                        if db.cache_gist_embedding(uuid, &emb).is_ok() { done += 1; }
-                    }
-                }
-                return Ok(format!("[backfill] Done. {} gists cached, {} failed.", done, ungisted.len() - done));
-            }
-
-            println!("[backfill] {} memories to embed...", uncached.len());
-            let backend = geniuz::embedding::create_backend()?;
-
-            let mut cached = 0;
-            let mut failed = 0;
-            for (i, (uuid, content)) in uncached.iter().enumerate() {
-                match backend.embed(content) {
-                    Ok(emb) => {
-                        if db.cache_embedding(uuid, &emb).is_ok() { cached += 1; }
-                        else { failed += 1; }
-                    }
-                    Err(_) => { failed += 1; }
-                }
-                if (i + 1) % 50 == 0 {
-                    println!("[backfill] {}/{}", i + 1, uncached.len());
-                }
-            }
-
-            // Their gists, and any older memory's, in the same run.
-            for (uuid, gist) in &db.ungisted_memories()? {
-                if let Ok(emb) = backend.embed(&geniuz::embedding::gist_text(gist)) {
-                    let _ = db.cache_gist_embedding(uuid, &emb);
-                }
-            }
-
-            Ok(format!("[backfill] Done. {} cached, {} failed.", cached, failed))
+            println!("[backfill] {} to embed...", todo);
+            let mut loaded: Option<std::rc::Rc<dyn geniuz::embedding::EmbeddingBackend>> = None;
+            let mut backend = || -> Result<std::rc::Rc<dyn geniuz::embedding::EmbeddingBackend>, String> {
+                if let Some(b) = &loaded { return Ok(b.clone()); }
+                let b: std::rc::Rc<dyn geniuz::embedding::EmbeddingBackend> = std::rc::Rc::from(geniuz::embedding::create_backend()?);
+                loaded = Some(b.clone());
+                Ok(b)
+            };
+            let (bodies, gists, failed) = db.backfill(&mut backend)?;
+            Ok(format!("[backfill] Done. {} memories and {} gists cached, {} failed.", bodies, gists, failed))
         }
 
         Command::Status => {

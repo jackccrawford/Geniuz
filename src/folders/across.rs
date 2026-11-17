@@ -74,3 +74,35 @@ pub fn search_across(reg: &Registry, search: &Search, window: &Window, limit: us
     out.hits.truncate(limit);
     out
 }
+
+/// What [`backfill_all`] did in one folder.
+pub struct Backfilled {
+    pub name: String,
+    pub bodies: usize,
+    pub gists: usize,
+    pub failed: usize,
+}
+
+/// Make every missing vector in every folder, loading the model once and only if
+/// some folder needs it. A folder that can't be opened or written to is passed by:
+/// it is searched with the vectors it has. Folders with nothing to do are left out.
+pub fn backfill_all(reg: &Registry) -> Vec<Backfilled> {
+    let mut loaded: Option<std::rc::Rc<dyn EmbeddingBackend>> = None;
+    let mut backend = || -> Result<std::rc::Rc<dyn EmbeddingBackend>, String> {
+        if let Some(b) = &loaded { return Ok(b.clone()); }
+        let b: std::rc::Rc<dyn EmbeddingBackend> = std::rc::Rc::from(crate::embedding::create_backend()?);
+        loaded = Some(b.clone());
+        Ok(b)
+    };
+    let mut out = Vec::new();
+    for f in reg.scan().folders {
+        let Ok(db) = crate::db::DatabaseManager::open_existing(&f.db_path.to_string_lossy()) else { continue };
+        match db.backfill(&mut backend) {
+            Ok((0, 0, 0)) => {}
+            Ok((bodies, gists, failed)) => out.push(Backfilled { name: f.name, bodies, gists, failed }),
+            // No model: no folder after this one will fare better.
+            Err(_) => break,
+        }
+    }
+    out
+}

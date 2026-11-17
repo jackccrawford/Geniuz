@@ -279,9 +279,13 @@ pub enum Command {
 
     /// Make memories without an embedding searchable by meaning
     #[command(
-        after_help = "Embeds all content using ONNX (paraphrase-multilingual-MiniLM-L12-v2).\nFirst run downloads the model (~118MB). Subsequent runs only process new memories."
+        after_help = "Makes the vectors search by meaning uses, for memories that lack them:\none for a memory's words and one for its gist.\nThe first run downloads the search model (about 127 MB). Later runs only do what is new.\n\n  geniuz backfill          This folder\n  geniuz backfill --all    Every folder"
     )]
-    Backfill,
+    Backfill {
+        /// Every folder, not only this one
+        #[arg(long)]
+        all: bool,
+    },
 
     /// Show usage guide for agents
     Skill,
