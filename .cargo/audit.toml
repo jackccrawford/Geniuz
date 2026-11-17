@@ -1,9 +1,3 @@
 # `cargo audit` reads this. An advisory is listed here only with a reason and a way out.
 [advisories]
-ignore = [
-    # SQLite, bundled through rusqlite. Fixed in libsqlite3-sys 0.39, which means moving
-    # the rusqlite pin in Cargo.toml. That pin is deliberate (a date-handling behaviour of
-    # SQLite 3.46 the fleet's stores depend on), so the move is its own change with its own
-    # tests. Listed 16 Nov 2026; remove this line when that change lands.
-    "RUSTSEC-2026-0459",
-]
+ignore = []

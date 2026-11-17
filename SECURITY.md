@@ -31,5 +31,5 @@ risk until a fix is out.
 
 ## Dependencies
 
-`cargo audit` runs on every change and weekly. Any advisory that is set aside is listed,
+`cargo audit` runs on every change and weekly. Any advisory that is ever set aside is listed,
 with the reason, in `.cargo/audit.toml`.

@@ -39,7 +39,7 @@ winresource = "0.1"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-rusqlite = { version = "=0.32.1", features = ["bundled"] }  # pinned: SQLite 3.46, the fleet's engine (relay, Team, kith); 3.45 shifted datetime('now','utc') by the local offset
+rusqlite = { version = "=0.43.0", features = ["bundled", "fallible_uint"] }  # pinned exactly: the bundled SQLite is part of what is tested. Moved from 0.32.1 for RUSTSEC-2026-0459; the old pin's reason (3.45 shifting datetime('now','utc')) no longer applies, since every write uses db::NOW_UTC
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1", features = ["v4", "v5"] }
