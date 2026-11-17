@@ -1687,7 +1687,7 @@ dependencies = [
 
 [[package]]
 name = "geniuz"
-version = "5.1.4"
+version = "5.1.5"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1709,12 +1709,14 @@ dependencies = [
  "ureq",
  "uuid",
  "webp",
+ "widestring",
+ "windows-sys 0.52.0",
  "winresource",
 ]
 
 [[package]]
 name = "geniuz-dashboard"
-version = "5.1.4"
+version = "5.1.5"
 dependencies = [
  "chrono",
  "geniuz",
