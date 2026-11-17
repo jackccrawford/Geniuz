@@ -1,5 +1,6 @@
 pub mod embedding;
 pub mod embed_client;
+pub mod embed_socket;
 pub mod db;
 pub mod folders;
 pub mod settings;
@@ -8,6 +9,7 @@ pub mod window;
 pub mod dig;
 pub mod gist;
 pub mod pictures;
+pub mod private;
 
 use std::path::PathBuf;
 

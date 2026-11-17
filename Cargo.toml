@@ -1,6 +1,6 @@
 [package]
 name = "geniuz"
-version = "5.1.4"
+version = "5.1.5"
 edition = "2021"
 description = "Your AI remembers now — persistent memory for AI agents"
 license = "MIT"
@@ -39,7 +39,7 @@ winresource = "0.1"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
-rusqlite = { version = "=0.32.1", features = ["bundled"] }  # pinned: SQLite 3.46, the fleet's engine (relay, Team, kith); 3.45 shifted datetime('now','utc') by the local offset
+rusqlite = { version = "=0.43.0", features = ["bundled", "fallible_uint"] }  # pinned exactly: the bundled SQLite (3.54) is part of what is tested. Moved from 0.32.1 (SQLite 3.46) for RUSTSEC-2026-0459. The old pin kept Geniuz on the engine it shared with relay, Team and kith; relay was retired on 12 Nov 2026 and Team is research, and files were checked in both directions with a 3.46 build (5.1.4). Its other reason, 3.45 shifting datetime('now','utc'), no longer applies: every write uses db::NOW_UTC
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 uuid = { version = "1", features = ["v4", "v5"] }
@@ -71,3 +71,13 @@ base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
+
+# umask, so the files Geniuz creates are private to their owner (src/private.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+# The embed helper's pipe: who owns it and who is at the other end (src/embed_socket.rs).
+# Both are already in the build through `interprocess`, at these versions.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
+widestring = "1"

@@ -82,17 +82,17 @@ The reason is in [`src/dig.rs`](../src/dig.rs): "Semantic search is for discover
 
 ## The model
 
-Search by meaning runs locally through ONNX Runtime, using a BERT sentence model that covers more than 50 languages. It downloads once from Hugging Face, about 130 MB, into `~/.geniuz/models/`, the first time anything is embedded. That includes your first `keep`. Loading a model is slow, so a helper called `geniuz-embed` keeps it ready over a local socket and exits after five idle minutes.
+Search by meaning runs locally through ONNX Runtime, using a BERT sentence model that covers more than 50 languages. It downloads once from Hugging Face, about 130 MB, into `models/` in the data directory (`~/.geniuz/models/` by default; `GENIUZ_HOME` or `GENIUZ_MODELS_PATH` move it), the first time anything is embedded. That includes your first `keep`. The model is one fixed snapshot: Geniuz carries the SHA-256 of each file and loads nothing that doesn't match, so a changed or tampered file is set aside and fetched again. A file is hashed when it arrives and again whenever its size or time changes; in a models directory that others can write to, it is hashed on every load. Loading a model is slow, so a helper called `geniuz-embed` keeps it ready and exits after five idle minutes. The helper can be reached only by you: on Mac and Linux it listens on a socket inside a directory only you can enter, and on Windows on a pipe only you may open. Each side checks that the other is you before any text passes.
 
 If the built-in model fails to load, Geniuz tries an embedding service instead: Ollama on your own machine by default. See [Using it](using-it.md#settings).
 
 ## Your data stays on your machine
 
-When Geniuz runs, it stores all your data locally, in a file on your computer. There is no account, no cloud and no telemetry.
+When Geniuz runs, it stores all your data locally, in a file on your computer. There is no account, no cloud and no telemetry. On Mac and Linux the files in the default data directory are readable by you alone: Geniuz creates them that way, and closes a directory an earlier version left open to other users of the computer. A directory you chose yourself with `GENIUZ_HOME`, or by making `~/.geniuz` a link, is left as you set it, and `geniuz status` tells you if others can read it. On Windows your profile is private already; a directory chosen elsewhere is not checked.
 
 For completeness, Geniuz reaches the network in a few small ways, and none of them sends your memories:
 
-- **Hugging Face:** to download the model, once.
+- **Hugging Face:** to download the model, once, from one fixed revision, checked against the checksum Geniuz carries.
 - **GitHub:** when you run the install script or download a release, and when the Mac menubar checks for a newer version. That check sends the version you have and nothing from your folders. In Settings you can make it weekly, only when you ask, or turn it off.
 
 Geniuz itself sends memory text to another address in only one case: if the built-in model fails to load and `GENIUZ_EMBED_URL` points at another machine, text goes there to be embedded. By default that address is your own machine. What you recall through an AI tool goes wherever that tool sends it.

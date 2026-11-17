@@ -1,0 +1,29 @@
+name: Dependency audit
+
+# Checks both lock files against the RustSec advisory database: on every change that
+# touches dependencies, on demand, and weekly, since advisories appear without any change here.
+on:
+  push:
+    branches: [main]
+    paths: ["**/Cargo.toml", "**/Cargo.lock", ".cargo/audit.toml", ".github/workflows/audit.yml"]
+  pull_request:
+    paths: ["**/Cargo.toml", "**/Cargo.lock", ".cargo/audit.toml", ".github/workflows/audit.yml"]
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.23.0 --locked
+      - name: Engine
+        run: cargo audit
+      - name: Desktop app
+        # Run from the repository root, so the ignore list in .cargo/audit.toml applies here too.
+        run: cargo audit --file desktop/dashboard/Cargo.lock

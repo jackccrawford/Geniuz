@@ -62,7 +62,9 @@ jobs:
             librsvg2-dev libxdo-dev libssl-dev build-essential curl wget file patchelf \
             squashfs-tools desktop-file-utils zsync
 
-      - uses: dtolnay/rust-toolchain@stable
+      # The version comes from rust-toolchain.toml, the same one mars and orbit use.
+      - name: Install Rust
+        run: rustup show
 
       - name: Install ONNX Runtime 1.22 (glibc 2.27-compatible, dynamic link)
         run: |

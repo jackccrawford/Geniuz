@@ -41,8 +41,20 @@ fn watch_exec_command(template: &str, e: &geniuz::db::MemoryEntry) -> (String, V
 }
 
 fn main() {
+    // Before anything is written: files Geniuz makes belong to their owner alone.
+    geniuz::private::by_default();
+
     let cli = Cli::from_arg_matches(&Cli::build().get_matches())
         .expect("Failed to parse arguments");
+
+    // A data directory left open by an earlier version is closed. This comes after the
+    // arguments are read, so `--version` and `--help`, which answer and exit above, change
+    // nothing on disk.
+    match geniuz::private::data_dir() {
+        geniuz::private::Found::Tightened(n) => eprintln!("[geniuz] Your notes were readable by other users of this computer. They are now private to you ({} files and directories changed).", n),
+        geniuz::private::Found::StillOpen(note) => eprintln!("[geniuz] {}", note),
+        _ => {}
+    }
 
     match run(cli) {
         Ok(output) => {
@@ -1263,6 +1275,10 @@ fn run(cli: Cli) -> Result<String, String> {
                 let bytes: u64 = images.iter().map(|i| i.bytes).sum();
                 let size = if bytes < 1_048_576 { format!("{} KB", (bytes + 512) / 1024) } else { format!("{:.1} MB", bytes as f64 / 1_048_576.0) };
                 lines.push(format!("Images: {}, {}", images.len(), size));
+            }
+            // A directory the person chose is never closed for them; status is where they hear of it.
+            if let geniuz::private::Found::OpenByChoice(note) | geniuz::private::Found::StillOpen(note) = geniuz::private::data_dir() {
+                lines.push(format!("Note: {}", note));
             }
             if embeddings < memories {
                 lines.push("Run 'geniuz backfill' to make the rest searchable by meaning.".to_string());
