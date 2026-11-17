@@ -1229,8 +1229,21 @@ fn run(cli: Cli) -> Result<String, String> {
             db.set_embedding_model(geniuz::embedding::model_id())?;
 
             let uncached = db.unembedded_memories()?;
-            if uncached.is_empty() {
+            let ungisted = db.ungisted_memories()?;
+            if uncached.is_empty() && ungisted.is_empty() {
                 return Ok("All memories cached.".to_string());
+            }
+            if uncached.is_empty() {
+                // Folders from before 5.1.6: every body has its vector, the gists have none yet.
+                println!("[backfill] {} gists to embed...", ungisted.len());
+                let backend = geniuz::embedding::create_backend()?;
+                let mut done = 0;
+                for (uuid, gist) in &ungisted {
+                    if let Ok(emb) = backend.embed(&geniuz::embedding::gist_text(gist)) {
+                        if db.cache_gist_embedding(uuid, &emb).is_ok() { done += 1; }
+                    }
+                }
+                return Ok(format!("[backfill] Done. {} gists cached, {} failed.", done, ungisted.len() - done));
             }
 
             println!("[backfill] {} memories to embed...", uncached.len());
@@ -1248,6 +1261,13 @@ fn run(cli: Cli) -> Result<String, String> {
                 }
                 if (i + 1) % 50 == 0 {
                     println!("[backfill] {}/{}", i + 1, uncached.len());
+                }
+            }
+
+            // Their gists, and any older memory's, in the same run.
+            for (uuid, gist) in &db.ungisted_memories()? {
+                if let Ok(emb) = backend.embed(&geniuz::embedding::gist_text(gist)) {
+                    let _ = db.cache_gist_embedding(uuid, &emb);
                 }
             }
 

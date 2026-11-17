@@ -30,6 +30,25 @@ fn unembedded_share(limit: usize, semantic_hits: usize, unembedded_hits: usize) 
     free.max(limit / 2).min(unembedded_hits)
 }
 
+/// How two rankings are merged: each gives a memory 1 / (RANK_K + its place), and
+/// the sums are compared (reciprocal rank fusion). 60 is the customary value: large
+/// enough that being first in one list doesn't outweigh being high in both.
+const RANK_K: f32 = 60.0;
+
+/// The most time one search spends making gist vectors for older memories.
+const GIST_FILL_BUDGET: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// The words of a text as word search compares them: lower case, split at anything
+/// that isn't a letter or digit (so `belief_loop_attack` is three words), single
+/// characters dropped.
+fn words_of(text: &str) -> Vec<String> {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() > 1)
+        .map(String::from)
+        .collect()
+}
+
 /// The names Geniuz has written into a store's `product` field over time.
 pub const OWN_PRODUCTS: [&str; 3] = ["geniuz", "clawmark", "relay-for-claw"];
 
@@ -317,11 +336,14 @@ impl DatabaseManager {
         // memories table; no embedding row is created for it. Keyword search
         // (geniuz recall --keyword) still finds it. Semantic search does not
         // until someone runs `geniuz backfill` with a working backend.
-        let embedding = if let Some(b) = backend {
-            b.embed(content).ok()
-        } else {
-            crate::embedding::embed_content(content).ok()
+        // The gist gets a vector of its own: search scores a memory by whichever of
+        // the two is closer to the query. Without the body's vector there is none.
+        let gist_text = crate::embedding::gist_text(gist);
+        let (embedding, gist_embedding) = match backend {
+            Some(b) => (b.embed(content).ok(), b.embed(&gist_text).ok()),
+            None => crate::embedding::embed_pair(content, &gist_text),
         };
+        let gist_embedding = embedding.as_ref().and(gist_embedding);
 
         // No notice here: the CLI's "Kept" line and the MCP's reply both say a memory
         // was kept without an embedding, and how to fix it.
@@ -345,6 +367,13 @@ impl DatabaseManager {
             let blob = crate::embedding::embedding_to_blob(emb);
             tx.execute(
                 "INSERT INTO memory_embeddings (memory_uuid, embedding) VALUES (?1, ?2)",
+                rusqlite::params![&uuid, blob],
+            ).map_err(|e| format!("Failed to cache embedding: {}", e))?;
+        }
+        if let Some(emb) = &gist_embedding {
+            let blob = crate::embedding::embedding_to_blob(emb);
+            tx.execute(
+                "INSERT INTO memory_gist_embeddings (memory_uuid, embedding) VALUES (?1, ?2)",
                 rusqlite::params![&uuid, blob],
             ).map_err(|e| format!("Failed to cache embedding: {}", e))?;
         }
@@ -671,31 +700,70 @@ impl DatabaseManager {
     ) -> Result<Vec<MemoryEntry>, String> {
         let cached = self.get_cached_embeddings()?;
         if cached.is_empty() {
-            eprintln!("[geniuz] No embedding cache. Run: geniuz backfill");
+            // An empty folder has nothing to prepare, so there is nothing to say.
+            if self.count().unwrap_or(0) > 0 {
+                eprintln!("[geniuz] No embedding cache. Run: geniuz backfill");
+            }
             return self.keyword_search_in(query, window, limit);
         }
         let cached: Vec<_> = cached.into_iter().filter(|c| window.contains(&c.created_at)).collect();
 
-        // Every cached memory in the window is scored, not only the top
-        // `limit`: a memory that names the query's proper name may sit far
+        // One search, two readings of the query (Jack, 17 Nov 2026: "don't make the
+        // user (nor the agent) choose between semantic and key word"). By meaning:
+        // each memory scored by its body's vector or its gist's, whichever is closer.
+        // By words: which memories hold the query's words, rare words counting more.
+        // The two orders are merged by rank, so a memory high in either rises.
+        //
+        // Every cached memory in the window is scored by meaning, not only the
+        // top `limit`: a memory that names the query's proper name may sit far
         // down by meaning, and still needs its score to order the name hits.
-        let mut ranked = if cached.is_empty() {
+        let by_meaning: Vec<crate::embedding::ScoredMemory> = if cached.is_empty() {
             Vec::new()
         } else {
-            let q = match backend {
-                Some(b) => b.embed(query)?,
-                None => crate::embedding::create_backend()?.embed(query)?,
+            let made;
+            let be: &dyn crate::embedding::EmbeddingBackend = match backend {
+                Some(b) => b,
+                None => { made = crate::embedding::create_backend()?; made.as_ref() }
             };
-            let n = cached.len();
-            crate::embedding::rank_cached(&q, cached, n)
+            let q = be.embed(query)?;
+            let gists = self.gist_vectors(be);
+            let mut scored: Vec<crate::embedding::ScoredMemory> = cached.into_iter().map(|c| {
+                let body = crate::embedding::cosine_similarity(&q, &c.embedding);
+                let score = match gists.get(&c.memory_uuid) {
+                    Some(g) => body.max(crate::embedding::cosine_similarity(&q, g)),
+                    None => body,
+                };
+                crate::embedding::ScoredMemory { memory_uuid: c.memory_uuid, gist: c.gist, created_at: c.created_at, score }
+            }).collect();
+            scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+            scored
         };
         let scores: std::collections::HashMap<String, f32> =
-            ranked.iter().map(|r| (r.memory_uuid.clone(), r.score)).collect();
+            by_meaning.iter().map(|r| (r.memory_uuid.clone(), r.score)).collect();
+        let by_words = self.word_ranks(query, window).unwrap_or_default();
+
+        let mut merged: std::collections::HashMap<String, (f32, String, String)> = std::collections::HashMap::new();
+        for (rank, m) in by_meaning.into_iter().enumerate() {
+            merged.insert(m.memory_uuid, (1.0 / (RANK_K + rank as f32), m.gist, m.created_at));
+        }
+        for (rank, w) in by_words.into_iter().enumerate() {
+            let share = 1.0 / (RANK_K + rank as f32);
+            merged.entry(w.0).and_modify(|e| e.0 += share).or_insert((share, w.1, w.2));
+        }
+        let mut ranked: Vec<(String, (f32, String, String))> = merged.into_iter().collect();
+        ranked.sort_by(|a, b| {
+            b.1.0.partial_cmp(&a.1.0).unwrap_or(std::cmp::Ordering::Equal)
+                .then(scores.get(&b.0).copied().unwrap_or(-1.0)
+                    .partial_cmp(&scores.get(&a.0).copied().unwrap_or(-1.0)).unwrap_or(std::cmp::Ordering::Equal))
+                .then(b.1.2.cmp(&a.1.2))
+                .then(a.0.cmp(&b.0))
+        });
         ranked.truncate(limit);
         let mut results: Vec<MemoryEntry> = ranked
-            .into_iter().map(|r| MemoryEntry {
-                memory_uuid: r.memory_uuid, gist: r.gist, created_at: r.created_at,
-                parent_uuid: None, content: None, score: Some(r.score),
+            .into_iter().map(|(uuid, (_, gist, created_at))| MemoryEntry {
+                score: scores.get(&uuid).copied(),
+                memory_uuid: uuid, gist, created_at,
+                parent_uuid: None, content: None,
                 images: Vec::new(),
                 images_unavailable: 0,
             }).collect();
@@ -736,6 +804,8 @@ impl DatabaseManager {
         // limit 1 the share is zero and the single best cosine hit wins,
         // which is the right answer when the caller asked for exactly one.
         if let Ok(unembedded) = self.keyword_search_unembedded(query, window, limit) {
+            // One found by its words above is seated here instead, not twice.
+            results.retain(|e| !unembedded.iter().any(|u| u.memory_uuid == e.memory_uuid));
             let take = unembedded_share(limit, results.len(), unembedded.len());
             if take > 0 {
                 results.truncate(limit.saturating_sub(take));
@@ -769,6 +839,123 @@ impl DatabaseManager {
         }
 
         Ok(results)
+    }
+
+    /// Memories inside `window` that hold the query's words, best first: each as
+    /// (ID, gist, time). Scored the usual way for word search (BM25): a word counts
+    /// for more the rarer it is in this folder and the shorter the memory holding
+    /// it. A word in more than half the folder's memories says nothing and is left
+    /// out, which also drops "the" and its like in any language without a list.
+    fn word_ranks(&self, query: &str, window: &Window) -> Result<Vec<(String, String, String)>, String> {
+        let mut terms = words_of(query);
+        terms.sort();
+        terms.dedup();
+        if terms.is_empty() { return Ok(Vec::new()); }
+        let (wcond, wparams) = window.sql("created_at", 1);
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT memory_uuid,
+                    COALESCE(json_extract(payload, '$.gist'), substr(json_extract(payload, '$.content'), 1, 200)),
+                    created_at,
+                    COALESCE(json_extract(payload, '$.gist'), '') || char(10) ||
+                    COALESCE(json_extract(payload, '$.content'), '')
+               FROM memories WHERE json_valid(payload) AND {wcond}"
+        )).map_err(|e| format!("Query failed: {}", e))?;
+        let mut rows = stmt.query(rusqlite::params_from_iter(wparams.iter()))
+            .map_err(|e| format!("Query failed: {}", e))?;
+        // Per memory: its length in words, and how often it holds each query word.
+        let mut docs: Vec<(String, String, String, usize, Vec<u32>)> = Vec::new();
+        let mut held_by = vec![0usize; terms.len()];
+        let mut total_len = 0usize;
+        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+            let text: String = row.get(3).map_err(|e| e.to_string())?;
+            let mut counts = vec![0u32; terms.len()];
+            let mut len = 0usize;
+            for w in words_of(&text) {
+                len += 1;
+                if let Ok(i) = terms.binary_search(&w) { counts[i] += 1; }
+            }
+            total_len += len;
+            for (i, c) in counts.iter().enumerate() { if *c > 0 { held_by[i] += 1; } }
+            let gist: Option<String> = row.get(1).map_err(|e| e.to_string())?;
+            docs.push((
+                row.get(0).map_err(|e| e.to_string())?, gist.unwrap_or_default(),
+                row.get(2).map_err(|e| e.to_string())?, len, counts,
+            ));
+        }
+        let n = docs.len();
+        if n == 0 { return Ok(Vec::new()); }
+        let average = (total_len as f32 / n as f32).max(1.0);
+        let weight: Vec<f32> = held_by.iter().map(|&held| {
+            if held == 0 || (n >= 10 && held * 2 > n) { return 0.0; }
+            ((n as f32 - held as f32 + 0.5) / (held as f32 + 0.5) + 1.0).ln()
+        }).collect();
+        let mut hits: Vec<(f32, String, String, String)> = docs.into_iter().filter_map(|(id, gist, at, len, counts)| {
+            let mut score = 0.0f32;
+            for (i, &c) in counts.iter().enumerate() {
+                if c == 0 || weight[i] == 0.0 { continue; }
+                let tf = c as f32;
+                score += weight[i] * tf * 2.2 / (tf + 1.2 * (0.25 + 0.75 * len as f32 / average));
+            }
+            (score > 0.0).then_some((score, id, gist, at))
+        }).collect();
+        hits.sort_by(|a, b| {
+            b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal).then(b.3.cmp(&a.3)).then(a.1.cmp(&b.1))
+        });
+        Ok(hits.into_iter().map(|(_, id, gist, at)| (id, gist, at)).collect())
+    }
+
+    /// Every gist's vector, by memory ID. Memories kept before 5.1.6 have none, so
+    /// some are made here on each search, newest first, for at most a second and a
+    /// half; a large old folder is complete after a few searches, or at once with
+    /// `geniuz backfill`. Nothing here can fail a search: a folder that can't be
+    /// written to is searched with the vectors it has.
+    fn gist_vectors(&self, backend: &dyn crate::embedding::EmbeddingBackend) -> std::collections::HashMap<String, Vec<f32>> {
+        let mut out = std::collections::HashMap::new();
+        let Ok(conn) = self.conn() else { return out };
+        if let Ok(mut stmt) = conn.prepare("SELECT memory_uuid, embedding FROM memory_gist_embeddings") {
+            if let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))) {
+                for (id, blob) in rows.flatten() {
+                    if let Ok(v) = crate::embedding::blob_to_embedding(&blob) { out.insert(id, v); }
+                }
+            }
+        }
+        let missing = self.ungisted_memories().unwrap_or_default();
+        let started = std::time::Instant::now();
+        for (id, gist) in missing {
+            if started.elapsed() > GIST_FILL_BUDGET { break; }
+            let Ok(v) = backend.embed(&crate::embedding::gist_text(&gist)) else { break };
+            if self.cache_gist_embedding(&id, &v).is_err() { break; }
+            out.insert(id, v);
+        }
+        out
+    }
+
+    /// Memories that have a body vector and a gist, but no gist vector yet, newest first.
+    pub fn ungisted_memories(&self) -> Result<Vec<(String, String)>, String> {
+        let conn = self.conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT s.memory_uuid, json_extract(s.payload, '$.gist')
+               FROM memories s
+               JOIN memory_embeddings e ON e.memory_uuid = s.memory_uuid
+               LEFT JOIN memory_gist_embeddings g ON g.memory_uuid = s.memory_uuid
+              WHERE g.memory_uuid IS NULL AND json_valid(s.payload)
+                AND trim(COALESCE(json_extract(s.payload, '$.gist'), '')) <> ''
+              ORDER BY s.rowid DESC"
+        ).map_err(|e| format!("Query failed: {}", e))?;
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+            .map_err(|e| format!("Query failed: {}", e))?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
+    }
+
+    pub fn cache_gist_embedding(&self, uuid: &str, embedding: &[f32]) -> Result<(), String> {
+        let conn = self.conn()?;
+        let blob = crate::embedding::embedding_to_blob(embedding);
+        conn.execute(
+            "INSERT OR REPLACE INTO memory_gist_embeddings (memory_uuid, embedding) VALUES (?1, ?2)",
+            rusqlite::params![uuid, blob],
+        ).map_err(|e| format!("Cache write failed: {}", e))?;
+        Ok(())
     }
 
     /// Memories inside `window` holding any of `names` verbatim (case kept),
@@ -2361,13 +2548,19 @@ mod tests {
         (db, dir, r.uuid)
     }
 
+    /// By meaning alone, thirty review memories sit above last week's answer. Its
+    /// words are in the query, so the one search finds it with no window and no
+    /// mode to choose. (Before 5.1.6 this test showed the answer buried.)
     #[test]
-    fn semantic_without_a_window_buries_last_weeks_answer() {
+    fn the_querys_words_bring_up_an_answer_that_meaning_alone_buries() {
         let (db, _dir, cubic) = review_folder();
         let hits = db.semantic_search_with("third-party reviewers", &Window::all(), 5, Some(&ReviewAxis)).unwrap();
         assert_eq!(hits.len(), 5);
-        assert!(hits.iter().all(|h| !h.memory_uuid.starts_with(&cubic)), "{:?}",
+        assert!(hits.iter().any(|h| h.memory_uuid.starts_with(&cubic)), "{:?}",
             hits.iter().map(|h| &h.gist).collect::<Vec<_>>());
+        // A query sharing no words with it is ranked by meaning, as before.
+        let none = db.semantic_search_with("audits", &Window::all(), 5, Some(&ReviewAxis)).unwrap();
+        assert!(none.iter().all(|h| !h.memory_uuid.starts_with(&cubic)));
     }
 
     #[test]
@@ -2503,10 +2696,14 @@ mod tests {
         let named = db.semantic_search_with("reviewers like Cubic", &Window::all(), 5, Some(&LunchAxis)).unwrap();
         assert_eq!(named.len(), 5);
         assert!(named[0].memory_uuid.starts_with(&cubic), "{:?}", named.iter().map(|e| &e.gist).collect::<Vec<_>>());
-        assert!(named[1..].iter().all(|e| e.gist.starts_with("review")), "verbatim: the lowercase 'cubic box' is not a name hit");
+        assert!(named[1..].iter().all(|e| !e.memory_uuid.starts_with(&cubic)));
+        assert_ne!(named[0].gist, "box", "verbatim: the lowercase 'cubic box' is not a name hit, so it is never first");
 
+        // In lowercase it is a word like any other: both memories holding it are
+        // found by the word, neither is put first as a name.
         let plain = db.semantic_search_with("reviewers like cubic", &Window::all(), 5, Some(&LunchAxis)).unwrap();
-        assert!(!plain.iter().any(|e| e.memory_uuid.starts_with(&cubic)), "lowercase ranks by meaning only");
+        assert!(plain.iter().any(|e| e.memory_uuid.starts_with(&cubic)));
+        assert!(plain.iter().any(|e| e.gist == "box"));
 
         let quoted = db.semantic_search_with("reviewers like \"Cubic\"", &Window::all(), 5, Some(&LunchAxis)).unwrap();
         assert!(quoted[0].memory_uuid.starts_with(&cubic));
@@ -2649,5 +2846,74 @@ mod tests {
         insert(&db, "memory two", None, None);
         let uncached = db.unembedded_memories().unwrap();
         assert_eq!(uncached.len(), 0);
+    }
+
+    /// A long body about many things, and a gist that says what the memory is.
+    /// Embeds a text by whether it says "pricing".
+    struct PricingAxis;
+    impl crate::embedding::EmbeddingBackend for PricingAxis {
+        fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
+            let mut v = vec![0.0; MOCK_DIM];
+            if text.contains("pricing") { v[1] = 1.0 } else { v[0] = 1.0 }
+            Ok(v)
+        }
+        fn name(&self) -> &str { "pricing-axis" }
+    }
+
+    #[test]
+    fn a_memory_is_found_by_its_gist_when_its_body_says_something_else() {
+        let (db, _dir) = fresh_db();
+        for i in 0..12 {
+            db.keep_with_backend(&format!("minutes of meeting {i}"), &format!("minutes {i}"), None, Some(&PricingAxis)).unwrap();
+        }
+        // The gist is stored with underscores; the model is given spaces.
+        let it = db.keep_with_backend("long notes that wander through many subjects", "decision: annual_pricing",
+            None, Some(&PricingAxis)).unwrap().uuid;
+        struct Asks;
+        impl crate::embedding::EmbeddingBackend for Asks {
+            fn embed(&self, text: &str) -> Result<Vec<f32>, String> {
+                // The query is about pricing though it shares no word with the gist.
+                if text == "what we charge" { let mut v = vec![0.0; MOCK_DIM]; v[1] = 1.0; return Ok(v); }
+                PricingAxis.embed(text)
+            }
+            fn name(&self) -> &str { "asks" }
+        }
+        let hits = db.semantic_search_with("what we charge", &Window::all(), 3, Some(&Asks)).unwrap();
+        assert!(hits[0].memory_uuid.starts_with(&it), "{:?}", hits.iter().map(|h| &h.gist).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn an_older_memory_gains_its_gist_vector_when_the_folder_is_searched() {
+        let (db, _dir) = fresh_db();
+        let it = db.keep_with_backend("body", "decision: annual_pricing", None, Some(&PricingAxis)).unwrap().uuid;
+        // As a folder from before 5.1.6: body vectors only.
+        db.conn().unwrap().execute("DELETE FROM memory_gist_embeddings", []).unwrap();
+        assert_eq!(db.ungisted_memories().unwrap().len(), 1);
+        db.semantic_search_with("anything", &Window::all(), 3, Some(&PricingAxis)).unwrap();
+        assert!(db.ungisted_memories().unwrap().is_empty());
+        let n: i64 = db.conn().unwrap().query_row(
+            "SELECT count(*) FROM memory_gist_embeddings WHERE memory_uuid LIKE ?1", [format!("{it}%")], |r| r.get(0)).unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn words_split_at_underscores_and_rare_words_count_for_more() {
+        assert_eq!(words_of("belief_loop_attack: A survived"), ["belief", "loop", "attack", "survived"]);
+        let (db, _dir) = fresh_db();
+        for i in 0..20 {
+            db.keep_with_backend(&format!("the weekly report {i}"), &format!("report {i}"), None, Some(&MockBackend)).unwrap();
+        }
+        let rare = db.keep_with_backend("the tailscale login expired", "ops", None, Some(&MockBackend)).unwrap().uuid;
+        // "the" and "report" are in more than half the folder and say nothing.
+        let hits = db.word_ranks("the report about tailscale", &Window::all()).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].0.starts_with(&rare));
+        assert!(db.word_ranks("zebra", &Window::all()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_empty_folder_is_searched_without_a_hint_to_backfill() {
+        let (db, _dir) = fresh_db();
+        assert!(db.semantic_search_with("anything", &Window::all(), 5, Some(&MockBackend)).unwrap().is_empty());
     }
 }

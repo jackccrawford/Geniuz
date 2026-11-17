@@ -544,6 +544,24 @@ pub fn embed_content(text: &str) -> Result<Vec<f32>, String> {
     backend.embed(text)
 }
 
+/// A gist as the search model should read it. Many gists are written
+/// `like_this: with_underscores`, which the model reads as one unknown word.
+pub fn gist_text(gist: &str) -> String {
+    gist.replace('_', " ")
+}
+
+/// Embed a memory's body and its gist with one model load: the helper if it is
+/// running, else the model loaded here once for both.
+pub fn embed_pair(body: &str, gist: &str) -> (Option<Vec<f32>>, Option<Vec<f32>>) {
+    if let Some(b) = crate::embed_client::embed_via_socket(body) {
+        return (Some(b), crate::embed_client::embed_via_socket(gist));
+    }
+    match create_backend() {
+        Ok(be) => (be.embed(body).ok(), be.embed(gist).ok()),
+        Err(_) => (None, None),
+    }
+}
+
 pub fn model_id() -> &'static str { "paraphrase-multilingual-MiniLM-L12-v2-qint8" }
 
 pub fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {

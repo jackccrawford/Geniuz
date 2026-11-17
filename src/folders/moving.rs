@@ -150,7 +150,7 @@ pub(super) fn fenced(conn: &Connection) -> bool {
 /// close off only part of it, and the retired original could still take writes.
 pub(super) fn fence_sql(conn: &Connection) -> Result<String, String> {
     let mut sql = String::new();
-    for table in ["memories", "memory_embeddings", "embedding_meta", "_meta", "images", "memory_images"] {
+    for table in ["memories", "memory_embeddings", "memory_gist_embeddings", "embedding_meta", "_meta", "images", "memory_images"] {
         let exists: i64 = conn
             .query_row("SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = ?1", [table], |r| r.get(0))
             .map_err(|e| format!("Couldn't read the folder's tables: {}", e))?;
