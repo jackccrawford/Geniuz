@@ -57,9 +57,14 @@ const MAX_SOCKET_PATH: usize = 100;
 /// helpers side by side), but only a bare file name: it can never point elsewhere.
 fn file_name() -> String {
     match std::env::var("GENIUZ_EMBED_SOCKET") {
-        Ok(name) if !name.is_empty() && !name.contains(['/', '\\', '\0']) && name != "." && name != ".." => name,
+        Ok(name) if valid_file_name(&name) => name,
         _ => FILE_NAME.to_string(),
     }
+}
+
+/// A bare file name: not empty, no separators, no NUL, and not a way up or out.
+fn valid_file_name(name: &str) -> bool {
+    !name.is_empty() && !name.contains(['/', '\\', '\0']) && name != "." && name != ".."
 }
 
 #[cfg(windows)]
@@ -399,7 +404,9 @@ pub fn listen() -> Result<Listener, String> {
         use std::os::unix::fs::PermissionsExt;
         let path = place::path().ok_or("no private place for the socket (the path may be too long)")?;
         // One helper at a time decides: look for a live one, clear a dead one's socket, bind.
-        let _lock = place::start_lock(&path);
+        // Without the lock two helpers could each find nobody listening, and one would
+        // remove the other's socket: so no lock, no helper.
+        let _lock = place::start_lock(&path).ok_or("couldn't take the start lock in the socket's directory")?;
         if connect().is_some() {
             return Err(ALREADY_RUNNING.to_string());
         }
@@ -497,8 +504,8 @@ mod tests {
 
     #[test]
     fn the_name_can_be_chosen_but_never_a_path() {
-        // file_name() reads the environment, which tests share, so the rule is checked directly.
-        let ok = |name: &str| !name.is_empty() && !name.contains(['/', '\\', '\0']) && name != "." && name != "..";
+        // file_name() reads the environment, which tests share; its rule is the function below.
+        let ok = super::valid_file_name;
         assert!(ok("limen-test.sock"));
         for bad in ["/tmp/evil.sock", "../evil.sock", "a/b", r"a\b", "..", ".", "", "a\0b"] {
             assert!(!ok(bad), "{:?} must not be accepted", bad);

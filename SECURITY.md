@@ -11,8 +11,8 @@ risk until a fix is out.
 
 ## What Geniuz does and doesn't do
 
-- Your notes are stored in files on your own computer, under `~/.geniuz`. There is no
-  account and no telemetry.
+- Your notes are stored in files on your own computer, under `~/.geniuz` unless
+  `GENIUZ_HOME` names another directory. There is no account and no telemetry.
 - Geniuz opens no network port. The AI connection (MCP) runs over standard input and
   output.
 - It contacts GitHub to check for updates, and Hugging Face once to fetch the search
@@ -31,5 +31,5 @@ risk until a fix is out.
 
 ## Dependencies
 
-`cargo audit` runs on every change and weekly. Any advisory that is ever set aside is listed,
+`cargo audit` runs on every change to the dependencies and weekly. Any advisory that is ever set aside is listed,
 with the reason, in `.cargo/audit.toml`.

@@ -1263,7 +1263,11 @@ pub fn run() {
     // As in the command-line program: what Geniuz writes is its owner's alone, and a data
     // directory left open by an earlier version is closed.
     geniuz::private::by_default();
-    let _ = geniuz::private::data_dir();
+    match geniuz::private::data_dir() {
+        geniuz::private::Found::Tightened(n) => eprintln!("[geniuz] Your notes were readable by other users of this computer. They are now private to you ({} files and directories changed).", n),
+        geniuz::private::Found::StillOpen(note) => eprintln!("[geniuz] {}", note),
+        _ => {}
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Re-launch attempt: focus the existing window instead of

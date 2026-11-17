@@ -19,6 +19,23 @@ const EMBEDDING_BYTES: usize = 384 * 4;
 /// serves one caller at a time, so a stalled one must not hold it.
 const CALLER_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Fill `buf` from the caller, giving up when `deadline` passes.
+fn read_by(stream: &mut interprocess::local_socket::Stream, buf: &mut [u8], deadline: Instant) -> bool {
+    let mut filled = 0;
+    while filled < buf.len() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        match stream.read(&mut buf[filled..]) {
+            Ok(0) => return false,
+            Ok(n) => filled += n,
+            Err(ref e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return false,
+        }
+    }
+    true
+}
+
 fn main() {
     geniuz::private::by_default();
     let idle_secs = std::env::var("GENIUZ_EMBED_IDLE")
@@ -81,13 +98,23 @@ fn main() {
                 // A connection can inherit the listener's non-blocking mode (it does on macOS),
                 // which would drop a caller whose text arrives in more than one piece. Each
                 // caller is read in blocking mode, with a limit on how long it may take.
-                let _ = stream.set_nonblocking(false);
-                let _ = stream.set_recv_timeout(Some(CALLER_TIMEOUT));
-                let _ = stream.set_send_timeout(Some(CALLER_TIMEOUT));
+                let limited = stream.set_nonblocking(false).is_ok()
+                    && stream.set_recv_timeout(Some(CALLER_TIMEOUT)).is_ok()
+                    && stream.set_send_timeout(Some(CALLER_TIMEOUT)).is_ok();
+                // On Mac and Linux a caller that can't be given a limit is not served: it
+                // could hold the helper. (Windows pipes may not take these limits; there the
+                // pipe admits only this user, who would only be delaying themselves.)
+                if cfg!(unix) && !limited {
+                    eprintln!("[geniuz-embed] Couldn't limit a caller's time; not served.");
+                    continue;
+                }
+                // The limit above is per read. This one is for the whole request, so a
+                // caller sending a byte at a time can't hold the helper either.
+                let deadline = Instant::now() + CALLER_TIMEOUT * 3;
 
                 // Read u32 LE length prefix
                 let mut len_buf = [0u8; 4];
-                if stream.read_exact(&mut len_buf).is_err() { continue; }
+                if !read_by(&mut stream, &mut len_buf, deadline) { continue; }
                 let text_len = u32::from_le_bytes(len_buf) as usize;
 
                 if text_len == 0 || text_len > 1_000_000 {
@@ -97,7 +124,7 @@ fn main() {
 
                 // Read text
                 let mut text_buf = vec![0u8; text_len];
-                if stream.read_exact(&mut text_buf).is_err() { continue; }
+                if !read_by(&mut stream, &mut text_buf, deadline) { continue; }
 
                 let text = match String::from_utf8(text_buf) {
                     Ok(t) => t,

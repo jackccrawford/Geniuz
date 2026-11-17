@@ -211,7 +211,7 @@ These variables are for unusual setups:
 |---|---|
 | `GENIUZ_DB` | Use one specific memory file, for the CLI and MCP |
 | `GENIUZ_EMBED_SPAWN`, `GENIUZ_EMBED_IDLE` | Control the embed helper |
-| `GENIUZ_EMBED_SOCKET` | A file name for the embed helper's socket, inside Geniuz's own private directory. It cannot name a path |
+| `GENIUZ_EMBED_SOCKET` | A name for the embed helper's socket. On Mac and Linux it is a file inside Geniuz's own private directory; on Windows it is part of a pipe name that only you may open. It cannot name a path |
 | `GENIUZ_EMBED_URL`, `GENIUZ_EMBED_MODEL` | The embedding service to try if the built-in model fails to load |
 | `GENIUZ_HOME` | Where Geniuz keeps its files |
 | `GENIUZ_MODELS_PATH` | Where the model is stored |

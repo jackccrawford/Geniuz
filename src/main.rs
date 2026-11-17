@@ -50,8 +50,10 @@ fn main() {
     // A data directory left open by an earlier version is closed. This comes after the
     // arguments are read, so `--version` and `--help`, which answer and exit above, change
     // nothing on disk.
-    if let geniuz::private::Found::Tightened(n) = geniuz::private::data_dir() {
-        eprintln!("[geniuz] Your notes were readable by other users of this computer. They are now private to you ({} files and directories changed).", n);
+    match geniuz::private::data_dir() {
+        geniuz::private::Found::Tightened(n) => eprintln!("[geniuz] Your notes were readable by other users of this computer. They are now private to you ({} files and directories changed).", n),
+        geniuz::private::Found::StillOpen(note) => eprintln!("[geniuz] {}", note),
+        _ => {}
     }
 
     match run(cli) {
@@ -1275,7 +1277,7 @@ fn run(cli: Cli) -> Result<String, String> {
                 lines.push(format!("Images: {}, {}", images.len(), size));
             }
             // A directory the person chose is never closed for them; status is where they hear of it.
-            if let geniuz::private::Found::OpenByChoice(note) = geniuz::private::data_dir() {
+            if let geniuz::private::Found::OpenByChoice(note) | geniuz::private::Found::StillOpen(note) = geniuz::private::data_dir() {
                 lines.push(format!("Note: {}", note));
             }
             if embeddings < memories {

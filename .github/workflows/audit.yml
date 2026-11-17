@@ -25,5 +25,5 @@ jobs:
       - name: Engine
         run: cargo audit
       - name: Desktop app
-        # The ignore list lives at the repository root; point this run at it.
+        # Run from the repository root, so the ignore list in .cargo/audit.toml applies here too.
         run: cargo audit --file desktop/dashboard/Cargo.lock

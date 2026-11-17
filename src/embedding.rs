@@ -203,21 +203,50 @@ fn stamp(path: &Path) -> Option<String> {
     Some(format!("{} {}.{:09}", meta.len(), modified.as_secs(), modified.subsec_nanos()))
 }
 
+/// Whether only this user can put files in `dir`. Elsewhere, a note that a file was
+/// checked is worth nothing: whoever can swap the file can also restore its size and time.
+fn only_we_can_write(dir: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        matches!(std::fs::metadata(dir), Ok(m) if m.uid() == unsafe { libc::geteuid() } && m.permissions().mode() & 0o022 == 0)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+        true
+    }
+}
+
+/// Write the note that a file was checked, never through a link someone left in its place.
+fn write_checked_note(note: &Path, text: &str) {
+    use std::io::Write;
+    let _ = std::fs::remove_file(note);
+    if let Ok(mut f) = std::fs::OpenOptions::new().write(true).create_new(true).open(note) {
+        let _ = f.write_all(text.as_bytes());
+    }
+}
+
 /// Whether the file at `path` is the pinned one. Hashing 118 MB on every load would
 /// slow each keep, so a match is written down with the file's size and time, and the
-/// file is hashed again only when those change. (In a directory only its owner can
-/// write, anything able to swap the file could as easily patch the program.)
+/// file is hashed again only when those change. That shortcut is taken only in a
+/// directory nobody else can write to; anywhere else the file is hashed every time.
+/// (Where only its owner can write, anything able to swap the file could as easily
+/// patch the program.)
 pub(crate) fn is_pinned(path: &Path, pinned: Pinned) -> Result<bool, String> {
     let now = stamp(path).ok_or_else(|| format!("couldn't read {}", path.display()))?;
     let note = checked_note(path);
     let expected = format!("{} {}", pinned.sha256, now);
-    if std::fs::read_to_string(&note).map(|s| s.trim() == expected).unwrap_or(false) {
+    let trust_note = path.parent().map(only_we_can_write).unwrap_or(false);
+    if trust_note && std::fs::read_to_string(&note).map(|s| s.trim() == expected).unwrap_or(false) {
         return Ok(true);
     }
     let matches = std::fs::metadata(path).map(|m| m.len() == pinned.bytes).unwrap_or(false)
         && sha256_file(path)? == pinned.sha256;
     if matches {
-        let _ = std::fs::write(&note, format!("{}\n", expected));
+        if trust_note {
+            write_checked_note(&note, &format!("{}\n", expected));
+        }
     } else {
         let _ = std::fs::remove_file(&note);
     }
@@ -250,7 +279,16 @@ pub(crate) fn ensure_verified(path: &Path, pinned: Pinned, what: &str, base_url:
 }
 
 /// Fetch `url` to `dest`, and put it in place only if it is exactly the pinned file.
+/// Whatever goes wrong, no partial download is left behind.
 fn download_verified(url: &str, dest: &Path, pinned: Pinned) -> Result<(), String> {
+    let result = download_verified_inner(url, dest, pinned);
+    if result.is_err() {
+        let _ = std::fs::remove_file(dest.with_extension("tmp"));
+    }
+    result
+}
+
+fn download_verified_inner(url: &str, dest: &Path, pinned: Pinned) -> Result<(), String> {
     use sha2::{Digest, Sha256};
     use std::io::{Read, Write};
     let agent = ureq::Agent::config_builder()
@@ -291,7 +329,7 @@ fn download_verified(url: &str, dest: &Path, pinned: Pinned) -> Result<(), Strin
     std::fs::rename(&tmp_path, dest)
         .map_err(|e| format!("Failed to finalize download: {}", e))?;
     if let Some(now) = stamp(dest) {
-        let _ = std::fs::write(checked_note(dest), format!("{} {}\n", pinned.sha256, now));
+        write_checked_note(&checked_note(dest), &format!("{} {}\n", pinned.sha256, now));
     }
     Ok(())
 }

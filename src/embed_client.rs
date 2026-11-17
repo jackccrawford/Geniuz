@@ -72,7 +72,8 @@ fn spawn_server() {
 
     // Wait for the helper to start listening (up to 5 seconds), but not for one that
     // has already given up: a helper that can't have its socket (someone else holds the
-    // name, say) exits at once, and waiting out the five seconds would slow every keep.
+    // name, say) exits once it has loaded the model and found that out, and waiting out
+    // the rest of the five seconds would slow every keep.
     for _ in 0..50 {
         if crate::embed_socket::connect().is_some() {
             return;

@@ -22,8 +22,12 @@ pub enum Found {
     /// It was open to others and has been closed; this many files and directories changed.
     Tightened(usize),
     /// It is open to others and was left that way, because the person chose this
-    /// directory with GENIUZ_HOME and may share it on purpose. The message says so.
+    /// directory (with GENIUZ_HOME, or by making the default one a link to somewhere
+    /// else) and may share it on purpose. The message says so.
     OpenByChoice(String),
+    /// It is open to others and could not be closed (it isn't ours to change, or the
+    /// system refused). The message says so; Geniuz never reports it as private.
+    StillOpen(String),
 }
 
 /// Files and directories this program creates from here on belong to their owner alone.
@@ -45,18 +49,36 @@ pub fn data_dir() -> Found {
 #[cfg(unix)]
 fn check(dir: &Path, chosen: bool) -> Found {
     use std::os::unix::fs::PermissionsExt;
-    // lstat, not stat: a link put where the directory should be is not followed.
+    let open = |m: &std::fs::Metadata| m.is_dir() && m.permissions().mode() & 0o077 != 0;
+    let by_choice = |d: &Path| Found::OpenByChoice(format!(
+        "{} can be read by other users of this computer. Geniuz leaves a directory you chose as it is; `chmod 700` closes it.",
+        d.display()
+    ));
+    // lstat first: a link is never changed through. But the notes do live where it
+    // points, so that place is looked at, and reported if it is open. Someone who made
+    // the directory a link chose where their notes are kept.
     let Ok(meta) = std::fs::symlink_metadata(dir) else { return Found::Private };
-    if !meta.is_dir() || meta.permissions().mode() & 0o077 == 0 {
+    if meta.file_type().is_symlink() {
+        return match (std::fs::metadata(dir), std::fs::canonicalize(dir)) {
+            (Ok(target), Ok(real)) if open(&target) => by_choice(&real),
+            _ => Found::Private,
+        };
+    }
+    if !open(&meta) {
         return Found::Private;
     }
     if chosen {
-        return Found::OpenByChoice(format!(
-            "{} can be read by other users of this computer. Geniuz leaves a directory you chose as it is; `chmod 700` closes it.",
-            dir.display()
-        ));
+        return by_choice(dir);
     }
-    Found::Tightened(tighten(dir))
+    let changed = tighten(dir);
+    // Said to be private only if it now is: the directory may not be ours to change.
+    match std::fs::symlink_metadata(dir) {
+        Ok(m) if !open(&m) => Found::Tightened(changed),
+        _ => Found::StillOpen(format!(
+            "{} can be read by other users of this computer, and Geniuz could not close it. `chmod 700` on it, by its owner, closes it.",
+            dir.display()
+        )),
+    }
 }
 
 #[cfg(not(unix))]
@@ -151,6 +173,23 @@ mod tests {
         check(&dir, false);
         assert_eq!(mode(&outside), 0o644, "a file outside the directory is not touched through a link");
         let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_link_to_an_open_directory_is_reported_not_called_private() {
+        let dir = tree("linked");
+        let link = dir.with_extension("as-link");
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&dir, &link).unwrap();
+        match check(&link, false) {
+            Found::OpenByChoice(msg) => assert!(msg.contains("chmod 700"), "{}", msg),
+            other => panic!("expected OpenByChoice, got {:?}", other),
+        }
+        assert_eq!(mode(&dir), 0o755, "nothing is changed through a link");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(check(&link, false), Found::Private, "a link to a closed directory is fine");
+        let _ = std::fs::remove_file(&link);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
