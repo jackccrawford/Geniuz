@@ -3,22 +3,51 @@
 //! Built-in ONNX Runtime with paraphrase-multilingual-MiniLM-L12-v2.
 //! 384-dim, INT8 quantized, auto-downloads on first use.
 //! Falls back to ollama if ONNX fails.
+//!
+//! The model is a snapshot: one fixed revision, never followed upstream (Jack, 16 Nov
+//! 2026: "we snapshot the onnx. no need to update it. we find a way to validate it").
+//! Geniuz carries the SHA-256 of each file and loads nothing that doesn't match, so the
+//! signed program vouches for the model it runs.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use ort::value::Tensor;
 
-const HF_BASE_URL: &str = "https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/main";
+/// The snapshot's revision on Hugging Face. A revision is a commit: what it names
+/// cannot change, unlike `main`.
+const HF_BASE_URL: &str = "https://huggingface.co/sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2/resolve/e8f8c211226b894fcb81acc59f3b34ba3efd5f42";
 const EMBEDDING_DIM: usize = 384;
 
-fn onnx_model_filename() -> &'static str {
+/// One file of the snapshot: where it is fetched from, and what it must be.
+#[derive(Clone, Copy)]
+pub(crate) struct Pinned {
+    pub remote: &'static str,
+    pub sha256: &'static str,
+    pub bytes: u64,
+}
+
+fn pinned_model() -> Pinned {
     if cfg!(target_arch = "aarch64") {
-        "onnx/model_qint8_arm64.onnx"
+        Pinned {
+            remote: "onnx/model_qint8_arm64.onnx",
+            sha256: "783fea82d71a58179b830a4dbd2d58447e640609e98eedf9ffa12622d375a672",
+            bytes: 118_412_398,
+        }
     } else {
-        "onnx/model_quint8_avx2.onnx"
+        Pinned {
+            remote: "onnx/model_quint8_avx2.onnx",
+            sha256: "98a01d88b7de996cdea58c32ca71208c09968d143798814b2ea09d3439dc334f",
+            bytes: 118_453_870,
+        }
     }
 }
+
+const PINNED_TOKENIZER: Pinned = Pinned {
+    remote: "tokenizer.json",
+    sha256: "2c3387be76557bd40970cec13153b3bbf80407865484b209e655e5e4729076b8",
+    bytes: 9_081_518,
+};
 
 fn default_models_dir() -> PathBuf {
     crate::data_dir().join("models")
@@ -53,18 +82,8 @@ impl BuiltinBackend {
         // Said once, the first time the model arrives; every later load is quiet, so a
         // keep prints only what it kept.
         let first_time = !model_path.exists();
-        if first_time {
-            let url = format!("{}/{}", HF_BASE_URL, onnx_model_filename());
-            eprintln!("[geniuz] Downloading model from {}...", url);
-            download_file(&url, &model_path)?;
-            eprintln!("[geniuz] Model saved to {}", model_path.display());
-        }
-
-        if !tokenizer_path.exists() {
-            let url = format!("{}/tokenizer.json", HF_BASE_URL);
-            eprintln!("[geniuz] Downloading tokenizer...");
-            download_file(&url, &tokenizer_path)?;
-        }
+        ensure_verified(&model_path, pinned_model(), "model", HF_BASE_URL)?;
+        ensure_verified(&tokenizer_path, PINNED_TOKENIZER, "tokenizer", HF_BASE_URL)?;
 
         let session = ort::session::Session::builder()
             .map_err(|e| format!("Failed to create ONNX session builder: {}", e))?
@@ -154,7 +173,86 @@ impl EmbeddingBackend for BuiltinBackend {
     fn name(&self) -> &str { "builtin" }
 }
 
-fn download_file(url: &str, dest: &Path) -> Result<(), String> {
+/// SHA-256 of a file, as lowercase hex.
+pub(crate) fn sha256_file(path: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).map_err(|e| format!("couldn't open {}: {}", path.display(), e))?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    loop {
+        let n = file.read(&mut buf).map_err(|e| format!("couldn't read {}: {}", path.display(), e))?;
+        if n == 0 { break; }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+/// Where the note that a file was checked is kept: beside the file.
+fn checked_note(path: &Path) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(".verified");
+    path.with_file_name(name)
+}
+
+/// The file's size and modification time, as written in the note: a change in either
+/// means the file is hashed again.
+fn stamp(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    let modified = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?;
+    Some(format!("{} {}.{:09}", meta.len(), modified.as_secs(), modified.subsec_nanos()))
+}
+
+/// Whether the file at `path` is the pinned one. Hashing 118 MB on every load would
+/// slow each keep, so a match is written down with the file's size and time, and the
+/// file is hashed again only when those change. (In a directory only its owner can
+/// write, anything able to swap the file could as easily patch the program.)
+pub(crate) fn is_pinned(path: &Path, pinned: Pinned) -> Result<bool, String> {
+    let now = stamp(path).ok_or_else(|| format!("couldn't read {}", path.display()))?;
+    let note = checked_note(path);
+    let expected = format!("{} {}", pinned.sha256, now);
+    if std::fs::read_to_string(&note).map(|s| s.trim() == expected).unwrap_or(false) {
+        return Ok(true);
+    }
+    let matches = std::fs::metadata(path).map(|m| m.len() == pinned.bytes).unwrap_or(false)
+        && sha256_file(path)? == pinned.sha256;
+    if matches {
+        let _ = std::fs::write(&note, format!("{}\n", expected));
+    } else {
+        let _ = std::fs::remove_file(&note);
+    }
+    Ok(matches)
+}
+
+/// Make sure `path` holds the pinned file: check the one that is there, or fetch it.
+/// A file that doesn't match is never loaded. It is set aside, not deleted, and the
+/// pinned one is fetched in its place.
+pub(crate) fn ensure_verified(path: &Path, pinned: Pinned, what: &str, base_url: &str) -> Result<(), String> {
+    if path.exists() {
+        if is_pinned(path, pinned)? {
+            return Ok(());
+        }
+        let aside = path.with_extension(format!("unverified-{}", chrono::Utc::now().format("%Y%m%dT%H%M%SZ")));
+        std::fs::rename(path, &aside).map_err(|e| format!(
+            "The search {} at {} is not the one Geniuz ships with, and it couldn't be set aside ({}). It was not loaded.",
+            what, path.display(), e
+        ))?;
+        eprintln!(
+            "[geniuz] The search {} at {} was not the one Geniuz ships with. It was not loaded, and is kept as {}.",
+            what, path.display(), aside.display()
+        );
+    }
+    let url = format!("{}/{}", base_url, pinned.remote);
+    eprintln!("[geniuz] Downloading the search {} from {}...", what, url);
+    download_verified(&url, path, pinned)?;
+    eprintln!("[geniuz] Saved and checked: {}", path.display());
+    Ok(())
+}
+
+/// Fetch `url` to `dest`, and put it in place only if it is exactly the pinned file.
+fn download_verified(url: &str, dest: &Path, pinned: Pinned) -> Result<(), String> {
+    use sha2::{Digest, Sha256};
+    use std::io::{Read, Write};
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(std::time::Duration::from_secs(300)))
         .build()
@@ -164,10 +262,37 @@ fn download_file(url: &str, dest: &Path) -> Result<(), String> {
     let tmp_path = dest.with_extension("tmp");
     let mut file = std::fs::File::create(&tmp_path)
         .map_err(|e| format!("Failed to create temp file: {}", e))?;
-    std::io::copy(&mut response.body_mut().as_reader(), &mut file)
-        .map_err(|e| format!("Failed to write model file: {}", e))?;
+    let mut reader = response.body_mut().as_reader();
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 16];
+    let mut total: u64 = 0;
+    loop {
+        let n = reader.read(&mut buf).map_err(|e| format!("Download failed partway: {}", e))?;
+        if n == 0 { break; }
+        total += n as u64;
+        // A file larger than the pinned one is already wrong; don't fill the disk finding out.
+        if total > pinned.bytes {
+            drop(file);
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(format!("The download from {} is larger than the file Geniuz expects. It was discarded.", host_of(url)));
+        }
+        hasher.update(&buf[..n]);
+        file.write_all(&buf[..n]).map_err(|e| format!("Failed to write model file: {}", e))?;
+    }
+    drop(file);
+    let got: String = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect();
+    if got != pinned.sha256 {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(format!(
+            "The download from {} is not the file Geniuz expects (its checksum differs). It was discarded.",
+            host_of(url)
+        ));
+    }
     std::fs::rename(&tmp_path, dest)
         .map_err(|e| format!("Failed to finalize download: {}", e))?;
+    if let Some(now) = stamp(dest) {
+        let _ = std::fs::write(checked_note(dest), format!("{} {}\n", pinned.sha256, now));
+    }
     Ok(())
 }
 
@@ -254,6 +379,64 @@ pub fn create_backend() -> Result<Box<dyn EmbeddingBackend>, String> {
 
 #[cfg(test)]
 mod host_tests {
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("geniuz-pin-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    // "hello\n", so the expected value can be checked with `printf 'hello\n' | shasum -a 256`.
+    const HELLO: super::Pinned = super::Pinned {
+        remote: "hello.txt",
+        sha256: "5891b5b522d5df086d0ff0b110fbd9d21bb4fc7163af34d08286a2e846f6be03",
+        bytes: 6,
+    };
+
+    #[test]
+    fn a_file_is_pinned_only_while_it_is_exactly_the_snapshot() {
+        let dir = scratch("exact");
+        let file = dir.join("hello.txt");
+        std::fs::write(&file, "hello\n").unwrap();
+        assert_eq!(super::sha256_file(&file).unwrap(), HELLO.sha256);
+        assert!(super::is_pinned(&file, HELLO).unwrap());
+        assert!(dir.join("hello.txt.verified").exists(), "a match is written down");
+        assert!(super::is_pinned(&file, HELLO).unwrap(), "and trusted again while size and time hold");
+
+        // Same length, different bytes: the note must not vouch for it.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(&file, "jello\n").unwrap();
+        assert!(!super::is_pinned(&file, HELLO).unwrap());
+        assert!(!dir.join("hello.txt.verified").exists(), "a mismatch clears the note");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_note_copied_from_elsewhere_does_not_vouch_for_a_wrong_file() {
+        let dir = scratch("forged");
+        let file = dir.join("hello.txt");
+        std::fs::write(&file, "nope!\n").unwrap();
+        // A note naming the right hash but the wrong size and time is ignored.
+        std::fs::write(dir.join("hello.txt.verified"), format!("{} 6 1.000000000\n", HELLO.sha256)).unwrap();
+        assert!(!super::is_pinned(&file, HELLO).unwrap());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_wrong_file_is_set_aside_and_never_left_in_place() {
+        let dir = scratch("aside");
+        let file = dir.join("hello.txt");
+        std::fs::write(&file, "not the snapshot").unwrap();
+        // Nothing listens on port 9, so the fetch fails: the point is what happened to the file.
+        let err = super::ensure_verified(&file, HELLO, "model", "http://127.0.0.1:9").unwrap_err();
+        assert!(err.contains("Download failed"), "{}", err);
+        assert!(!file.exists(), "the wrong file is not left where it would be loaded");
+        let kept: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains("unverified-")).collect();
+        assert_eq!(kept.len(), 1, "it is kept, not deleted");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn an_address_is_named_by_its_host_only() {
         assert_eq!(super::host_of("http://user:secret@gpu.lan:11434/api/tags?token=x"), "http://gpu.lan:11434");
