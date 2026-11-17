@@ -99,8 +99,12 @@ fn tighten(dir: &Path) -> usize {
         if meta.file_type().is_symlink() {
             continue;
         }
-        let want = if meta.is_dir() { 0o700 } else { 0o600 };
-        if meta.permissions().mode() & 0o777 != want
+        // Close a file to other users without changing what its owner may do. The
+        // install script puts the program itself in `bin` here; setting every file to
+        // 600 took away its execute bit, and the next run was refused (5.1.5).
+        let now = meta.permissions().mode() & 0o777;
+        let want = if meta.is_dir() { 0o700 } else { now & 0o700 };
+        if now != want
             && std::fs::set_permissions(&path, std::fs::Permissions::from_mode(want)).is_ok()
         {
             changed += 1;
@@ -196,5 +200,21 @@ mod tests {
     #[test]
     fn a_directory_that_is_not_there_yet_is_fine() {
         assert_eq!(check(Path::new("/nonexistent/geniuz-private-test"), false), Found::Private);
+    }
+
+    #[test]
+    fn a_program_in_the_data_folder_stays_runnable() {
+        let dir = tree("program");
+        std::fs::create_dir_all(dir.join("bin")).unwrap();
+        std::fs::write(dir.join("bin/geniuz"), "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(dir.join("bin"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(dir.join("bin/geniuz"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        tighten(&dir);
+        // Closed to others, still the owner's to run.
+        assert_eq!(mode(&dir.join("bin")), 0o700);
+        assert_eq!(mode(&dir.join("bin/geniuz")), 0o700);
+        // A note file loses nothing it had and gains nothing.
+        assert_eq!(mode(&dir.join("settings.json")), 0o600);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
