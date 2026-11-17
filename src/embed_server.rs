@@ -9,36 +9,31 @@
 use std::io::{Read, Write};
 use std::time::{Duration, Instant};
 
-use interprocess::local_socket::{
-    prelude::*, GenericNamespaced, ListenerOptions, ToNsName,
-};
+use interprocess::local_socket::prelude::*;
 
-use geniuz::embedding;
+use geniuz::{embed_socket, embedding};
 
-const DEFAULT_NAME: &str = "geniuz-embed.sock";
 const DEFAULT_IDLE_SECS: u64 = 300;
 const EMBEDDING_BYTES: usize = 384 * 4;
+/// How long one caller may take to send its text or accept the answer. The helper
+/// serves one caller at a time, so a stalled one must not hold it.
+const CALLER_TIMEOUT: Duration = Duration::from_secs(2);
 
 fn main() {
     geniuz::private::by_default();
-    let name = std::env::var("GENIUZ_EMBED_SOCKET")
-        .unwrap_or_else(|_| DEFAULT_NAME.to_string());
     let idle_secs = std::env::var("GENIUZ_EMBED_IDLE")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_IDLE_SECS);
 
-    let ns_name = match name.as_str().to_ns_name::<GenericNamespaced>() {
-        Ok(n) => n,
-        Err(e) => {
-            eprintln!("[geniuz-embed] Bad socket name {}: {}", name, e);
-            std::process::exit(1);
-        }
+    let Some(place) = embed_socket::describe() else {
+        eprintln!("[geniuz-embed] No private place for the socket (the path may be too long). Geniuz loads the model itself instead.");
+        std::process::exit(1);
     };
 
     // Check if already running (try connecting)
-    if interprocess::local_socket::Stream::connect(ns_name.clone()).is_ok() {
-        eprintln!("[geniuz-embed] Already running at {}", name);
+    if embed_socket::connect().is_some() {
+        eprintln!("[geniuz-embed] Already running at {}", place);
         std::process::exit(0);
     }
 
@@ -54,20 +49,17 @@ fn main() {
         }
     };
 
-    let listener = match ListenerOptions::new()
-        .name(ns_name)
-        .create_sync()
-    {
+    let listener = match embed_socket::listen() {
         Ok(l) => l,
         Err(e) => {
             eprintln!("[geniuz-embed] Bind failed: {}", e);
             std::process::exit(1);
         }
     };
-    listener.set_nonblocking(interprocess::local_socket::ListenerNonblockingMode::Both)
+    listener.set_nonblocking(interprocess::local_socket::ListenerNonblockingMode::Accept)
         .expect("set_nonblocking");
 
-    eprintln!("[geniuz-embed] {} (idle: {}s)", name, idle_secs);
+    eprintln!("[geniuz-embed] {} (idle: {}s)", place, idle_secs);
 
     let mut last_activity = Instant::now();
     let idle_timeout = Duration::from_secs(idle_secs);
@@ -76,7 +68,17 @@ fn main() {
     loop {
         match listener.accept() {
             Ok(mut stream) => {
+                // Only this user's own programs are served; anyone else is dropped unread.
+                if !embed_socket::may_serve(&stream) {
+                    continue;
+                }
                 last_activity = Instant::now();
+                // A connection can inherit the listener's non-blocking mode (it does on macOS),
+                // which would drop a caller whose text arrives in more than one piece. Each
+                // caller is read in blocking mode, with a limit on how long it may take.
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_recv_timeout(Some(CALLER_TIMEOUT));
+                let _ = stream.set_send_timeout(Some(CALLER_TIMEOUT));
 
                 // Read u32 LE length prefix
                 let mut len_buf = [0u8; 4];

@@ -82,17 +82,17 @@ The reason is in [`src/dig.rs`](../src/dig.rs): "Semantic search is for discover
 
 ## The model
 
-Search by meaning runs locally through ONNX Runtime, using a BERT sentence model that covers more than 50 languages. It downloads once from Hugging Face, about 130 MB, into `~/.geniuz/models/`, the first time anything is embedded. That includes your first `keep`. Loading a model is slow, so a helper called `geniuz-embed` keeps it ready over a local socket and exits after five idle minutes.
+Search by meaning runs locally through ONNX Runtime, using a BERT sentence model that covers more than 50 languages. It downloads once from Hugging Face, about 130 MB, into `~/.geniuz/models/`, the first time anything is embedded. That includes your first `keep`. The model is one fixed snapshot: Geniuz carries the SHA-256 of each file and loads nothing that doesn't match, so a changed or tampered file is set aside and fetched again. Loading a model is slow, so a helper called `geniuz-embed` keeps it ready and exits after five idle minutes. On Mac and Linux the helper listens on a socket inside a directory only you can enter, and each side checks that the other is you before any text passes.
 
 If the built-in model fails to load, Geniuz tries an embedding service instead: Ollama on your own machine by default. See [Using it](using-it.md#settings).
 
 ## Your data stays on your machine
 
-When Geniuz runs, it stores all your data locally, in a file on your computer. There is no account, no cloud and no telemetry.
+When Geniuz runs, it stores all your data locally, in a file on your computer. There is no account, no cloud and no telemetry. On Mac and Linux the files are readable by you alone: Geniuz creates them that way, and closes a data directory an earlier version left open to other users of the computer.
 
 For completeness, Geniuz reaches the network in a few small ways, and none of them sends your memories:
 
-- **Hugging Face:** to download the model, once.
+- **Hugging Face:** to download the model, once, from one fixed revision, checked against the checksum Geniuz carries.
 - **GitHub:** when you run the install script or download a release, and when the Mac menubar checks for a newer version. That check sends the version you have and nothing from your folders. In Settings you can make it weekly, only when you ask, or turn it off.
 
 Geniuz itself sends memory text to another address in only one case: if the built-in model fails to load and `GENIUZ_EMBED_URL` points at another machine, text goes there to be embedded. By default that address is your own machine. What you recall through an AI tool goes wherever that tool sends it.
