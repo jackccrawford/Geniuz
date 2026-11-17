@@ -73,6 +73,9 @@ fi
 
 # Extract
 mkdir -p "$INSTALL_DIR"
+# The notes folder belongs to its owner alone. Closing it here also keeps Geniuz 5.1.5
+# from closing it on first run, which took the execute bit off the program below.
+chmod 700 "$GENIUZ_HOME" 2>/dev/null || true
 mkdir -p "$TMPDIR/extract"
 tar xzf "$TMPDIR/geniuz.tar.gz" -C "$TMPDIR/extract"
 cp "$TMPDIR/extract/geniuz" "$INSTALL_DIR/"
