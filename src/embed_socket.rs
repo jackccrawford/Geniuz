@@ -16,6 +16,11 @@
 //! - the client asks the system who is listening before sending any text, and the server
 //!   asks who connected before reading any.
 //!
+//! The second of those is the guarantee. The directory check keeps strangers out in the
+//! ordinary case, but a directory could in principle be swapped between the check and the
+//! connect; asking the system who is at the other end cannot be got around that way. Never
+//! remove the same-user check on the strength of the directory check.
+//!
 //! If no such place can be had (the path is too long for a socket, say), there is no
 //! helper: the model is loaded in-process, which is slower and safe.
 //!
@@ -36,7 +41,7 @@ const MAX_SOCKET_PATH: usize = 100;
 /// helpers side by side), but only a bare file name: it can never point elsewhere.
 fn file_name() -> String {
     match std::env::var("GENIUZ_EMBED_SOCKET") {
-        Ok(name) if !name.is_empty() && !name.contains(['/', '\\']) && name != "." && name != ".." => name,
+        Ok(name) if !name.is_empty() && !name.contains(['/', '\\', '\0']) && name != "." && name != ".." => name,
         _ => FILE_NAME.to_string(),
     }
 }
@@ -98,13 +103,27 @@ mod place {
         matches!(stream.peer_creds().ok().and_then(|c| c.euid()), Some(uid) if uid == me())
     }
 
+    /// Whether `path` is a socket of ours (and not a link to something else).
+    pub(super) fn is_our_socket(path: &Path) -> bool {
+        matches!(std::fs::symlink_metadata(path), Ok(m) if m.file_type().is_socket() && m.uid() == me())
+    }
+
     /// Remove a socket left by a helper that is gone, but only a socket, and only ours.
+    /// Call it only when nothing answers there: a live helper's socket must not be removed.
     pub(super) fn clear_stale(path: &Path) {
-        if let Ok(m) = std::fs::symlink_metadata(path) {
-            if m.file_type().is_socket() && m.uid() == me() {
-                let _ = std::fs::remove_file(path);
-            }
+        if is_our_socket(path) {
+            let _ = std::fs::remove_file(path);
         }
+    }
+
+    /// Held while a helper decides whether to start: two helpers launched at the same
+    /// moment would otherwise both find nobody listening, and the second would remove the
+    /// first one's socket. The lock is released when the returned file is dropped.
+    pub(super) fn start_lock(socket: &Path) -> Option<std::fs::File> {
+        use std::os::unix::io::AsRawFd;
+        let file = std::fs::OpenOptions::new().create(true).write(true).truncate(false)
+            .open(socket.with_extension("lock")).ok()?;
+        (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0).then_some(file)
     }
 }
 
@@ -126,24 +145,37 @@ pub fn connect() -> Option<Stream> {
     }
 }
 
-/// Start listening. Err says why not, in words fit for the helper's log.
+/// What `listen` answers when another helper got there first.
+pub const ALREADY_RUNNING: &str = "already running";
+
+/// Start listening. Err says why not, in words fit for the helper's log; it is
+/// `ALREADY_RUNNING` when a helper of this user's is already listening.
 pub fn listen() -> Result<Listener, String> {
     #[cfg(unix)]
     {
         use interprocess::local_socket::GenericFilePath;
         use std::os::unix::fs::PermissionsExt;
         let path = place::path().ok_or("no private place for the socket (the path may be too long)")?;
+        // One helper at a time decides: look for a live one, clear a dead one's socket, bind.
+        let _lock = place::start_lock(&path);
+        if connect().is_some() {
+            return Err(ALREADY_RUNNING.to_string());
+        }
         place::clear_stale(&path);
         let name = path.as_os_str().to_fs_name::<GenericFilePath>().map_err(|e| e.to_string())?;
         // The socket must never be open to others, even for the moment between its
         // creation and a chmod: so it is created under a umask that allows only its owner.
         // (The library's own `mode` option changes the mode through the open socket, which
-        // macOS doesn't support.)
+        // macOS doesn't support.) Geniuz's programs already run under this umask
+        // (`private::by_default`); setting it here keeps this function safe on its own.
+        // A umask belongs to the whole process, which is harmless here for that reason.
         let before = unsafe { libc::umask(0o077) };
         let made = ListenerOptions::new().name(name).create_sync();
         unsafe { libc::umask(before) };
         let listener = made.map_err(|e| format!("{}: {}", path.display(), e))?;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        if place::is_our_socket(&path) {
+            let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+        }
         Ok(listener)
     }
     #[cfg(not(unix))]
@@ -215,9 +247,9 @@ mod tests {
     #[test]
     fn the_name_can_be_chosen_but_never_a_path() {
         // file_name() reads the environment, which tests share, so the rule is checked directly.
-        let ok = |name: &str| !name.is_empty() && !name.contains(['/', '\\']) && name != "." && name != "..";
+        let ok = |name: &str| !name.is_empty() && !name.contains(['/', '\\', '\0']) && name != "." && name != "..";
         assert!(ok("limen-test.sock"));
-        for bad in ["/tmp/evil.sock", "../evil.sock", "a/b", r"a\b", "..", ".", ""] {
+        for bad in ["/tmp/evil.sock", "../evil.sock", "a/b", r"a\b", "..", ".", "", "a\0b"] {
             assert!(!ok(bad), "{:?} must not be accepted", bad);
         }
     }

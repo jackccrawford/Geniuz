@@ -51,6 +51,11 @@ fn main() {
 
     let listener = match embed_socket::listen() {
         Ok(l) => l,
+        // Another helper started in the same moment and got there first.
+        Err(e) if e == embed_socket::ALREADY_RUNNING => {
+            eprintln!("[geniuz-embed] Already running at {}", place);
+            std::process::exit(0);
+        }
         Err(e) => {
             eprintln!("[geniuz-embed] Bind failed: {}", e);
             std::process::exit(1);
