@@ -20,6 +20,7 @@ const DEFAULT_IDLE_SECS: u64 = 300;
 const EMBEDDING_BYTES: usize = 384 * 4;
 
 fn main() {
+    geniuz::private::by_default();
     let name = std::env::var("GENIUZ_EMBED_SOCKET")
         .unwrap_or_else(|_| DEFAULT_NAME.to_string());
     let idle_secs = std::env::var("GENIUZ_EMBED_IDLE")

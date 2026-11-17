@@ -1691,6 +1691,7 @@ dependencies = [
  "dirs 5.0.1",
  "image",
  "interprocess",
+ "libc",
  "ort",
  "ratatui",
  "regex",

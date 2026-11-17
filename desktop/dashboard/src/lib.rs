@@ -1260,6 +1260,10 @@ fn open_update() {
 }
 
 pub fn run() {
+    // As in the command-line program: what Geniuz writes is its owner's alone, and a data
+    // directory left open by an earlier version is closed.
+    geniuz::private::by_default();
+    let _ = geniuz::private::data_dir();
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Re-launch attempt: focus the existing window instead of

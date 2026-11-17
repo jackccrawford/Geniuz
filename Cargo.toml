@@ -71,3 +71,7 @@ base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"
+
+# umask, so the files Geniuz creates are private to their owner (src/private.rs).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

@@ -8,6 +8,7 @@ pub mod window;
 pub mod dig;
 pub mod gist;
 pub mod pictures;
+pub mod private;
 
 use std::path::PathBuf;
 
