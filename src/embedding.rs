@@ -298,7 +298,9 @@ fn download_verified_inner(url: &str, dest: &Path, pinned: Pinned) -> Result<(),
     let mut response = agent.get(url).call()
         .map_err(|e| format!("Download failed: {}", e))?;
     let tmp_path = dest.with_extension("tmp");
-    let mut file = std::fs::File::create(&tmp_path)
+    // Made fresh, never through a link someone left in its place.
+    let _ = std::fs::remove_file(&tmp_path);
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&tmp_path)
         .map_err(|e| format!("Failed to create temp file: {}", e))?;
     let mut reader = response.body_mut().as_reader();
     let mut hasher = Sha256::new();

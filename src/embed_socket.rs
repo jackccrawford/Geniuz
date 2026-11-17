@@ -361,13 +361,22 @@ mod place {
         }
     }
 
+    /// The lock file's path: the socket's name with ".lock" added. Added, not swapped
+    /// for the extension, so a socket that is itself named "something.lock" still gets
+    /// a lock file of its own.
+    pub(super) fn lock_path(socket: &Path) -> PathBuf {
+        let mut name = socket.file_name().unwrap_or_default().to_os_string();
+        name.push(".lock");
+        socket.with_file_name(name)
+    }
+
     /// Held while a helper decides whether to start: two helpers launched at the same
     /// moment would otherwise both find nobody listening, and the second would remove the
     /// first one's socket. The lock is released when the returned file is dropped.
     pub(super) fn start_lock(socket: &Path) -> Option<std::fs::File> {
         use std::os::unix::io::AsRawFd;
         let file = std::fs::OpenOptions::new().create(true).write(true).truncate(false)
-            .open(socket.with_extension("lock")).ok()?;
+            .open(lock_path(socket)).ok()?;
         (unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0).then_some(file)
     }
 }
@@ -500,6 +509,17 @@ mod tests {
         assert!(!is_private_dir(&d.join("missing")));
         let _ = std::fs::remove_file(&link);
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_lock_file_is_never_the_socket_itself() {
+        use std::path::Path;
+        for name in ["embed.sock", "helper.lock", "plain"] {
+            let socket = Path::new("/run/user/1000/geniuz").join(name);
+            let lock = super::place::lock_path(&socket);
+            assert_ne!(lock, socket, "{}", name);
+            assert_eq!(lock.parent(), socket.parent());
+        }
     }
 
     #[test]
