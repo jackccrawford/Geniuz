@@ -10,7 +10,7 @@ use std::path::PathBuf;
     about = "Your AI remembers now",
     long_about = "GENIUZ: Your AI remembers now.\n\nYour AI starts every conversation from zero. Geniuz keeps what matters,\nthe calls you made and the reasons behind them, on your own computer,\nwhere any AI you use can find it: Claude Desktop through MCP, or any\nagent that can run a command. A memory is never edited, so the record holds.",
     before_help = "Start here: 'geniuz recall' shows what's in your folder.",
-    after_help = "Examples:\n  geniuz keep -f Work -c \"Chose the smaller vendor: faster support\" -g \"decision: vendor\"\n  geniuz recall \"vendor\"                 Search by meaning\n  geniuz recall --grep Acme              Literal text: every line that has it\n  geniuz recall 13625F6B:3487B9B0        Open one memory by its address\n  geniuz recall --all \"pricing\"          Every folder at once\n  geniuz capture -f Docs ./policies/     Keep a folder of documents\n\nFolders: 'geniuz folder list' shows them; -f <name> uses one for a command.\n  A project, a team, an agent: each can have its own, or share one.\n\nData: everything stays in .geniuz in your home directory.\n  GENIUZ_HOME moves it; GENIUZ_DB names one memory file.\n\nUse \"geniuz <command> --help\" for more."
+    after_help = "Examples:\n  geniuz keep -f Work -c \"Chose the smaller vendor: faster support\" -g \"decision: vendor\"\n  geniuz recall \"vendor\"                 Search, by meaning and by words\n  geniuz recall --grep Acme              Literal text: every line that has it\n  geniuz recall 13625F6B:3487B9B0        Open one memory by its address\n  geniuz recall --all \"pricing\"          Every folder at once\n  geniuz capture -f Docs ./policies/     Keep a folder of documents\n\nFolders: 'geniuz folder list' shows them; -f <name> uses one for a command.\n  A project, a team, an agent: each can have its own, or share one.\n\nData: everything stays in .geniuz in your home directory.\n  GENIUZ_HOME moves it; GENIUZ_DB names one memory file.\n\nUse \"geniuz <command> --help\" for more."
 )]
 pub struct Cli {
     // -f and --folder as well: agents name a folder on most calls, so it gets a short
@@ -138,9 +138,9 @@ pub enum Command {
         json: bool,
     },
 
-    /// Search your memories, by meaning unless you ask for exact words
+    /// Search your memories, by meaning and by their words together
     #[command(
-        after_help = "Examples:\n  geniuz recall \"auth token\"                  Semantic search\n  geniuz recall --keyword \"auth\"               Keyword fallback\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n  geniuz recall --grep Cubic --since 7d        Lines naming Cubic, past week\n\nTip: Run 'geniuz backfill' first to enable semantic search."
+        after_help = "Examples:\n  geniuz recall \"auth token\"                  Search: by meaning and by words, together\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n  geniuz recall --grep Cubic --since 7d        Lines naming Cubic, past week"
     )]
     Recall {
         /// Search query, or an address like 13625F6B:3487B9B0 to open that memory
@@ -165,8 +165,8 @@ pub enum Command {
         #[arg(long)]
         random: bool,
 
-        /// Force keyword search (skip semantic)
-        #[arg(short, long)]
+        /// No longer needed: search reads a query by meaning and by words together
+        #[arg(short, long, hide = true)]
         keyword: bool,
 
         /// Include full content (no short form: -f names the folder)

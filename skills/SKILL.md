@@ -49,7 +49,7 @@ geniuz keep --in Work -c @session-notes.md -g "session: March 19 architecture re
 # Thread a follow-up
 geniuz keep --in Work -c "Same fix needed in staging compose" -g "fix: staging auth ordering" -p A1B2C3D4
 
-# Search by meaning — not keywords
+# Search: by meaning and by words, together. There is no mode to choose
 geniuz recall --in Work "authentication middleware"
 geniuz recall --in Work "what broke in production" --since 7d
 
@@ -57,15 +57,12 @@ geniuz recall --in Work "what broke in production" --since 7d
 # first, or anything in "quotes")
 geniuz recall "who reviewed the PR, was it Cubic"
 
-# Exact words: the matching LINES from full content, newest first
+# Every line holding exact words, from full content, newest first
 geniuz recall --grep Cubic --since 7d
 geniuz recall --grep Cubic --grep "pull request"   # every term must appear
 
 # A whole thread, root first, from any memory in it
 geniuz recall --thread A1B2C3D4
-
-# Keyword fallback (whole memories, any word)
-geniuz recall --keyword "auth"
 
 # Recent memories: recall with no search
 geniuz recall
@@ -131,15 +128,16 @@ Never copy a folder's files: a copy of a live database can lose memories, and a 
 
 ## How to find things
 
-Meaning is for **discovery**: concepts and names you didn't know to ask for.
-Exact is for **recall**: who, when, did it happen, by proper name.
+A search is for **finding**: it ranks memories by what they mean and by the
+words they hold, so a topic, a name or a term all work in one query.
+`--grep` is for **listing**: every line that holds a word, nothing left out.
 
 1. If the question has a time in it ("last week", "yesterday"), add
    `--since`: `7d`, `24h`, `2w`, or a date. Without it, months of older
    memories outrank last week's answer.
-2. Start by meaning. Every answer ends with `names seen:` and `pointers:`.
+2. Start with a search. Every answer ends with `names seen:` and `pointers:`.
    Those are your next hops.
-3. Go exact with what you found: `--grep Devin`, or `--thread 3487B9B0` to
+3. List exactly what you found: `--grep Devin`, or `--thread 3487B9B0` to
    read the whole conversation.
 4. Read the last line. `searched: 312 memories · since 7d · grep "Cubic"`
    says what "nothing found" means: nothing *in that scope*.
@@ -211,6 +209,6 @@ There is no edit and no delete (an image is the one exception, above: its owner 
 
 ## How it works
 
-Memories live in a SQLite database. Semantic search uses a local BERT model — no API calls, no cloud, runs fully offline. The model downloads once (~118MB) on first search. Every memory after that is embedded automatically.
+Memories live in a SQLite database. Search uses a local BERT model: no API calls, no cloud, fully offline. The model downloads once (about 127 MB) the first time a memory is kept or searched for. Every memory after that is embedded automatically, its words and its gist each.
 
-Search finds memories by meaning, not keywords. "Authentication middleware" matches a memory about "token validation ordering" because the concepts overlap.
+Search reads your query two ways together. By meaning: "authentication middleware" matches a memory about "token validation ordering" because the ideas overlap. By words: a name or a specific term in the query lifts the memories that hold it. A memory's gist counts as much as its body, so a gist that says plainly what the memory is makes it easy to find.

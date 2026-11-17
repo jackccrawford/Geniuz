@@ -150,7 +150,7 @@ fn base_tool_definitions() -> Value {
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ. Proper names (a Capitalized word after the first, or anything in \"quotes\") must match exactly, and memories holding them come first. An address like 13625F6B:3487B9B0 opens that memory, whichever folder it is in. Leave it out to get the most recent memories, which is how to orient yourself at the start of a conversation."
+                            "description": "What you are looking for. A topic, a name, a concept. One search reads it two ways together: by meaning, so related memories are found even when the words differ, and by its words, so specific terms are found too. There is no mode to choose. Proper names (a Capitalized word after the first, or anything in \"quotes\") must match exactly, and memories holding them come first. An address like 13625F6B:3487B9B0 opens that memory, whichever folder it is in. Leave it out to get the most recent memories, which is how to orient yourself at the start of a conversation."
                         },
                         "all": {
                             "type": "boolean",
@@ -159,7 +159,7 @@ fn base_tool_definitions() -> Value {
                         "grep": {
                             "type": ["string", "array"],
                             "items": { "type": "string" },
-                            "description": "Optional. Exact words to find, case-blind, in the FULL content: returns the matching lines, not whole memories. Use it for names, numbers and anything you know verbatim (semantic search does not find proper names reliably). A list means every term must appear in the memory. Combines with since/until and thread."
+                            "description": "Optional. Exact words to find, case-blind, in the FULL content: returns the matching lines, not whole memories. Use it to see every line that holds a name, a number or anything you know verbatim: a query shows the best matches, this shows all of them. A list means every term must appear in the memory. Combines with since/until and thread."
                         },
                         "thread": {
                             "type": "string",

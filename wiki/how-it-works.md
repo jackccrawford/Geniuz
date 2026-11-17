@@ -48,9 +48,9 @@ Agents point at each other's memories by address, such as `13625F6B:3487B9B0`, s
 
 1. The command reads your text, which can be inline, from a file (`-c @notes.md`) or piped in (`-c -`).
 2. [`keep_with_backend`](../src/db.rs) refuses empty content and creates an ID. If you named a parent, it looks it up in the same folder. A parent it can't find, or one in another folder, is refused with the reason: a reply never quietly becomes a new thread.
-3. The text is turned into an embedding, a list of numbers that represents its meaning. Geniuz asks the small background helper first, then falls back to loading the model itself.
+3. The text is turned into an embedding, a list of numbers that represents its meaning, and the gist into a second one. Geniuz asks the small background helper first, then falls back to loading the model itself.
 4. If embedding fails, the memory is still saved and can be found by keyword until it is embedded later.
-5. The memory and its embedding are written in one transaction.
+5. The memory and its embeddings are written in one transaction.
 6. Geniuz answers with the memory's address, folder then memory, such as `13625F6B:F96D91B4`.
 
 A memory is dated the moment it's kept, and nobody chooses that time. Something about the past goes in the gist and content ("21 Mar meeting: ..."). What matters most is order: memories written in the same second share a time, and Geniuz still keeps them in the order they were written.
@@ -61,24 +61,28 @@ A memory is dated the moment it's kept, and nobody chooses that time. Something 
 
 ## When you recall
 
-`geniuz recall "topic"` searches by meaning: it compares your query with stored embeddings and ranks the closest. A few details make that work better:
+`geniuz recall "topic"` is one search that reads your query two ways together, so there is no mode to choose:
+
+- **By meaning.** Your query is compared with each memory's two embeddings, one for its words and one for its gist, and the closer one counts. A long memory covers many things; its gist says what it is.
+- **By words.** Memories holding the query's words are lifted, rare words counting for more. A word in more than half the folder's memories is ignored.
+
+The two make one score, which is the number shown beside a result. A few details:
 
 - **Names come first.** Capitalized names in a query are matched exactly and put at the top, because searching by meaning alone tends to miss them.
 - **Memories not yet embedded still count.** They are found by keyword and given a share of the results.
 - **Time windows.** `--since 7d` limits results to a period.
 
-Other kinds of recall skip meaning entirely:
+Other kinds of recall are not searches:
 
 | Flag | What it does |
 |---|---|
 | `--grep Cubic --grep PR` | Memories holding every term, showing each line with any of them |
-| `--keyword "exact words"` | Keyword search |
 | `--random` | Something you may have forgotten |
 | `--thread 98672A90` | A whole thread, starting at its root |
 
 Two more forms reach across folders. `recall --all "topic"` searches every folder and shows each result with its address. `recall 13625F6B:3487B9B0` opens that memory in full, whichever folder it is in. In the dashboard, Find can search any selection of folders, and an address in a memory's text can be clicked.
 
-The reason is in [`src/dig.rs`](../src/dig.rs): "Semantic search is for discovery; exact search is for recall".
+Memories kept before 5.1.6 have no embedding for their gist. Geniuz makes them as a folder is searched, the dashboard makes them for every folder when it opens, and `geniuz backfill --all` does it at once.
 
 ## The model
 

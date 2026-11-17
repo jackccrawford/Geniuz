@@ -52,7 +52,6 @@ geniuz recall "topic"
 geniuz recall "topic" --since 7d
 geniuz recall --grep Cubic --grep PR
 geniuz recall --thread 98672A90
-geniuz recall --keyword "exact words"
 geniuz recall --random
 geniuz recall --full "topic"
 geniuz recall --json "topic"

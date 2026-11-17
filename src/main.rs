@@ -865,7 +865,10 @@ fn run(cli: Cli) -> Result<String, String> {
             ))
         }
 
-        Command::Recall { query, all, thread, grep, random, keyword, full, limit, since, until, json } => {
+        Command::Recall { query, all, thread, grep, random, keyword: _, full, limit, since, until, json } => {
+            // --keyword is still accepted so older scripts run, and does nothing: one
+            // search reads a query by meaning and by its words together (5.1.6).
+            let keyword = false;
             if query.as_deref() == Some("help") {
                 let mut cmd = Cli::build();
                 let sub = cmd.find_subcommand_mut("recall").unwrap();
@@ -953,8 +956,8 @@ fn run(cli: Cli) -> Result<String, String> {
                     match db.get_by_uuid_prefix(q)? {
                         Some(entry) => vec![entry],
                         None => {
-                            eprintln!("[geniuz] No memory found matching UUID {}, so searching by meaning instead.", q);
-                            mode = format!("semantic \"{q}\" (no memory has that id)");
+                            eprintln!("[geniuz] No memory found matching UUID {}, so searching for it as words instead.", q);
+                            mode = format!("search \"{q}\" (no memory has that id)");
                             db.semantic_search_in(q, &window, limit)?
                         }
                     }

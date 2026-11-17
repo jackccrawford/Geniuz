@@ -124,14 +124,14 @@ pub fn names(query: &str) -> Vec<String> {
     out
 }
 
-/// A meaning search's mode for its scope line: `semantic "q"`, plus
+/// A search's mode for its scope line: `search "q"`, plus
 /// ` · names first: Cubic` when the query held proper names.
 pub fn semantic_mode(query: &str) -> String {
     let n = names(query);
     if n.is_empty() {
-        format!("semantic \"{query}\"")
+        format!("search \"{query}\"")
     } else {
-        format!("semantic \"{query}\" · names first: {}", n.join(", "))
+        format!("search \"{query}\" · names first: {}", n.join(", "))
     }
 }
 
