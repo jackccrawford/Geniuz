@@ -41,15 +41,18 @@ fn watch_exec_command(template: &str, e: &geniuz::db::MemoryEntry) -> (String, V
 }
 
 fn main() {
-    // Before anything is written: files Geniuz makes belong to their owner alone, and
-    // a data directory left open by an earlier version is closed.
+    // Before anything is written: files Geniuz makes belong to their owner alone.
     geniuz::private::by_default();
-    if let geniuz::private::Found::Tightened(n) = geniuz::private::data_dir() {
-        eprintln!("[geniuz] Your notes were readable by other users of this computer. They are now private to you ({} files and directories changed).", n);
-    }
 
     let cli = Cli::from_arg_matches(&Cli::build().get_matches())
         .expect("Failed to parse arguments");
+
+    // A data directory left open by an earlier version is closed. This comes after the
+    // arguments are read, so `--version` and `--help`, which answer and exit above, change
+    // nothing on disk.
+    if let geniuz::private::Found::Tightened(n) = geniuz::private::data_dir() {
+        eprintln!("[geniuz] Your notes were readable by other users of this computer. They are now private to you ({} files and directories changed).", n);
+    }
 
     match run(cli) {
         Ok(output) => {
