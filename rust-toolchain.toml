@@ -1,0 +1,9 @@
+# The one Rust version Geniuz is built with, on every machine: mars (development and the
+# Mac release), orbit (the Windows release), and GitHub (the Linux release). rustup reads
+# this file and uses exactly this compiler, installing it if it is missing.
+#
+# Before this file each machine used whatever it had: 1.93.0, 1.94.1 and "latest" were all
+# building releases (Jack, 16 Nov 2026: "i'm trying avoid two different rust stacks").
+# To move to a newer Rust, change the version here, on mars, and nowhere else.
+[toolchain]
+channel = "1.94.1"
