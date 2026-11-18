@@ -345,7 +345,11 @@ fn is_function_word(w: &str) -> bool {
         "he", "she", "they", "i", "my", "what", "when", "where", "who", "why", "how", "which", "and",
         "but", "or", "if", "so", "then", "there", "here", "not",
     ];
-    FW.contains(&w.to_lowercase().as_str())
+    let w = w.to_lowercase();
+    // A contraction is the word before its apostrophe: I'm is I, We've is we. And a
+    // word ending n't (Don't, Isn't) is never a name. O'Brien is neither.
+    let head = w.split(['\'', '’']).next().unwrap_or(&w);
+    FW.contains(&w.as_str()) || FW.contains(&head) || w.ends_with("n't") || w.ends_with("n’t")
 }
 
 /// Month and weekday names, whole or short ("Sep 2026", "on Tuesday"):
@@ -396,6 +400,14 @@ fn escape_like(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_contraction_is_not_a_name() {
+        let hits = ["Then I'm sure Dana said so. We've met O'Brien.", "And I'm told Dana agreed. Don't ask; We've seen O'Brien."];
+        let h = Harvest::of(&hits, "anything", &[]);
+        let names: Vec<&str> = h.names.iter().map(|(n, _)| n.as_str()).collect();
+        assert_eq!(names, ["Dana", "O'Brien"]);
+    }
+
     use super::*;
 
     #[test]

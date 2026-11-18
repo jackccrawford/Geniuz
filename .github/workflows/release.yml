@@ -72,7 +72,10 @@ jobs:
           # Bundle ORT shared library for Linux (dynamic linking)
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp /usr/local/lib/libonnxruntime.so.1.22.0 .
-            tar czf ../../../geniuz-${{ matrix.name }}.tar.gz geniuz libonnxruntime.so.1.22.0
+            # geniuz-embed is the helper that keeps the search model loaded. Without
+            # it every search and every keep loads the model again (about 2 s and
+            # 480 MB on a small laptop). install.sh installs it when it is here.
+            tar czf ../../../geniuz-${{ matrix.name }}.tar.gz geniuz geniuz-embed libonnxruntime.so.1.22.0
           else
             tar czf ../../../geniuz-${{ matrix.name }}.tar.gz geniuz
           fi
