@@ -1783,3 +1783,24 @@ fn a_real_move_across_drives_names_itself_and_an_older_closed_original_still_fin
     reg.scan();
     assert!(d2.join(&old.uuid).join(DB_FILE).exists());
 }
+
+/// cubic on #68: the copy's bookkeeping files share a directory with whatever else the
+/// folder's directory holds.
+#[test]
+fn a_folder_holding_a_file_with_one_of_the_move_names_is_not_moved() {
+    let (tmp, reg) = setup();
+    let dest = tmp.path().join("dest");
+    std::fs::create_dir_all(&dest).unwrap();
+    for name in [MOVE_OWNER, MOVE_COMMITTED, MOVE_TOKEN] {
+        let work = reg.create(&format!("Work {}", name), "", None).unwrap();
+        add_memory(&work.db_path, M1);
+        let dir = work.db_path.parent().unwrap().to_path_buf();
+        std::fs::write(dir.join(name), b"the person's own file").unwrap();
+        let lock = super::moving::quiesce(&work.db_path).unwrap();
+        let err = super::moving::copy_then_retire(&dir, &dest, &work, lock).unwrap_err();
+        assert!(err.contains(name) && err.contains("Nothing was moved"), "{err}");
+        assert_eq!(std::fs::read(dir.join(name)).unwrap(), b"the person's own file");
+        assert!(!dest.join(format!("{}{}", MOVING_PREFIX, work.uuid)).exists(), "no copy was started");
+        assert_eq!(reg.find(&work.uuid).unwrap().stats().unwrap().0, 1, "and the folder is still in use where it was");
+    }
+}

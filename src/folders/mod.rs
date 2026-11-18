@@ -49,10 +49,11 @@ const MOVE_OWNER: &str = "move-owner";
 /// In a hidden copy: written once the original is fenced, as proof that the copy is
 /// final. Without this or a fenced original, the copy may have fallen behind.
 const MOVE_COMMITTED: &str = "move-committed";
-/// In a hidden copy, and in the original it was made from: one random word naming the
-/// move, written to the copy before anything is copied and to the original as it is
-/// closed. A closed original says which copy it was closed for.
+/// A file in a hidden copy: one random word naming the move that is making it,
+/// written before anything is copied.
 const MOVE_TOKEN: &str = "move-token";
+/// A `_meta` key in the original: the same word, written in the transaction that
+/// closes it. So a closed original says which copy it was closed for.
 const KEY_MOVING_TO: &str = "moving_to";
 const DOTFILE: &str = ".geniuz-folder";
 const DEFAULT_NAME: &str = "My memory";

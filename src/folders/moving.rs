@@ -195,6 +195,19 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
     std::fs::create_dir_all(&archive)
         .map_err(|e| format!("Couldn't create {}: {}", archive.display(), e))?;
 
+    // Three file names in the copy are Geniuz's own while a move is under way, and are
+    // removed when it is done. A file of the person's with one of those names would be
+    // written over and then removed, so the move is refused before anything is touched.
+    for reserved in [MOVE_OWNER, MOVE_COMMITTED, MOVE_TOKEN] {
+        if std::fs::symlink_metadata(dir.join(reserved)).is_ok() {
+            return Err(format!(
+                "{} holds a file called {}, a name Geniuz uses while moving a folder. Rename that file, then move the folder. Nothing was moved.",
+                dir.display(),
+                reserved
+            ));
+        }
+    }
+
     let staging = dest.join(format!("{}{}", MOVING_PREFIX, folder.uuid));
     if staging.exists() {
         return Err(format!("An earlier move left {} behind. Check it, then move it aside.", staging.display()));
