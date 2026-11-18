@@ -150,7 +150,7 @@ fn base_tool_definitions() -> Value {
                     "properties": {
                         "query": {
                             "type": "string",
-                            "description": "What you are looking for. A topic, a name, a concept. Semantic search finds related memories even if the exact words differ. Proper names (a Capitalized word after the first, or anything in \"quotes\") must match exactly, and memories holding them come first. An address like 13625F6B:3487B9B0 opens that memory, whichever folder it is in. Leave it out to get the most recent memories, which is how to orient yourself at the start of a conversation."
+                            "description": "What you are looking for. A topic, a name, a concept. One search reads it two ways together: by meaning, so related memories are found even when the words differ, and by its words, so specific terms are found too. There is no mode to choose. Proper names (a Capitalized word after the first, or anything in \"quotes\") must match exactly, and memories holding them come first. An address like 13625F6B:3487B9B0 opens that memory, whichever folder it is in. Leave it out to get the most recent memories, which is how to orient yourself at the start of a conversation."
                         },
                         "all": {
                             "type": "boolean",
@@ -159,7 +159,7 @@ fn base_tool_definitions() -> Value {
                         "grep": {
                             "type": ["string", "array"],
                             "items": { "type": "string" },
-                            "description": "Optional. Exact words to find, case-blind, in the FULL content: returns the matching lines, not whole memories. Use it for names, numbers and anything you know verbatim (semantic search does not find proper names reliably). A list means every term must appear in the memory. Combines with since/until and thread."
+                            "description": "Optional. Exact words to find, case-blind, in the FULL content: returns the matching lines, not whole memories. Use it to see every line that holds a name, a number or anything you know verbatim: a query shows the best matches, this shows every match up to the limit (50 lines unless you raise it). A list means every term must appear in the memory. Combines with since/until and thread."
                         },
                         "thread": {
                             "type": "string",
@@ -572,18 +572,21 @@ fn recall_by_address(reg: &Registry, args: &Value) -> Option<(String, bool)> {
     Some(execute_recall(&db, &rewritten))
 }
 
+/// What an all-folders listing found: (time, address, folder name, line), newest
+/// first, cut to the limit; how many folders were read; and those that could not be.
+pub(crate) struct GrepAll {
+    pub hits: Vec<(String, String, String, String)>,
+    pub searched: usize,
+    pub skipped: Vec<String>,
+}
+
 /// Exact words across every folder: the matching lines, newest first, each with
 /// the address that opens its memory.
-fn execute_grep_all(reg: &Registry, grep: &[String], window: &Window, args: &Value) -> (String, bool) {
-    let terms = match geniuz::dig::Terms::parse(grep) {
-        Ok(t) => t,
-        Err(e) => return (format!("Error: {}", e), true),
-    };
-    let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(50).min(500) as usize;
+pub(crate) fn grep_all(reg: &Registry, terms: &geniuz::dig::Terms, window: &Window, limit: usize) -> GrepAll {
     let (mut hits, mut searched, mut skipped) = (Vec::new(), 0, Vec::new());
     for f in reg.scan().folders {
         let found = DatabaseManager::open_existing(&f.db_path.to_string_lossy())
-            .and_then(|db| db.grep_in(&terms, window, None, limit));
+            .and_then(|db| db.grep_in(terms, window, None, limit));
         match found {
             Ok(dig) => {
                 searched += 1;
@@ -597,15 +600,32 @@ fn execute_grep_all(reg: &Registry, grep: &[String], window: &Window, args: &Val
     }
     hits.sort_by(|a, b| b.0.cmp(&a.0));
     hits.truncate(limit);
-    let mut lines: Vec<String> = hits
+    GrepAll { hits, searched, skipped }
+}
+
+pub(crate) fn grep_all_scope(found: &GrepAll, grep: &[String]) -> String {
+    format!("searched: {} · grep \"{}\"", geniuz::dig::count(found.searched, "folder", "folders"), grep.join(" "))
+}
+
+pub(crate) fn grep_all_text(found: &GrepAll, grep: &[String]) -> String {
+    let mut lines: Vec<String> = found.hits
         .iter()
         .map(|(at, address, folder, line)| format!("{} | {} | {} | {}", address, folder, crate::shorten_ts(at), line))
         .collect();
-    if !skipped.is_empty() {
-        lines.push(format!("Couldn't read: {}", skipped.join(", ")));
+    if !found.skipped.is_empty() {
+        lines.push(format!("Couldn't read: {}", found.skipped.join(", ")));
     }
-    lines.push(format!("searched: {} · grep \"{}\"", geniuz::dig::count(searched, "folder", "folders"), grep.join(" ")));
-    (lines.join("\n"), false)
+    lines.push(grep_all_scope(found, grep));
+    lines.join("\n")
+}
+
+fn execute_grep_all(reg: &Registry, grep: &[String], window: &Window, args: &Value) -> (String, bool) {
+    let terms = match geniuz::dig::Terms::parse(grep) {
+        Ok(t) => t,
+        Err(e) => return (format!("Error: {}", e), true),
+    };
+    let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(50).min(500) as usize;
+    (grep_all_text(&grep_all(reg, &terms, window, limit), grep), false)
 }
 
 fn execute_recall_all(reg: &Registry, backend: Option<&dyn EmbeddingBackend>, args: &Value) -> (String, bool) {
@@ -1710,6 +1730,25 @@ pub fn status() -> Result<String, String> {
                 Err(e) => lines.push(format!("Folder: {} (can't be opened: {})", name, e)),
             }
         }
+    }
+    // That is only the folder used when none is named. With several folders, a count
+    // of 0 there reads as "Geniuz is empty" (seen on a new install, 17 Nov 2026).
+    // Listing folders makes the first one if it is missing, and a status check
+    // changes nothing on disk: so only where the first folder is already there.
+    let folders = if geniuz::data_dir().join("memory.db").is_file() {
+        geniuz::folders::Registry::from_env().scan().folders
+    } else {
+        Vec::new()
+    };
+    if folders.len() > 1 {
+        let memories: i64 = folders.iter().filter_map(|f| f.stats().ok()).map(|(n, _)| n).sum();
+        if let Some(l) = lines.last_mut() {
+            l.push_str(": used when no folder is named");
+        }
+        lines.push(format!(
+            "All folders: {} folders, {} memories in all. An AI connected to Geniuz can read and keep in any of them by name.",
+            folders.len(), memories
+        ));
     }
 
     if !any_installed {

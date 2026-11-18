@@ -116,7 +116,7 @@ impl Window {
 /// The closing line of every recall answer: what was searched, so that
 /// "nothing found" carries its scope and a short list says how big the pool
 /// was (search feature 5). For example
-/// `searched: PILOT · 312 memories · since 7d · semantic "reviewers"`.
+/// `searched: PILOT · 312 memories · since 7d · search "reviewers"`.
 pub fn scope_line(folders: Option<&str>, memories: usize, window: &Window, mode: &str) -> String {
     let mut parts: Vec<String> = Vec::new();
     if let Some(s) = folders.filter(|s| !s.is_empty()) {
@@ -253,8 +253,8 @@ mod tests {
     fn the_scope_line_names_pool_window_and_mode() {
         let w = Window::parse_at(Some("7d"), None, now()).unwrap();
         assert_eq!(
-            scope_line(Some("PILOT"), 312, &w, "semantic \"reviewers\""),
-            "searched: PILOT · 312 memories · since 7d · semantic \"reviewers\""
+            scope_line(Some("PILOT"), 312, &w, "search \"reviewers\""),
+            "searched: PILOT · 312 memories · since 7d · search \"reviewers\""
         );
         assert_eq!(scope_line(None, 1, &Window::all(), "recent"), "searched: 1 memory · all time · recent");
     }

@@ -52,7 +52,6 @@ geniuz recall "topic"
 geniuz recall "topic" --since 7d
 geniuz recall --grep Cubic --grep PR
 geniuz recall --thread 98672A90
-geniuz recall --keyword "exact words"
 geniuz recall --random
 geniuz recall --full "topic"
 geniuz recall --json "topic"
@@ -183,7 +182,7 @@ On Windows and Linux, use Ctrl in place of ⌘.
 
 Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory per folder you made, `archive/`, `models/`, `settings.json` and `bin/`. A few small files hold your choices: `added-folders`, `pinned-folders` and `shortcuts.json`. A `current` file from before 5.0.8 is no longer read.
 
-**To back up**, use Export under Data & Export in the dashboard, which saves the folder on screen as one complete file. Time Machine and similar tools are fine too. A backup is a file to keep, not a folder to use: it holds the same permanent IDs, so Geniuz refuses it while the original is present.
+**To back up**, use Export under Data & Export in the dashboard, which saves the folder on screen as one complete file, or `geniuz folder export Work ~/Backups/work.db` from the command line. `geniuz folder export --all ~/Backups/2026-11-17` writes one file per folder into that directory. From the command line an export never overwrites a file, so a nightly job gives each run a new directory, named for its date, and removes old ones itself. Time Machine and similar tools are fine too. A backup is a file to keep, not a folder to use: it holds the same permanent IDs, so Geniuz refuses it while the original is present.
 
 **Do not copy a folder by hand to use it elsewhere.** A copy of a live database can lose recent memories, and copies aren't supported. Use `geniuz folder move`.
 

@@ -66,14 +66,17 @@ jobs:
       - name: Install Rust
         run: rustup show
 
-      - name: Install ONNX Runtime 1.22 (glibc 2.27-compatible, dynamic link)
+      - name: Install ONNX Runtime 1.22 (pinned by hash, dynamic link)
         run: |
-          ORT_ARCHIVE="onnxruntime-linux-x64-1.22.0"
-          curl -sL "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/${ORT_ARCHIVE}.tgz" | tar xz -C /tmp
-          sudo cp /tmp/${ORT_ARCHIVE}/lib/libonnxruntime.so.1.22.0 /usr/local/lib/
+          # From our own 5.1.5 release, matched against the hash shipped since
+          # 5.0.11: see release.yml for why it is no longer fetched from Microsoft.
+          mkdir -p /tmp/ort && cd /tmp/ort
+          curl -fsSL -o from.tar.gz "https://github.com/jackccrawford/Geniuz/releases/download/v5.1.5/geniuz-linux-amd64.tar.gz"
+          tar xzf from.tar.gz libonnxruntime.so.1.22.0
+          echo "3da6146e14e7b8aaec625dde11d6114c7457c87a5f93d744897da8781e35c673  libonnxruntime.so.1.22.0" | sha256sum -c -
+          sudo cp libonnxruntime.so.1.22.0 /usr/local/lib/
           sudo ln -sf libonnxruntime.so.1.22.0 /usr/local/lib/libonnxruntime.so
           sudo ln -sf libonnxruntime.so.1.22.0 /usr/local/lib/libonnxruntime.so.1
-          sudo cp -r /tmp/${ORT_ARCHIVE}/include/* /usr/local/include/
           sudo ldconfig
           echo "ORT_LIB_LOCATION=/usr/local/lib" >> "$GITHUB_ENV"
           echo "ORT_PREFER_DYNAMIC_LINK=1" >> "$GITHUB_ENV"

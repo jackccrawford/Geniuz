@@ -10,7 +10,7 @@
 | Capture | Loading existing files into memory in bulk. |
 | Content | The full detail of a memory. |
 | Embed helper | `geniuz-embed`, which keeps the model loaded between calls. |
-| Embedding | Numbers representing a memory's meaning, used to search by meaning. |
+| Embedding | Numbers representing a meaning, used to search by meaning. A memory has two, one for its words and one for its gist; an older one, or one kept while the model was unavailable, may have fewer until `geniuz backfill`. |
 | Face | What the sidebar shows beside a folder's name: one emoji its writer chose, or else a small mosaic of nine tiles laid out from the folder's ID, so every folder has its own and it never changes. |
 | Folder | A directory holding one `memory.db`, with its own permanent UUID, name and description. |
 | Gist | The short line you find a memory by. |
@@ -23,7 +23,7 @@
 | My memory | Your first folder, made on first run. What `recall` reads when nothing names a folder. |
 | Parent | The earlier memory that a memory replies to. |
 | Pin | Keeping a folder at the top of every list. |
-| Recall | Searching your memories, by meaning or exactly. With nothing to search for, it shows the newest. |
+| Recall | Searching your memories, by meaning and by their words together. With nothing to search for, it shows the newest. |
 | Short ID | The first 8 characters of a UUID. A folder's short ID works anywhere its name does. |
 | Station | The older name for a folder, from before Geniuz 4.0. |
 | Thread | Memories linked by parent, such as a problem and its solution. |

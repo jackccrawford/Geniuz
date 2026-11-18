@@ -865,7 +865,10 @@ fn run(cli: Cli) -> Result<String, String> {
             ))
         }
 
-        Command::Recall { query, all, thread, grep, random, keyword, full, limit, since, until, json } => {
+        Command::Recall { query, all, thread, grep, random, keyword: _, full, limit, since, until, json } => {
+            // --keyword is still accepted so older scripts run, and does nothing: one
+            // search reads a query by meaning and by its words together (5.1.6).
+            let keyword = false;
             if query.as_deref() == Some("help") {
                 let mut cmd = Cli::build();
                 let sub = cmd.find_subcommand_mut("recall").unwrap();
@@ -879,6 +882,24 @@ fn run(cli: Cli) -> Result<String, String> {
             if all {
                 if IN_FOLDER.get().and_then(|f| f.as_deref()).is_some() {
                     return Err("--all searches every folder, so it can't be combined with --in.".to_string());
+                }
+                // Exact words in every folder: the same listing the MCP tool gives
+                // (5.1.6; before it, the command line refused --all with --grep).
+                if !grep.is_empty() {
+                    let reg = geniuz::folders::Registry::from_env();
+                    let terms = geniuz::dig::Terms::parse(&grep)?;
+                    let found = mcp::grep_all(&reg, &terms, &window, limit.unwrap_or(50).min(500));
+                    if json {
+                        let hits: Vec<serde_json::Value> = found.hits.iter().map(|(at, address, folder, line)| serde_json::json!({
+                            "address": address, "folder": folder, "created_at": at, "line": line,
+                        })).collect();
+                        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+                            "ok": true, "action": "grep", "count": hits.len(), "hits": hits,
+                            "folders_searched": found.searched, "folders_unread": found.skipped,
+                            "searched": mcp::grep_all_scope(&found, &grep),
+                        })).unwrap());
+                    }
+                    return Ok(mcp::grep_all_text(&found, &grep));
                 }
                 return recall_all(query.as_deref(), keyword, full, &window, limit.unwrap_or(20), json);
             }
@@ -953,8 +974,8 @@ fn run(cli: Cli) -> Result<String, String> {
                     match db.get_by_uuid_prefix(q)? {
                         Some(entry) => vec![entry],
                         None => {
-                            eprintln!("[geniuz] No memory found matching UUID {}, so searching by meaning instead.", q);
-                            mode = format!("semantic \"{q}\" (no memory has that id)");
+                            eprintln!("[geniuz] No memory found matching UUID {}, so searching for it as words instead.", q);
+                            mode = format!("search \"{q}\" (no memory has that id)");
                             db.semantic_search_in(q, &window, limit)?
                         }
                     }
@@ -1224,34 +1245,40 @@ fn run(cli: Cli) -> Result<String, String> {
             }
         }
 
-        Command::Backfill => {
+        Command::Backfill { all } => {
+            if all {
+                let report = geniuz::folders::backfill_all(&geniuz::folders::Registry::from_env());
+                let mut lines: Vec<String> = report.done.iter().map(|d| format!(
+                    "[backfill] {}: {} memories, {} gists{}", d.name, d.bodies, d.gists,
+                    if d.failed > 0 { format!(", {} failed", d.failed) } else { String::new() }
+                )).collect();
+                if report.skipped.is_empty() {
+                    if lines.is_empty() {
+                        return Ok("All memories cached.".to_string());
+                    }
+                    return Ok(lines.join("\n"));
+                }
+                // Some folders were not read: never "all cached", and an error, so a
+                // script notices.
+                lines.push("[backfill] Not done:".to_string());
+                lines.extend(report.skipped.iter().map(|(name, why)| format!("  {}: {}", name, why)));
+                return Err(lines.join("\n"));
+            }
             let db = get_db()?;
-            db.set_embedding_model(geniuz::embedding::model_id())?;
-
-            let uncached = db.unembedded_memories()?;
-            if uncached.is_empty() {
+            let todo = db.unembedded_memories()?.len() + db.ungisted_memories()?.len();
+            if todo == 0 {
                 return Ok("All memories cached.".to_string());
             }
-
-            println!("[backfill] {} memories to embed...", uncached.len());
-            let backend = geniuz::embedding::create_backend()?;
-
-            let mut cached = 0;
-            let mut failed = 0;
-            for (i, (uuid, content)) in uncached.iter().enumerate() {
-                match backend.embed(content) {
-                    Ok(emb) => {
-                        if db.cache_embedding(uuid, &emb).is_ok() { cached += 1; }
-                        else { failed += 1; }
-                    }
-                    Err(_) => { failed += 1; }
-                }
-                if (i + 1) % 50 == 0 {
-                    println!("[backfill] {}/{}", i + 1, uncached.len());
-                }
-            }
-
-            Ok(format!("[backfill] Done. {} cached, {} failed.", cached, failed))
+            println!("[backfill] {} to embed...", todo);
+            let mut loaded: Option<std::rc::Rc<dyn geniuz::embedding::EmbeddingBackend>> = None;
+            let mut backend = || -> Result<std::rc::Rc<dyn geniuz::embedding::EmbeddingBackend>, String> {
+                if let Some(b) = &loaded { return Ok(b.clone()); }
+                let b: std::rc::Rc<dyn geniuz::embedding::EmbeddingBackend> = std::rc::Rc::from(geniuz::embedding::create_backend()?);
+                loaded = Some(b.clone());
+                Ok(b)
+            };
+            let (bodies, gists, failed) = db.backfill(&mut backend)?;
+            Ok(format!("[backfill] Done. {} memories and {} gists cached, {} failed.", bodies, gists, failed))
         }
 
         Command::Status => {

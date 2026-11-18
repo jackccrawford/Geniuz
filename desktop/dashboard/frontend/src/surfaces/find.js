@@ -1,8 +1,7 @@
 // find.js — Find surface in Tool register.
 //
-// Large prominent input, mode toggle (Meaning | Exact), a time window, and
-// results: Meaning ranks memories (proper names first); Exact returns the
-// matching LINES from full content (Ember's dig). Every answer ends with
+// Large prominent input, a time window, and results ranked by meaning and
+// words together (proper names first). Every answer ends with
 // where to go next (names seen, pointers) and what was searched
 // (search features 1-5). Mode and window are
 // local to the surface; the query persists to the store so navigating to
@@ -16,16 +15,10 @@ import * as fmt from '../format.js';
 import { getState, setState, navigate } from '../store.js';
 import { openMemory } from '../components/memoryModal.js';
 
-const MODES = {
-  meaning: {
-    label: 'Meaning',
-    placeholder: 'Search by meaning… (Capitalized names match exactly)',
-  },
-  exact: {
-    label: 'Exact',
-    placeholder: 'Exact words or "a phrase"… every term must appear',
-  },
-};
+// One search (5.1.6): it reads the query by meaning and by its words together, so
+// there is no mode to choose. Capitalized names and "quoted phrases" still match
+// exactly and come first.
+const PLACEHOLDER = 'Search… (Capitalized names and "quoted phrases" match exactly)';
 
 // The time window: a value the CLI's --since takes, or null for all time.
 const WINDOWS = [
@@ -45,7 +38,7 @@ export async function mount(container) {
   // Mount-scoped state. Local `mounted` flag drops late results when the
   // router replaces this surface mid-flight.
   let mounted = true;
-  let mode = 'meaning';
+  const mode = 'meaning';
   let since = null;
   let query = (getState().searchQuery || '');
   let debounceTimer = null;
@@ -67,7 +60,7 @@ export async function mount(container) {
   header.className = 'main-header';
   header.innerHTML = `
     <h1 class="main-header__title">Find</h1>
-    <p class="main-header__sub">Search your folders, by meaning or by exact words.</p>
+    <p class="main-header__sub">Search your folders.</p>
   `;
   root.appendChild(header);
 
@@ -82,7 +75,7 @@ export async function mount(container) {
   const input = document.createElement('input');
   input.type = 'text';
   input.className = 'find-input';
-  input.placeholder = MODES[mode].placeholder;
+  input.placeholder = PLACEHOLDER;
   input.value = query;
   input.autocomplete = 'off';
   input.spellcheck = false;
@@ -93,31 +86,8 @@ export async function mount(container) {
   submitBtn.textContent = 'Search';
   inputWrap.appendChild(submitBtn);
 
-  const toggle = document.createElement('div');
-  toggle.className = 'find-mode-toggle';
-  const modeButtons = {};
-  for (const key of Object.keys(MODES)) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = MODES[key].label;
-    if (key === mode) btn.classList.add('is-active');
-    btn.addEventListener('click', () => {
-      if (mode === key) return;
-      mode = key;
-      for (const k of Object.keys(modeButtons)) {
-        modeButtons[k].classList.toggle('is-active', k === mode);
-      }
-      input.placeholder = MODES[mode].placeholder;
-      // Re-run immediately against the current query on mode change.
-      runSearch(query, /* immediate */ true);
-      input.focus();
-    });
-    modeButtons[key] = btn;
-    toggle.appendChild(btn);
-  }
   const controls = document.createElement('div');
   controls.className = 'find-controls';
-  controls.appendChild(toggle);
 
   const windowToggle = document.createElement('div');
   windowToggle.className = 'find-mode-toggle';
@@ -279,7 +249,7 @@ export async function mount(container) {
     renderLoading();
     let results;
     try {
-      results = await api.find(q, mode, since, mode === 'exact' ? 100 : RESULT_LIMIT, [...chosen]);
+      results = await api.find(q, mode, since, RESULT_LIMIT, [...chosen]);
     } catch (e) {
       if (!mounted || ticket !== inFlight) return;
       renderError(e);
@@ -293,8 +263,9 @@ export async function mount(container) {
   function renderHint() {
     resultsEl.innerHTML = `
       <div class="surface-empty">
-        Type to search. Meaning ranks by similarity, with Capitalized names
-        matched exactly and first. Exact shows the lines holding every word.
+        Type to search. Memories are found by what they mean and by the words
+        they hold, together. Capitalized names and "quoted phrases" are matched
+        exactly and come first.
       </div>
     `;
   }
@@ -368,11 +339,8 @@ export async function mount(container) {
           chip.type = 'button';
           chip.className = 'find-next__chip';
           chip.textContent = n;
-          chip.title = `Find lines naming ${n}`;
+          chip.title = `Search for ${n}`;
           chip.addEventListener('click', () => {
-            mode = 'exact';
-            for (const k of Object.keys(modeButtons)) modeButtons[k].classList.toggle('is-active', k === mode);
-            input.placeholder = MODES[mode].placeholder;
             input.value = n;
             query = n;
             setState({ searchQuery: query });

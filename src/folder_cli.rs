@@ -22,6 +22,15 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
             lines.extend(found.iter().map(|f| format!("  {} ({})", f.name, f.short_id())));
             Ok(lines.join("\n"))
         }
+        FolderCommand::Export { all: Some(dir), .. } => export_all(&reg, &dir),
+        FolderCommand::Export { name, to, all: None } => {
+            let name = name.ok_or("Name the folder to export, or use --all <DIRECTORY>.")?;
+            let to = to.ok_or_else(|| format!("Say where to write it: geniuz folder export {} <FILE>", name))?;
+            let f = reg.find(&name)?;
+            let bytes = export_one(&f, &to)?;
+            Ok(format!("Exported {} ({}) to {} ({}).\nIt is a backup to keep: every memory and image, in one file.",
+                f.name, f.short_id(), to.display(), size(bytes)))
+        }
         FolderCommand::Remove { path } => {
             reg.remove(&path)?;
             Ok(format!("Geniuz no longer looks in {}. Its files weren't touched.", path.display()))
@@ -256,4 +265,122 @@ fn clip(text: &str) -> String {
     }
     let cut: String = flat.chars().take(CLIPPED).collect();
     format!("{}…", cut.trim_end())
+}
+
+/// A whole number of bytes as a person reads it.
+fn size(bytes: u64) -> String {
+    match bytes {
+        b if b >= 1 << 20 => format!("{:.1} MB", b as f64 / (1u64 << 20) as f64),
+        b if b >= 1 << 10 => format!("{} KB", b >> 10),
+        b => format!("{} bytes", b),
+    }
+}
+
+/// One folder to one file. Never over a file that is already there: a backup that
+/// replaced an older backup by accident is worse than an error.
+fn export_one(f: &Folder, to: &std::path::Path) -> Result<u64, String> {
+    if to.is_dir() {
+        return Err(format!("{} is a directory. Name the file to write, such as {}.",
+            to.display(), to.join(export_name(f)).display()));
+    }
+    // Take the name first, in one step that fails if anything is there: looking and
+    // then copying would let a file that appeared in between be written over.
+    let exists = || format!("{} already exists, and an export never overwrites a file. Choose another name.", to.display());
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(to) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(exists()),
+        Err(e) => return Err(format!("Couldn't write {}: {}", to.display(), e)),
+    }
+    // Copy beside it, and put the whole file in place only when it is complete, so a
+    // copy that fails leaves nothing behind to block the next try.
+    let partial = to.with_file_name(format!(
+        ".{}.partial-{}", to.file_name().and_then(|n| n.to_str()).unwrap_or("export"), std::process::id()
+    ));
+    let done = geniuz::folders::backup_to(&f.db_path, &partial)
+        .and_then(|bytes| std::fs::rename(&partial, to).map(|_| bytes).map_err(|e| format!("Couldn't finish {}: {}", to.display(), e)));
+    if done.is_err() {
+        let _ = std::fs::remove_file(&partial);
+        let _ = std::fs::remove_file(to);
+    }
+    done
+}
+
+/// `Work-13625F6B.db`: the name for whoever reads the directory, the ID because
+/// two folders can share a name. Characters a file name can't hold become `-`.
+fn export_name(f: &Folder) -> String {
+    let name: String = f.name.chars()
+        .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' || c == '.' { c } else { '-' })
+        .collect();
+    format!("{}-{}.db", name.trim(), f.short_id())
+}
+
+fn export_all(reg: &Registry, dir: &std::path::Path) -> Result<String, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {}", dir.display(), e))?;
+    let scan = reg.scan();
+    let (mut lines, mut done, mut total) = (Vec::new(), 0, 0u64);
+    // What Geniuz knows of but can't use right now is not exported, and must be said:
+    // a backup that quietly leaves a folder out is the one found missing later.
+    for dir in &scan.unavailable {
+        lines.push(format!("  {}: can't be reached right now", dir.display()));
+    }
+    for b in &scan.blocked {
+        lines.push(format!("  {} ({}): {}", b.name, b.uuid.chars().take(8).collect::<String>(), b.reason));
+    }
+    let folders = scan.folders;
+    for f in &folders {
+        match export_one(f, &dir.join(export_name(f))) {
+            Ok(bytes) => { done += 1; total += bytes; }
+            Err(e) => lines.push(format!("  {} ({}): {}", f.name, f.short_id(), e)),
+        }
+    }
+    let mut out = format!("Exported {} of {} to {} ({}).", done, plural(folders.len()), dir.display(), size(total));
+    if lines.is_empty() {
+        Ok(out)
+    } else {
+        // Some were not written: say which, and fail, so a nightly script notices.
+        out.push_str("\nNot exported:\n");
+        out.push_str(&lines.join("\n"));
+        Err(out)
+    }
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+
+    fn folder(name: &str, db: &std::path::Path) -> Folder {
+        Folder {
+            uuid: "13625F6B-0000-4000-8000-000000000000".into(), name: name.into(),
+            description: String::new(), face: String::new(), created: String::new(),
+            db_path: db.to_path_buf(),
+        }
+    }
+
+    #[test]
+    fn an_export_is_named_for_its_folder_and_never_replaces_a_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("memory.db");
+        geniuz::db::DatabaseManager::new(&db.to_string_lossy()).unwrap()
+            .keep_with_backend("kept", "kept", None, None).ok();
+        let f = folder("Q3: plans/drafts", &db);
+        // What a file name can't hold becomes a dash; the ID tells two "Work"s apart.
+        assert_eq!(export_name(&f), "Q3- plans-drafts-13625F6B.db");
+
+        let to = dir.path().join("copy.db");
+        assert!(export_one(&f, &to).unwrap() > 0);
+        let first = std::fs::read(&to).unwrap();
+        assert!(export_one(&f, &to).unwrap_err().contains("already exists"));
+        assert_eq!(std::fs::read(&to).unwrap(), first, "a refused export changes nothing");
+        // A copy that fails leaves no file behind to block the next try.
+        let gone = folder("gone", &dir.path().join("no-such-folder").join("memory.db"));
+        let other = dir.path().join("other.db");
+        assert!(export_one(&gone, &other).is_err());
+        assert!(!other.exists());
+        let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains("partial")).collect();
+        assert!(left.is_empty());
+        assert!(export_one(&f, dir.path()).unwrap_err().contains("is a directory"));
+        assert_eq!(size(512), "512 bytes");
+        assert_eq!(size(217_088), "212 KB");
+    }
 }

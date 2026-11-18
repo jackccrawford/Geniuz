@@ -91,6 +91,16 @@ CREATE TABLE IF NOT EXISTS memory_embeddings (
     embedding   BLOB NOT NULL
 );
 
+-- A second vector per memory, made from its gist alone (5.1.6). A long body's vector
+-- is an average of everything in it; the gist is the one line saying what the memory
+-- is. Search scores a memory by whichever of the two is closer to the query. Filled
+-- when a memory is kept and both embeddings succeed; older memories that have a body
+-- vector are filled a few at a time as the folder is searched.
+CREATE TABLE IF NOT EXISTS memory_gist_embeddings (
+    memory_uuid TEXT PRIMARY KEY NOT NULL,
+    embedding   BLOB NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS embedding_meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL

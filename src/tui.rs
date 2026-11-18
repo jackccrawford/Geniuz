@@ -229,13 +229,16 @@ impl App {
                     .select(if self.memories.is_empty() { None } else { Some(0) });
                 self.status = format!("recent · showing {}", self.memories.len());
             }
-            "search" => {
+            // One search (5.1.6): by meaning and by words together. The older names
+            // for the two kinds still work and do the same thing.
+            "search" | "find" | "similar" | "semantic" => {
                 if arg.is_empty() {
                     self.status = "usage: /search <query>".into();
                 } else {
                     self.memories = self
                         .db
-                        .keyword_search(arg, 24)
+                        .semantic_search(arg, 24)
+                        .or_else(|_| self.db.keyword_search(arg, 24))
                         .map_err(|e| anyhow::anyhow!(e))?;
                     self.rows.clear();
                     self.mode = Mode::Search;
@@ -243,22 +246,6 @@ impl App {
                     self.list_state
                         .select(if self.memories.is_empty() { None } else { Some(0) });
                     self.status = format!("search: {} · {} matches", arg, self.memories.len());
-                }
-            }
-            "find" | "similar" | "semantic" => {
-                if arg.is_empty() {
-                    self.status = "usage: /find <query>".into();
-                } else {
-                    self.memories = self
-                        .db
-                        .semantic_search(arg, 24)
-                        .map_err(|e| anyhow::anyhow!(e))?;
-                    self.rows.clear();
-                    self.mode = Mode::Search;
-                    self.detail = None;
-                    self.list_state
-                        .select(if self.memories.is_empty() { None } else { Some(0) });
-                    self.status = format!("find: {} · {} matches", arg, self.memories.len());
                 }
             }
             "detail" => {
@@ -744,8 +731,7 @@ fn render_help(f: &mut Frame, area: Rect) {
         Line::raw(""),
         Line::from(vec![Span::styled("COMMANDS", header)]),
         Line::from(vec![Span::styled("  /recent [n]   ", cmd), Span::raw("last n memories (default 24)")]),
-        Line::from(vec![Span::styled("  /search <q>   ", cmd), Span::raw("keyword search across gists and content")]),
-        Line::from(vec![Span::styled("  /find <q>     ", cmd), Span::raw("find by meaning (semantic search)")]),
+        Line::from(vec![Span::styled("  /search <q>   ", cmd), Span::raw("search by meaning and by words, together")]),
         Line::from(vec![Span::styled("  /keep         ", cmd), Span::raw("author a new memory (compose pane)")]),
         Line::from(vec![Span::styled("  /detail [id]  ", cmd), Span::raw("open detail; no arg uses selected row")]),
         Line::from(vec![Span::styled("  /random       ", cmd), Span::raw("open a random memory")]),

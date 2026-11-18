@@ -423,6 +423,14 @@ mod host_tests {
         let dir = std::env::temp_dir().join(format!("geniuz-pin-{}-{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        // Ours alone, whatever the umask: a note is trusted only in a directory
+        // nobody else can write to, and Ubuntu's default umask (002) makes a new
+        // directory group-writable. Geniuz itself creates its own with 700.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         dir
     }
 
@@ -542,6 +550,32 @@ pub fn embed_content(text: &str) -> Result<Vec<f32>, String> {
     // Fallback: load model inline (~500ms)
     let backend = create_backend()?;
     backend.embed(text)
+}
+
+/// Whether the search model's files are already on this computer. Background work
+/// asks this first, so that it never starts a download: two downloads at once
+/// (a search beginning while a backfill does) would share one partial file.
+pub fn model_is_here() -> bool {
+    let dir = std::env::var("GENIUZ_MODELS_PATH").map(PathBuf::from).unwrap_or_else(|_| default_models_dir());
+    dir.join("model.onnx").is_file() && dir.join("tokenizer.json").is_file()
+}
+
+/// A gist as the search model should read it. Many gists are written
+/// `like_this: with_underscores`, which the model reads as one unknown word.
+pub fn gist_text(gist: &str) -> String {
+    gist.replace('_', " ")
+}
+
+/// Embed a memory's body and its gist with one model load: the helper if it is
+/// running, else the model loaded here once for both.
+pub fn embed_pair(body: &str, gist: &str) -> (Option<Vec<f32>>, Option<Vec<f32>>) {
+    if let Some(b) = crate::embed_client::embed_via_socket(body) {
+        return (Some(b), crate::embed_client::embed_via_socket(gist));
+    }
+    match create_backend() {
+        Ok(be) => (be.embed(body).ok(), be.embed(gist).ok()),
+        Err(_) => (None, None),
+    }
 }
 
 pub fn model_id() -> &'static str { "paraphrase-multilingual-MiniLM-L12-v2-qint8" }

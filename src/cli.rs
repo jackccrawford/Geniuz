@@ -10,7 +10,7 @@ use std::path::PathBuf;
     about = "Your AI remembers now",
     long_about = "GENIUZ: Your AI remembers now.\n\nYour AI starts every conversation from zero. Geniuz keeps what matters,\nthe calls you made and the reasons behind them, on your own computer,\nwhere any AI you use can find it: Claude Desktop through MCP, or any\nagent that can run a command. A memory is never edited, so the record holds.",
     before_help = "Start here: 'geniuz recall' shows what's in your folder.",
-    after_help = "Examples:\n  geniuz keep -f Work -c \"Chose the smaller vendor: faster support\" -g \"decision: vendor\"\n  geniuz recall \"vendor\"                 Search by meaning\n  geniuz recall --grep Acme              Literal text: every line that has it\n  geniuz recall 13625F6B:3487B9B0        Open one memory by its address\n  geniuz recall --all \"pricing\"          Every folder at once\n  geniuz capture -f Docs ./policies/     Keep a folder of documents\n\nFolders: 'geniuz folder list' shows them; -f <name> uses one for a command.\n  A project, a team, an agent: each can have its own, or share one.\n\nData: everything stays in .geniuz in your home directory.\n  GENIUZ_HOME moves it; GENIUZ_DB names one memory file.\n\nUse \"geniuz <command> --help\" for more."
+    after_help = "Examples:\n  geniuz keep -f Work -c \"Chose the smaller vendor: faster support\" -g \"decision: vendor\"\n  geniuz recall \"vendor\"                 Search, by meaning and by words\n  geniuz recall --grep Acme              Literal text: every line that has it\n  geniuz recall 13625F6B:3487B9B0        Open one memory by its address\n  geniuz recall --all \"pricing\"          Every folder at once\n  geniuz capture -f Docs ./policies/     Keep a folder of documents\n\nFolders: 'geniuz folder list' shows them; -f <name> uses one for a command.\n  A project, a team, an agent: each can have its own, or share one.\n\nData: everything stays in .geniuz in your home directory.\n  GENIUZ_HOME moves it; GENIUZ_DB names one memory file.\n\nUse \"geniuz <command> --help\" for more."
 )]
 pub struct Cli {
     // -f and --folder as well: agents name a folder on most calls, so it gets a short
@@ -138,16 +138,17 @@ pub enum Command {
         json: bool,
     },
 
-    /// Search your memories, by meaning unless you ask for exact words
+    /// Search your memories, by meaning and by their words together
     #[command(
-        after_help = "Examples:\n  geniuz recall \"auth token\"                  Semantic search\n  geniuz recall --keyword \"auth\"               Keyword fallback\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n  geniuz recall --grep Cubic --since 7d        Lines naming Cubic, past week\n\nTip: Run 'geniuz backfill' first to enable semantic search."
+        after_help = "Examples:\n  geniuz recall \"auth token\"                  Search: by meaning and by words, together\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n  geniuz recall --grep Cubic --since 7d        Lines naming Cubic, past week\n  geniuz recall --all --grep Cubic             The same, in every folder"
     )]
     Recall {
         /// Search query, or an address like 13625F6B:3487B9B0 to open that memory
         query: Option<String>,
 
-        /// Search every folder. Each result shows the address that opens it
-        #[arg(long, conflicts_with_all = ["thread", "grep", "random"])]
+        /// Search every folder. Each result shows the address that opens it.
+        /// With --grep: every folder's matching lines
+        #[arg(long, conflicts_with_all = ["thread", "random"])]
         all: bool,
 
         /// Show the whole thread this memory belongs to (a UUID, prefix or address):
@@ -165,8 +166,8 @@ pub enum Command {
         #[arg(long)]
         random: bool,
 
-        /// Force keyword search (skip semantic)
-        #[arg(short, long)]
+        /// No longer needed: search reads a query by meaning and by words together
+        #[arg(short, long, hide = true)]
         keyword: bool,
 
         /// Include full content (no short form: -f names the folder)
@@ -279,9 +280,13 @@ pub enum Command {
 
     /// Make memories without an embedding searchable by meaning
     #[command(
-        after_help = "Embeds all content using ONNX (paraphrase-multilingual-MiniLM-L12-v2).\nFirst run downloads the model (~118MB). Subsequent runs only process new memories."
+        after_help = "Makes the vectors search by meaning uses, for memories that lack them:\none for a memory's words and one for its gist.\nThe first run downloads the search model (about 127 MB). Later runs only do what is new.\n\n  geniuz backfill          This folder\n  geniuz backfill --all    Every folder"
     )]
-    Backfill,
+    Backfill {
+        /// Every folder, not only this one
+        #[arg(long)]
+        all: bool,
+    },
 
     /// Show usage guide for agents
     Skill,
@@ -361,6 +366,21 @@ pub enum FolderCommand {
     Add {
         /// The directory
         path: PathBuf,
+    },
+
+    /// Write a complete copy of a folder to one file, safe to take while Geniuz is in use
+    #[command(
+        after_help = "The copy is one file holding every memory and image of the folder, with the same IDs.\nIt is a backup to keep, not a folder to use: 'folder add' refuses it while the original is here.\nA plain copy of a folder's files can miss recent memories; this can't.\nAn existing file is never overwritten.\n\n  geniuz folder export Work ~/Backups/work.db\n  geniuz folder export --all ~/Backups/2026-11-17     One file per folder, in that directory"
+    )]
+    Export {
+        /// Name or 8-character ID (leave out with --all)
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        name: Option<String>,
+        /// The file to write; with --all, the directory to write one file per folder into
+        to: Option<PathBuf>,
+        /// Every folder, each to its own file in a directory
+        #[arg(long, value_name = "DIRECTORY")]
+        all: Option<PathBuf>,
     },
 
     /// Stop looking in an added directory. Its files aren't touched

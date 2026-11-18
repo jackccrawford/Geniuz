@@ -1268,6 +1268,16 @@ pub fn run() {
         geniuz::private::Found::StillOpen(note) => eprintln!("[geniuz] {}", note),
         _ => {}
     }
+    // Folders from before 5.1.6 have no vectors for their gists. Make them while the
+    // window is open, in every folder, without asking (Jack, 17 Nov 2026: with so few
+    // installs, just backfill). The model is loaded only if some folder needs it.
+    // Only when the model is already on this computer: this must never begin a
+    // download, which a first search could begin at the same moment.
+    std::thread::spawn(|| {
+        if geniuz::embedding::model_is_here() {
+            geniuz::folders::backfill_all(&Registry::from_env());
+        }
+    });
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // Re-launch attempt: focus the existing window instead of

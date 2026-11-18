@@ -74,3 +74,67 @@ pub fn search_across(reg: &Registry, search: &Search, window: &Window, limit: us
     out.hits.truncate(limit);
     out
 }
+
+/// What [`backfill_all`] did in one folder.
+pub struct Backfilled {
+    pub name: String,
+    pub bodies: usize,
+    pub gists: usize,
+    pub failed: usize,
+}
+
+/// What [`backfill_all`] did: the folders it changed, and the ones it could not
+/// read or finish, each with the reason. A caller that says "all done" must look
+/// at `skipped` first.
+#[derive(Default)]
+pub struct BackfillReport {
+    pub done: Vec<Backfilled>,
+    pub skipped: Vec<(String, String)>,
+}
+
+/// Make every missing vector in every folder, loading the model once and only if
+/// some folder needs it. A folder that can't be read is reported and passed by; the
+/// rest still run. Only the model failing to load ends the run, since no folder
+/// after that would fare better. Folders with nothing to do are left out.
+pub fn backfill_all(reg: &Registry) -> BackfillReport {
+    let mut loaded: Option<std::rc::Rc<dyn EmbeddingBackend>> = None;
+    let no_model = std::cell::RefCell::new(None::<String>);
+    let mut backend = || -> Result<std::rc::Rc<dyn EmbeddingBackend>, String> {
+        if let Some(b) = &loaded { return Ok(b.clone()); }
+        match crate::embedding::create_backend() {
+            Ok(b) => {
+                let b: std::rc::Rc<dyn EmbeddingBackend> = std::rc::Rc::from(b);
+                loaded = Some(b.clone());
+                Ok(b)
+            }
+            Err(e) => {
+                *no_model.borrow_mut() = Some(e.clone());
+                Err(e)
+            }
+        }
+    };
+    let mut report = BackfillReport::default();
+    let scan = reg.scan();
+    for dir in &scan.unavailable {
+        report.skipped.push((dir.display().to_string(), "can't be reached right now".to_string()));
+    }
+    for b in &scan.blocked {
+        report.skipped.push((b.name.clone(), b.reason.clone()));
+    }
+    for f in scan.folders {
+        let db = match crate::db::DatabaseManager::open_existing(&f.db_path.to_string_lossy()) {
+            Ok(db) => db,
+            Err(e) => { report.skipped.push((f.name, e)); continue; }
+        };
+        match db.backfill(&mut backend) {
+            Ok((0, 0, 0)) => {}
+            Ok((bodies, gists, failed)) => report.done.push(Backfilled { name: f.name, bodies, gists, failed }),
+            Err(e) => {
+                let model_failed = no_model.borrow().is_some();
+                report.skipped.push((f.name, e));
+                if model_failed { break; }
+            }
+        }
+    }
+    report
+}
