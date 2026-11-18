@@ -57,6 +57,10 @@ pub const OWN_PRODUCTS: [&str; 3] = ["geniuz", "clawmark", "relay-for-claw"];
 /// Where a file from before Geniuz 4.0 can be brought forward.
 pub const MIGRATION_SCRIPT: &str = "schema/migrate-before-4.0.sql";
 
+/// The schema this version creates. Every statement is `IF NOT EXISTS` or `INSERT OR
+/// IGNORE`, so applying it to a store that has it changes nothing.
+pub const SCHEMA: &str = include_str!("../schema/schema.sql");
+
 /// A file from before Geniuz 4.0 (a `signals` table, or a `signal_uuid` column) is
 /// refused with the way forward, not converted in place.
 fn check_format(conn: &Connection, db_path: &str) -> Result<(), String> {
@@ -136,7 +140,7 @@ impl DatabaseManager {
 
         if !has_memories {
             // Fresh database: create from scratch
-            let schema = include_str!("../schema/schema.sql");
+            let schema = SCHEMA;
             conn.execute_batch(schema)
                 .map_err(|e| format!("Failed to init schema: {}", e))?;
         } else {
@@ -154,7 +158,7 @@ impl DatabaseManager {
             // modes are read-only media and a concurrent writer holding the
             // lock; either way the database still opens and works, and the
             // next successful open applies what's missing.
-            let schema = include_str!("../schema/schema.sql");
+            let schema = SCHEMA;
             if let Err(e) = conn.execute_batch(schema) {
                 eprintln!("[geniuz] Schema re-apply skipped (non-fatal): {}", e);
             }

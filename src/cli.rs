@@ -383,6 +383,18 @@ pub enum FolderCommand {
         all: Option<PathBuf>,
     },
 
+    /// Bring an exported folder in: the same folder, with the same IDs, on this computer
+    #[command(
+        after_help = "Takes the one file `geniuz folder export` (or the window's Export) wrote, and puts a copy of it here as a folder.\nThe folder keeps its ID, and every memory keeps its ID and its thread, so addresses still open.\nThe file you import from isn't changed. Nothing is merged: a folder that is already here is refused.\nIt holds what the folder held when it was exported, and nothing kept there since.\n\n  geniuz folder import ~/Backups/work.db\n  geniuz folder import ~/Downloads/notes.db --as \"Field notes\"     Under another name; the ID is the same"
+    )]
+    Import {
+        /// The exported file
+        file: PathBuf,
+        /// The name to give it here, if not the one it carries
+        #[arg(long = "as", value_name = "NAME")]
+        name: Option<String>,
+    },
+
     /// Stop looking in an added directory. Its files aren't touched
     Remove {
         /// The directory

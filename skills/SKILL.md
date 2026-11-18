@@ -113,7 +113,7 @@ A wrong name is an error, never a different folder. A `.geniuz-folder` file hold
 
 Multiple agents can use the same folder. What one agent learns, every agent finds. That also makes a folder a way to leave each other messages: thread your reply to theirs with `-p`.
 
-Never copy a folder's files: a copy of a live database can lose memories, and a folder can't be duplicated, because its ID and its memories' IDs are permanent. To relocate one, use `geniuz folder move`.
+Never copy a folder's files: a copy of a live database can lose memories, and a folder can't be duplicated, because its ID and its memories' IDs are permanent. To relocate one, use `geniuz folder move`. To bring one from another computer, export it there (`geniuz folder export NAME file.db`) and import the file here (`geniuz folder import file.db`, with `--as "Name"` if its name is taken): it arrives as the same folder with the same IDs. Nothing merges, and a folder already here is refused, so stop keeping at the source before exporting.
 
 ## When to keep
 

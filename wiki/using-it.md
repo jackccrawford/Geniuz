@@ -103,6 +103,8 @@ geniuz folder add /some/directory
 geniuz folder remove /some/directory
 geniuz folder move Clients --to /some/directory
 geniuz folder archive Clients
+geniuz folder export Clients ~/Backups/clients.db
+geniuz folder import ~/Backups/clients.db
 geniuz folder restore Clients
 geniuz folder pin Clients
 geniuz folder unpin Clients
@@ -184,7 +186,14 @@ Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory
 
 **To back up**, use Export under Data & Export in the dashboard, which saves the folder on screen as one complete file, or `geniuz folder export Work ~/Backups/work.db` from the command line. `geniuz folder export --all ~/Backups/2026-11-17` writes one file per folder into that directory. From the command line an export never overwrites a file, so a nightly job gives each run a new directory, named for its date, and removes old ones itself. Time Machine and similar tools are fine too. A backup is a file to keep, not a folder to use: it holds the same permanent IDs, so Geniuz refuses it while the original is present.
 
-**Do not copy a folder by hand to use it elsewhere.** A copy of a live database can lose recent memories, and copies aren't supported. Use `geniuz folder move`.
+**To bring a folder to another computer**, export it there and import the file here: `geniuz folder import ~/Downloads/clients.db`. It arrives as the same folder: the same ID, and every memory with its own ID and its thread, so an address written anywhere still opens. The file you import from isn't changed. Three things to know:
+
+- **It holds what the folder held when it was exported.** Nothing is merged, now or later, so stop keeping at the source first, or what is kept there afterwards stays there.
+- **A folder that is already here is refused**, in use or archived. Importing never replaces anything.
+- **Every place Geniuz reads must be reachable.** If a drive you added is unplugged, plug it in or take it off the list first: Geniuz won't import while it can't check that the folder isn't already there.
+- **A name already in use is refused too**, with the way forward: `--as "Another name"` imports it under a name of your choosing (the ID is unchanged), or, if the folder with that name is an empty placeholder you made for the one arriving, archive the placeholder first.
+
+**Do not copy a folder by hand to use it elsewhere.** A copy of a live database can lose recent memories, and copies aren't supported. Use `geniuz folder move` on one computer, and export then import between two.
 
 Read the schema freely, and write through Geniuz, which keeps embeddings and identity right.
 

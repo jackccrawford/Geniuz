@@ -291,6 +291,12 @@ pub(super) fn finish_interrupted_moves(root: &Path, live: &[Folder], paused: &[F
             let archive = root.join(ARCHIVE_DIR);
             let _ = std::fs::create_dir_all(&archive);
             let aside = archive.join(format!("{}{}{}", uuid, ABANDONED_MARK, stamp));
+            // Windows refuses to rename a directory while any file in it is open, and the
+            // lock just taken is a file in this one: held, the rename failed on every
+            // scan and nothing said so (found by SSH on orbit, 18 Nov 2026). If another
+            // process takes the lock in between, it attempts the same rename and one of
+            // the two fails, which is harmless.
+            drop(owner);
             changed |= std::fs::rename(&staging, aside).is_ok();
             continue;
         }

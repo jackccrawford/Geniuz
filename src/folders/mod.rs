@@ -782,10 +782,12 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
 mod across;
 mod archive;
 mod identity;
+mod import;
 mod moving;
 
 pub use across::*;
 pub use identity::identity_at;
+pub use import::Imported;
 pub use moving::backup_to;
 use identity::*;
 use moving::*;
