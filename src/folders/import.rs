@@ -266,6 +266,18 @@ impl Registry {
             }
             return Err(why);
         }
+        // A blocked folder's name is taken too: a lookup by name finds the blocked one
+        // first and stops there, so this folder could never be reached by its name. An
+        // archived folder's name is free on purpose: archiving an empty placeholder is
+        // how its name is handed to the folder it stood for.
+        if let Some(b) = scan.blocked.iter().find(|b| name_key(&b.name) == name_key(&name)) {
+            return Err(format!(
+                "A folder called \"{}\" is here and blocked ({}). Import this one under another name:\n  geniuz folder import \"{}\" --as \"<NAME>\"",
+                b.name,
+                b.reason,
+                source.display()
+            ));
+        }
         let was_called = (name != found.name).then(|| found.name.clone());
         if was_called.is_some() {
             replace_meta(&copy, KEY_NAME, &name)?;
@@ -406,7 +418,26 @@ fn only_our_schema(conn: &Connection) -> Result<(), String> {
     }
     batch.push_str("COMMIT;\n");
     conn.execute_batch(&batch).map_err(fail)?;
-    conn.execute_batch(crate::db::SCHEMA).map_err(fail)
+    conn.execute_batch(crate::db::SCHEMA).map_err(fail)?;
+
+    // The schema creates only what isn't there. A table that arrived under the name of
+    // one of our views would still be standing, and everything that reads that view
+    // would read the file's table instead. So every name our schema makes must now be
+    // the kind of thing our schema makes it.
+    let ours = Connection::open_in_memory().map_err(fail)?;
+    ours.execute_batch(crate::db::SCHEMA).map_err(fail)?;
+    let kinds = |c: &Connection| -> Result<HashMap<String, String>, rusqlite::Error> {
+        let mut stmt = c.prepare("SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view', 'trigger')")?;
+        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?.to_lowercase(), r.get(1)?)))?;
+        rows.collect()
+    };
+    let (expected, found) = (kinds(&ours).map_err(fail)?, kinds(conn).map_err(fail)?);
+    for (name, kind) in &expected {
+        if found.get(name) != Some(kind) {
+            return Err(format!("it has something of its own under the name {}, which Geniuz uses for a {}", name, kind));
+        }
+    }
+    Ok(())
 }
 
 /// Have the file's bytes on the disk, not only on their way there.

@@ -1659,3 +1659,58 @@ fn unsaved_changes_are_seen_beside_a_file_whose_name_is_not_text() {
     let err = reg.import(&odd, None).unwrap_err();
     assert!(err.contains("unsaved changes"), "{err}");
 }
+
+/// cubic on #68.
+#[test]
+fn a_table_under_the_name_of_one_of_our_views_and_a_blocked_folders_name_are_refused() {
+    let (tmp, reg) = setup();
+    let (file, _) = exported(&tmp, "Shadow", &[M1]);
+    let conn = rusqlite::Connection::open(&file).unwrap();
+    conn.execute_batch("DROP VIEW memory_chains; CREATE TABLE memory_chains (memory_uuid TEXT, gist TEXT); PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    drop(conn);
+    let _ = std::fs::remove_file(format!("{}-wal", file.display()));
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("under the name memory_chains"), "{err}");
+
+    // Two copies of one folder in reach: both blocked, and their name is not free.
+    let shelf = tmp.path().join("shelf");
+    let work = reg.create("Work", "", Some(&shelf)).unwrap();
+    copy_dir(work.db_path.parent().unwrap(), &shelf.join("twin"));
+    assert_eq!(reg.scan().blocked.len(), 2);
+    let (other, _) = exported(&tmp, "work", &[M2]);
+    let err = reg.import(&other, None).unwrap_err();
+    assert!(err.contains("blocked") && err.contains("--as"), "{err}");
+    // An archived folder's name is free: that is how a placeholder hands its name over.
+    let (third, _) = exported(&tmp, "Held", &[M3]);
+    reg.create("Held", "", None).unwrap();
+    reg.archive("Held").unwrap();
+    assert_eq!(reg.import(&third, None).unwrap().folder.name, "Held");
+}
+
+/// A copy an earlier move left behind must not be put in place because a later move
+/// of the same folder, to somewhere else, closed the original.
+#[test]
+fn a_copy_that_lacks_memories_its_closed_original_holds_is_not_published() {
+    let (tmp, reg) = setup();
+    let work = reg.create("Work", "", None).unwrap();
+    add_memory(&work.db_path, M1);
+    // What an interrupted move left: a copy without the record that it is final.
+    let dest = tmp.path().join("dest");
+    std::fs::create_dir_all(&dest).unwrap();
+    reg.remember_added(&dest).unwrap();
+    let stale = dest.join(format!("{}{}", MOVING_PREFIX, work.uuid));
+    copy_dir(work.db_path.parent().unwrap(), &stale);
+    // Since then a memory was kept, and another move closed the original.
+    add_memory(&work.db_path, M2);
+    let conn = rusqlite::Connection::open(&work.db_path).unwrap();
+    let sql = super::moving::fence_sql(&conn).unwrap();
+    conn.execute_batch(&sql).unwrap();
+    drop(conn);
+
+    let scan = reg.scan();
+    assert!(!dest.join(&work.uuid).exists(), "the stale copy was not put in place");
+    assert!(stale.exists());
+    assert_eq!(scan.pending_moves.len(), 1);
+    assert_eq!(scan.pending_moves[0].file_name(), stale.file_name());
+    assert!(work.db_path.exists(), "and the original was not retired for it");
+}

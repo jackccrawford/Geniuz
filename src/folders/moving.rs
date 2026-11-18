@@ -293,17 +293,34 @@ pub(super) fn finish_interrupted_moves(root: &Path, live: &[Folder], paused: &[F
             let aside = archive.join(format!("{}{}{}", uuid, ABANDONED_MARK, stamp));
             // Windows refuses to rename a directory while any file in it is open, and the
             // lock just taken is a file in this one: held, the rename failed on every
-            // scan and nothing said so (found by SSH on orbit, 18 Nov 2026). If another
-            // process takes the lock in between, it attempts the same rename and one of
-            // the two fails, which is harmless.
+            // scan and nothing said so (found by SSH on orbit, 18 Nov 2026). So there,
+            // and only there, it is let go first. Everywhere else it is held through the
+            // rename, as it always was, so no other scan can pick this copy up in between.
+            // What another scan could do with it in that moment on Windows is bounded
+            // below: a copy that lacks any memory its original holds is never published.
+            #[cfg(windows)]
             drop(owner);
             changed |= std::fs::rename(&staging, aside).is_ok();
             continue;
         }
         let original = paused.iter().find(|f| f.uuid.eq_ignore_ascii_case(uuid));
-        if original.is_none() && !staging.join(MOVE_COMMITTED).exists() {
+        let committed = staging.join(MOVE_COMMITTED).exists();
+        if original.is_none() && !committed {
             pending.push(staging);
             continue;
+        }
+        // A closed original was taken as proof that this copy is final. It is proof
+        // only if it was closed for this copy: a later move of the same folder, to
+        // somewhere else, closes the original too, and a copy an earlier move left
+        // here would then be put in place without the memories kept since. Without
+        // the record that this copy is final, it must hold every memory its original
+        // holds, or it waits. (Raised by cubic on #68; the gap was older than that change.)
+        if let (false, Some(original)) = (committed, original) {
+            let held: HashSet<String> = memory_ids(&staging.join(DB_FILE)).into_iter().collect();
+            if memory_ids(&original.db_path).iter().any(|id| !held.contains(id)) {
+                pending.push(staging);
+                continue;
+            }
         }
 
         // Only something that really is this folder, complete and readable.
