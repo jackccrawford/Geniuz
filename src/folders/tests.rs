@@ -1714,3 +1714,72 @@ fn a_copy_that_lacks_memories_its_closed_original_holds_is_not_published() {
     assert_eq!(scan.pending_moves[0].file_name(), stale.file_name());
     assert!(work.db_path.exists(), "and the original was not retired for it");
 }
+
+/// Lemonade's read of the guard above: holding every memory doesn't make a copy the
+/// one its original was closed for. Two moves, nothing kept between them.
+#[test]
+fn a_copy_from_another_move_is_not_published_even_when_it_holds_every_memory() {
+    let (tmp, reg) = setup();
+    let work = reg.create("Work", "", None).unwrap();
+    add_memory(&work.db_path, M1);
+    let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+    for d in [&a, &b] {
+        std::fs::create_dir_all(d).unwrap();
+        reg.remember_added(d).unwrap();
+    }
+    // Move 1, to A, stopped before it closed the original.
+    let at_a = a.join(format!("{}{}", MOVING_PREFIX, work.uuid));
+    copy_dir(work.db_path.parent().unwrap(), &at_a);
+    std::fs::write(at_a.join(MOVE_TOKEN), "first").unwrap();
+    // Move 2, to B, stopped just after closing the original for its own copy.
+    let at_b = b.join(format!("{}{}", MOVING_PREFIX, work.uuid));
+    copy_dir(work.db_path.parent().unwrap(), &at_b);
+    std::fs::write(at_b.join(MOVE_TOKEN), "second").unwrap();
+    let conn = rusqlite::Connection::open(&work.db_path).unwrap();
+    let sql = super::moving::fence_sql(&conn).unwrap();
+    conn.execute_batch(&format!("INSERT OR REPLACE INTO _meta (key, value) VALUES ('{}', 'second');\n{}", KEY_MOVING_TO, sql)).unwrap();
+    drop(conn);
+
+    reg.scan();
+    assert!(at_a.exists() && !a.join(&work.uuid).exists(), "the copy from the other move stays where it is");
+    assert!(b.join(&work.uuid).join(DB_FILE).exists(), "the copy the original was closed for is put in place");
+    assert!(!b.join(&work.uuid).join(MOVE_TOKEN).exists());
+    // With the folder in use again, the other copy is set aside on the next look.
+    let scan = reg.scan();
+    assert!(!at_a.exists());
+    assert!(scan.blocked.is_empty() && scan.pending_moves.is_empty());
+    assert_eq!(canonical(&reg.find("Work").unwrap().db_path), canonical(&b.join(&work.uuid).join(DB_FILE)));
+}
+
+#[test]
+fn a_real_move_across_drives_names_itself_and_an_older_closed_original_still_finishes() {
+    let (tmp, reg) = setup();
+    // What copy_then_retire writes, seen through an interruption after the original is closed.
+    let work = reg.create("Work", "", None).unwrap();
+    add_memory(&work.db_path, M1);
+    let dest = tmp.path().join("dest");
+    std::fs::create_dir_all(&dest).unwrap();
+    let dir = work.db_path.parent().unwrap().to_path_buf();
+    let lock = super::moving::quiesce(&work.db_path).unwrap();
+    let retired = super::moving::copy_then_retire(&dir, &dest, &work, lock).unwrap();
+    let conn = open_read_only(&retired.join(DB_FILE)).unwrap();
+    let named = get_meta(&conn, KEY_MOVING_TO).expect("the closed original names its move");
+    assert_eq!(named.len(), 32);
+    assert!(dest.join(&work.uuid).join(DB_FILE).exists());
+    assert!(!dest.join(&work.uuid).join(MOVE_TOKEN).exists(), "the published folder carries no trace of the move");
+
+    // An original closed by an older Geniuz names no move: its copy still finishes, on its memories.
+    let old = reg.create("Old", "", None).unwrap();
+    add_memory(&old.db_path, M2);
+    let d2 = tmp.path().join("d2");
+    std::fs::create_dir_all(&d2).unwrap();
+    reg.remember_added(&d2).unwrap();
+    let copy = d2.join(format!("{}{}", MOVING_PREFIX, old.uuid));
+    copy_dir(old.db_path.parent().unwrap(), &copy);
+    let conn = rusqlite::Connection::open(&old.db_path).unwrap();
+    let sql = super::moving::fence_sql(&conn).unwrap();
+    conn.execute_batch(&sql).unwrap();
+    drop(conn);
+    reg.scan();
+    assert!(d2.join(&old.uuid).join(DB_FILE).exists());
+}

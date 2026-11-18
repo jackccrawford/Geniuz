@@ -318,7 +318,8 @@ impl Registry {
         // waiting would hold the registry lock for nothing.
         #[cfg(windows)]
         for _ in 0..10 {
-            if !matches!(&placed, Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied) {
+            // Access denied (5) or a sharing violation (32): either is how Windows says a file in it is open.
+            if !matches!(&placed, Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied || e.raw_os_error() == Some(32)) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(200));

@@ -96,14 +96,17 @@ pub(super) fn memory_table(conn: &Connection) -> Result<(&'static str, &'static 
 
 /// Every memory ID in a store, normalised for comparing.
 pub(super) fn memory_ids(db: &Path) -> Vec<String> {
-    let read = || -> Option<Vec<String>> {
-        let conn = open_read_only(db).ok()?;
-        let (table, column) = memory_table(&conn).ok()?;
-        let mut stmt = conn.prepare(&format!("SELECT {} FROM {}", column, table)).ok()?;
-        let ids = stmt.query_map([], |r| r.get::<_, String>(0)).ok()?.flatten();
-        Some(ids.map(|id| id.to_lowercase()).collect())
-    };
-    read().unwrap_or_default()
+    try_memory_ids(db).unwrap_or_default()
+}
+
+/// The same, or `None` when the store couldn't be read. For the places where "it
+/// holds nothing" and "it couldn't be read" must not be taken for each other.
+pub(super) fn try_memory_ids(db: &Path) -> Option<Vec<String>> {
+    let conn = open_read_only(db).ok()?;
+    let (table, column) = memory_table(&conn).ok()?;
+    let mut stmt = conn.prepare(&format!("SELECT {} FROM {}", column, table)).ok()?;
+    let ids = stmt.query_map([], |r| r.get::<_, String>(0)).ok()?.flatten();
+    Some(ids.map(|id| id.to_lowercase()).collect())
 }
 
 /// The UUID for a store getting its first identity. It comes from the store's

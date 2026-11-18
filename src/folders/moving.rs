@@ -177,6 +177,9 @@ pub(super) fn fence_sql(conn: &Connection) -> Result<String, String> {
 ///  3. In the transaction already holding writers off, fence the original with
 ///     triggers. From here it refuses every change, durably, including from a
 ///     connection opened before the move or a writer waiting on the lock.
+///     In that same transaction the original is told which copy it is being closed
+///     for: the move's token, also written in the copy before step 2. An earlier
+///     move's leftover copy carries another token, or none.
 ///  4. Record in the copy that it is final.
 ///  5. Retire the original, then put the copy in place.
 ///
@@ -203,6 +206,11 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
     owner
         .lock()
         .map_err(|e| format!("Couldn't lock {}: {}", staging.display(), e))?;
+    // This move's name, in the copy now and in the original when it is closed (step 3).
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    std::fs::write(staging.join(MOVE_TOKEN), &token)
+        .and_then(|_| std::fs::File::open(staging.join(MOVE_TOKEN))?.sync_all())
+        .map_err(|e| format!("Couldn't write in {}: {}", staging.display(), e))?;
     let entries = std::fs::read_dir(dir).map_err(|e| format!("Couldn't read {}: {}", dir.display(), e))?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -233,7 +241,10 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
         .map_err(|e| format!("{} The original is untouched; the partial copy is at {}.", e, staging.display()))?;
 
     let fence = fence_sql(&lock).map_err(|e| format!("Couldn't close off the original: {}. Nothing moved.", e))?;
-    lock.execute_batch(&format!("{}COMMIT;", fence))
+    // The token is letters and digits Geniuz made a moment ago, and goes in before the
+    // triggers that close `_meta` with everything else.
+    let named = format!("INSERT OR REPLACE INTO _meta (key, value) VALUES ('{}', '{}');\n", KEY_MOVING_TO, token);
+    lock.execute_batch(&format!("{}{}COMMIT;", named, fence))
         .map_err(|e| format!("Couldn't close off the original: {}. Nothing moved.", e))?;
     drop(lock);
     let committed = staging.join(MOVE_COMMITTED);
@@ -255,7 +266,7 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
 pub(super) fn publish(staging: &Path, target: &Path) -> Result<(), String> {
     std::fs::rename(staging, target)
         .map_err(|e| format!("Couldn't finish the move to {}: {}.", target.display(), e))?;
-    for name in [MOVE_OWNER, MOVE_COMMITTED] {
+    for name in [MOVE_OWNER, MOVE_COMMITTED, MOVE_TOKEN] {
         let _ = std::fs::remove_file(target.join(name));
     }
     Ok(())
@@ -316,8 +327,26 @@ pub(super) fn finish_interrupted_moves(root: &Path, live: &[Folder], paused: &[F
         // the record that this copy is final, it must hold every memory its original
         // holds, or it waits. (Raised by cubic on #68; the gap was older than that change.)
         if let (false, Some(original)) = (committed, original) {
-            let held: HashSet<String> = memory_ids(&staging.join(DB_FILE)).into_iter().collect();
-            if memory_ids(&original.db_path).iter().any(|id| !held.contains(id)) {
+            // Which copy the original was closed for, when it says. A copy with another
+            // name, or with none when the original names one, is not that copy, whatever
+            // it holds: it may be behind in the folder's name, description or face.
+            // (Lemonade's read of this change. An original closed by a Geniuz before
+            // 5.1.7 names no copy, and the memories alone decide, below.)
+            let closed_for = open_read_only(&original.db_path).ok().and_then(|c| get_meta(&c, KEY_MOVING_TO));
+            let this_copy = std::fs::read_to_string(staging.join(MOVE_TOKEN)).ok().map(|t| t.trim().to_string());
+            if closed_for.is_some() && closed_for != this_copy {
+                pending.push(staging);
+                continue;
+            }
+            // Either side unreadable is not "nothing missing": it waits.
+            let safe = match (try_memory_ids(&staging.join(DB_FILE)), try_memory_ids(&original.db_path)) {
+                (Some(copy), Some(theirs)) => {
+                    let held: HashSet<String> = copy.into_iter().collect();
+                    theirs.iter().all(|id| held.contains(id))
+                }
+                _ => false,
+            };
+            if !safe {
                 pending.push(staging);
                 continue;
             }
