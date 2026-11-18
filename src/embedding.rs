@@ -552,6 +552,14 @@ pub fn embed_content(text: &str) -> Result<Vec<f32>, String> {
     backend.embed(text)
 }
 
+/// Whether the search model's files are already on this computer. Background work
+/// asks this first, so that it never starts a download: two downloads at once
+/// (a search beginning while a backfill does) would share one partial file.
+pub fn model_is_here() -> bool {
+    let dir = std::env::var("GENIUZ_MODELS_PATH").map(PathBuf::from).unwrap_or_else(|_| default_models_dir());
+    dir.join("model.onnx").is_file() && dir.join("tokenizer.json").is_file()
+}
+
 /// A gist as the search model should read it. Many gists are written
 /// `like_this: with_underscores`, which the model reads as one unknown word.
 pub fn gist_text(gist: &str) -> String {

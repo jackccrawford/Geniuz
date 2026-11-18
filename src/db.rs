@@ -732,7 +732,7 @@ impl DatabaseManager {
                 None => { made = crate::embedding::create_backend()?; made.as_ref() }
             };
             let q = be.embed(query)?;
-            let gists = self.gist_vectors(be);
+            let gists = self.gist_vectors(be, window);
             let mut scored: Vec<crate::embedding::ScoredMemory> = cached.into_iter().map(|c| {
                 let body = crate::embedding::cosine_similarity(&q, &c.embedding);
                 let meaning = match gists.get(&c.memory_uuid) {
@@ -891,7 +891,7 @@ impl DatabaseManager {
     /// half; a large old folder is complete after a few searches, or at once with
     /// `geniuz backfill`. Nothing here can fail a search: a folder that can't be
     /// written to is searched with the vectors it has.
-    fn gist_vectors(&self, backend: &dyn crate::embedding::EmbeddingBackend) -> std::collections::HashMap<String, Vec<f32>> {
+    fn gist_vectors(&self, backend: &dyn crate::embedding::EmbeddingBackend, window: &Window) -> std::collections::HashMap<String, Vec<f32>> {
         let mut out = std::collections::HashMap::new();
         let Ok(conn) = self.conn() else { return out };
         if let Ok(mut stmt) = conn.prepare("SELECT memory_uuid, embedding FROM memory_gist_embeddings") {
@@ -901,9 +901,12 @@ impl DatabaseManager {
                 }
             }
         }
-        let missing = self.ungisted_memories().unwrap_or_default();
+        // Those inside the window being searched come first: a search of last
+        // spring must not spend its time on this week's memories.
+        let mut missing = self.ungisted_in_order().unwrap_or_default();
+        missing.sort_by_key(|(_, _, at)| !window.contains(at));
         let started = std::time::Instant::now();
-        for (id, gist) in missing {
+        for (id, gist, _) in missing {
             if started.elapsed() > GIST_FILL_BUDGET { break; }
             let Ok(v) = backend.embed(&crate::embedding::gist_text(&gist)) else { break };
             if self.cache_gist_embedding(&id, &v).is_err() { break; }
@@ -946,9 +949,14 @@ impl DatabaseManager {
 
     /// Memories that have a body vector and a gist, but no gist vector yet, newest first.
     pub fn ungisted_memories(&self) -> Result<Vec<(String, String)>, String> {
+        Ok(self.ungisted_in_order()?.into_iter().map(|(id, gist, _)| (id, gist)).collect())
+    }
+
+    /// The same, each with its time.
+    fn ungisted_in_order(&self) -> Result<Vec<(String, String, String)>, String> {
         let conn = self.conn()?;
         let mut stmt = conn.prepare(
-            "SELECT s.memory_uuid, json_extract(s.payload, '$.gist')
+            "SELECT s.memory_uuid, json_extract(s.payload, '$.gist'), s.created_at
                FROM memories s
                JOIN memory_embeddings e ON e.memory_uuid = s.memory_uuid
                LEFT JOIN memory_gist_embeddings g ON g.memory_uuid = s.memory_uuid
@@ -956,7 +964,7 @@ impl DatabaseManager {
                 AND trim(COALESCE(json_extract(s.payload, '$.gist'), '')) <> ''
               ORDER BY s.rowid DESC"
         ).map_err(|e| format!("Query failed: {}", e))?;
-        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        let rows = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)))
             .map_err(|e| format!("Query failed: {}", e))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
     }

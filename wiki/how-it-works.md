@@ -64,7 +64,7 @@ A memory is dated the moment it's kept, and nobody chooses that time. Something 
 `geniuz recall "topic"` is one search that reads your query two ways together, so there is no mode to choose:
 
 - **By meaning.** Your query is compared with each memory's two embeddings, one for its words and one for its gist, and the closer one counts. A long memory covers many things; its gist says what it is.
-- **By words.** Memories holding the query's words are lifted, rare words counting for more. A word in more than half the folder's memories is ignored.
+- **By words.** Memories holding the query's words are lifted, rare words counting for more. Where at least ten memories are being searched, a word held by more than half of them is ignored.
 
 The two make one score, which is the number shown beside a result. A few details:
 
@@ -82,11 +82,11 @@ Other kinds of recall are not searches:
 
 Two more forms reach across folders. `recall --all "topic"` searches every folder and shows each result with its address. `recall 13625F6B:3487B9B0` opens that memory in full, whichever folder it is in. In the dashboard, Find can search any selection of folders, and an address in a memory's text can be clicked.
 
-Memories kept before 5.1.6 have no embedding for their gist. Geniuz makes them as a folder is searched, the dashboard makes them for every folder when it opens, and `geniuz backfill --all` does it at once.
+Memories kept before 5.1.6 have no embedding for their gist. Geniuz makes those during a search of the folder, for memories that already have an embedding for their words; the dashboard makes them for every folder when it opens; and `geniuz backfill --all` makes every missing embedding, words and gist, at once.
 
 ## The model
 
-Search by meaning runs locally through ONNX Runtime, using a BERT sentence model that covers more than 50 languages. It downloads once from Hugging Face, about 130 MB, into `models/` in the data directory (`~/.geniuz/models/` by default; `GENIUZ_HOME` or `GENIUZ_MODELS_PATH` move it), the first time anything is embedded. That includes your first `keep`. The model is one fixed snapshot: Geniuz carries the SHA-256 of each file and loads nothing that doesn't match, so a changed or tampered file is set aside and fetched again. A file is hashed when it arrives and again whenever its size or time changes; in a models directory that others can write to, it is hashed on every load. Loading a model takes a second or two. A helper called `geniuz-embed` can keep it ready, and exits after five idle minutes. It is off unless you set `GENIUZ_EMBED_SPAWN=1`: with it, keeping a memory no longer waits for the model to load (about eight times faster on a small Linux machine). A search loads the model itself either way. The helper can be reached only by you: on Mac and Linux it listens on a socket inside a directory only you can enter, and on Windows on a pipe only you may open. Each side checks that the other is you before any text passes.
+Search by meaning runs locally through ONNX Runtime, using a BERT sentence model that covers more than 50 languages. It downloads once from Hugging Face, about 130 MB, into `models/` in the data directory (`~/.geniuz/models/` by default; `GENIUZ_HOME` or `GENIUZ_MODELS_PATH` move it), the first time anything is embedded. That includes your first `keep`. The model is one fixed snapshot: Geniuz carries the SHA-256 of each file and loads nothing that doesn't match, so a changed or tampered file is set aside and fetched again. A file is hashed when it arrives and again whenever its size or time changes; in a models directory that others can write to, it is hashed on every load. Loading a model takes a second or two. A helper called `geniuz-embed` can keep it ready, and exits after five idle minutes. It is off unless you set `GENIUZ_EMBED_SPAWN=1`. With it, the first keep starts the helper and waits as before; after that, keeping a memory no longer waits for the model to load (about eight times faster on a small Linux machine). A search loads the model itself either way. The helper can be reached only by you: on Mac and Linux it listens on a socket inside a directory only you can enter, and on Windows on a pipe only you may open. Each side checks that the other is you before any text passes.
 
 If the built-in model fails to load, Geniuz tries an embedding service instead: Ollama on your own machine by default. See [Using it](using-it.md#settings).
 

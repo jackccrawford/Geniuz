@@ -283,10 +283,26 @@ fn export_one(f: &Folder, to: &std::path::Path) -> Result<u64, String> {
         return Err(format!("{} is a directory. Name the file to write, such as {}.",
             to.display(), to.join(export_name(f)).display()));
     }
-    if to.exists() {
-        return Err(format!("{} already exists, and an export never overwrites a file. Choose another name.", to.display()));
+    // Take the name first, in one step that fails if anything is there: looking and
+    // then copying would let a file that appeared in between be written over.
+    let exists = || format!("{} already exists, and an export never overwrites a file. Choose another name.", to.display());
+    match std::fs::OpenOptions::new().write(true).create_new(true).open(to) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Err(exists()),
+        Err(e) => return Err(format!("Couldn't write {}: {}", to.display(), e)),
     }
-    geniuz::folders::backup_to(&f.db_path, to)
+    // Copy beside it, and put the whole file in place only when it is complete, so a
+    // copy that fails leaves nothing behind to block the next try.
+    let partial = to.with_file_name(format!(
+        ".{}.partial-{}", to.file_name().and_then(|n| n.to_str()).unwrap_or("export"), std::process::id()
+    ));
+    let done = geniuz::folders::backup_to(&f.db_path, &partial)
+        .and_then(|bytes| std::fs::rename(&partial, to).map(|_| bytes).map_err(|e| format!("Couldn't finish {}: {}", to.display(), e)));
+    if done.is_err() {
+        let _ = std::fs::remove_file(&partial);
+        let _ = std::fs::remove_file(to);
+    }
+    done
 }
 
 /// `Work-13625F6B.db`: the name for whoever reads the directory, the ID because
@@ -300,8 +316,17 @@ fn export_name(f: &Folder) -> String {
 
 fn export_all(reg: &Registry, dir: &std::path::Path) -> Result<String, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("Couldn't create {}: {}", dir.display(), e))?;
-    let folders = reg.scan().folders;
+    let scan = reg.scan();
     let (mut lines, mut done, mut total) = (Vec::new(), 0, 0u64);
+    // What Geniuz knows of but can't use right now is not exported, and must be said:
+    // a backup that quietly leaves a folder out is the one found missing later.
+    for dir in &scan.unavailable {
+        lines.push(format!("  {}: can't be reached right now", dir.display()));
+    }
+    for b in &scan.blocked {
+        lines.push(format!("  {} ({}): {}", b.name, b.uuid.chars().take(8).collect::<String>(), b.reason));
+    }
+    let folders = scan.folders;
     for f in &folders {
         match export_one(f, &dir.join(export_name(f))) {
             Ok(bytes) => { done += 1; total += bytes; }
@@ -343,7 +368,17 @@ mod export_tests {
 
         let to = dir.path().join("copy.db");
         assert!(export_one(&f, &to).unwrap() > 0);
+        let first = std::fs::read(&to).unwrap();
         assert!(export_one(&f, &to).unwrap_err().contains("already exists"));
+        assert_eq!(std::fs::read(&to).unwrap(), first, "a refused export changes nothing");
+        // A copy that fails leaves no file behind to block the next try.
+        let gone = folder("gone", &dir.path().join("no-such-folder").join("memory.db"));
+        let other = dir.path().join("other.db");
+        assert!(export_one(&gone, &other).is_err());
+        assert!(!other.exists());
+        let left: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains("partial")).collect();
+        assert!(left.is_empty());
         assert!(export_one(&f, dir.path()).unwrap_err().contains("is a directory"));
         assert_eq!(size(512), "512 bytes");
         assert_eq!(size(217_088), "212 KB");

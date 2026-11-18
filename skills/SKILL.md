@@ -131,7 +131,7 @@ Never copy a folder's files: a copy of a live database can lose memories, and a 
 
 A search is for **finding**: it ranks memories by what they mean and by the
 words they hold, so a topic, a name or a term all work in one query.
-`--grep` is for **listing**: every line that holds a word, nothing left out.
+`--grep` is for **listing**: the lines that hold a word, newest first, up to the limit (50 lines unless you raise it with `-l`).
 
 1. If the question has a time in it ("last week", "yesterday"), add
    `--since`: `7d`, `24h`, `2w`, or a date. Without it, months of older
@@ -210,6 +210,6 @@ There is no edit and no delete (an image is the one exception, above: its owner 
 
 ## How it works
 
-Memories live in a SQLite database. Search uses a local BERT model: no API calls, no cloud, fully offline. The model downloads once (about 127 MB) the first time a memory is kept or searched for. Every memory after that is embedded automatically, its words and its gist each.
+Memories live in a SQLite database. Search uses a local BERT model: no API calls, no cloud, fully offline. The model downloads once (about 127 MB) the first time Geniuz needs it, usually when a memory is first kept. Memories are then embedded as they are kept, their words and their gist each.
 
 Search reads your query two ways together. By meaning: "authentication middleware" matches a memory about "token validation ordering" because the ideas overlap. By words: a name or a specific term in the query lifts the memories that hold it. A memory's gist counts as much as its body, so a gist that says plainly what the memory is makes it easy to find.

@@ -10,7 +10,7 @@
 | Capture | Loading existing files into memory in bulk. |
 | Content | The full detail of a memory. |
 | Embed helper | `geniuz-embed`, which keeps the model loaded between calls. |
-| Embedding | Numbers representing a meaning, used to search by meaning. A memory has two: one for its words, one for its gist. |
+| Embedding | Numbers representing a meaning, used to search by meaning. A memory has two, one for its words and one for its gist; an older one, or one kept while the model was unavailable, may have fewer until `geniuz backfill`. |
 | Face | What the sidebar shows beside a folder's name: one emoji its writer chose, or else a small mosaic of nine tiles laid out from the folder's ID, so every folder has its own and it never changes. |
 | Folder | A directory holding one `memory.db`, with its own permanent UUID, name and description. |
 | Gist | The short line you find a memory by. |

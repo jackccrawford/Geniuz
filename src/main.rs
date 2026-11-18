@@ -887,9 +887,19 @@ fn run(cli: Cli) -> Result<String, String> {
                 // (5.1.6; before it, the command line refused --all with --grep).
                 if !grep.is_empty() {
                     let reg = geniuz::folders::Registry::from_env();
-                    let args = serde_json::json!({ "limit": limit.unwrap_or(50) });
-                    let (text, failed) = mcp::execute_grep_all(&reg, &grep, &window, &args);
-                    return if failed { Err(text) } else { Ok(text) };
+                    let terms = geniuz::dig::Terms::parse(&grep)?;
+                    let found = mcp::grep_all(&reg, &terms, &window, limit.unwrap_or(50).min(500));
+                    if json {
+                        let hits: Vec<serde_json::Value> = found.hits.iter().map(|(at, address, folder, line)| serde_json::json!({
+                            "address": address, "folder": folder, "created_at": at, "line": line,
+                        })).collect();
+                        return Ok(serde_json::to_string_pretty(&serde_json::json!({
+                            "ok": true, "action": "grep", "count": hits.len(), "hits": hits,
+                            "folders_searched": found.searched, "folders_unread": found.skipped,
+                            "searched": mcp::grep_all_scope(&found, &grep),
+                        })).unwrap());
+                    }
+                    return Ok(mcp::grep_all_text(&found, &grep));
                 }
                 return recall_all(query.as_deref(), keyword, full, &window, limit.unwrap_or(20), json);
             }
@@ -1237,15 +1247,22 @@ fn run(cli: Cli) -> Result<String, String> {
 
         Command::Backfill { all } => {
             if all {
-                let done = geniuz::folders::backfill_all(&geniuz::folders::Registry::from_env());
-                if done.is_empty() {
-                    return Ok("All memories cached.".to_string());
-                }
-                let lines: Vec<String> = done.iter().map(|d| format!(
+                let report = geniuz::folders::backfill_all(&geniuz::folders::Registry::from_env());
+                let mut lines: Vec<String> = report.done.iter().map(|d| format!(
                     "[backfill] {}: {} memories, {} gists{}", d.name, d.bodies, d.gists,
                     if d.failed > 0 { format!(", {} failed", d.failed) } else { String::new() }
                 )).collect();
-                return Ok(lines.join("\n"));
+                if report.skipped.is_empty() {
+                    if lines.is_empty() {
+                        return Ok("All memories cached.".to_string());
+                    }
+                    return Ok(lines.join("\n"));
+                }
+                // Some folders were not read: never "all cached", and an error, so a
+                // script notices.
+                lines.push("[backfill] Not done:".to_string());
+                lines.extend(report.skipped.iter().map(|(name, why)| format!("  {}: {}", name, why)));
+                return Err(lines.join("\n"));
             }
             let db = get_db()?;
             let todo = db.unembedded_memories()?.len() + db.ungisted_memories()?.len();
