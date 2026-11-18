@@ -63,6 +63,10 @@ impl Registry {
                 file.display()
             ));
         }
+        // A pipe or a device would be waited on forever, with the registry lock held.
+        if !std::fs::metadata(&source).map(|m| m.is_file()).unwrap_or(false) {
+            return Err(not_a_folder(file));
+        }
         let scan = self.scan();
         let in_use = scan.folders.iter().map(|f| &f.db_path).chain(scan.blocked.iter().map(|b| &b.db_path));
         if in_use.into_iter().any(|p| canonical(p) == source) {
@@ -98,6 +102,7 @@ impl Registry {
         let copy = staging.join(DB_FILE);
         std::fs::copy(source, &copy).map_err(|e| format!("Couldn't copy {}: {}", source.display(), e))?;
         make_private_file(&copy)?;
+        sync(&copy)?;
 
         // A file is something people are sent, and a database file carries more than
         // rows: it can hold triggers and views of its writer's choosing, which run later,
@@ -118,7 +123,7 @@ impl Registry {
         }
         let health: String = conn
             .query_row("PRAGMA integrity_check", [], |r| r.get(0))
-            .map_err(|_| not_a_folder(source))?;
+            .map_err(|e| format!("{} couldn't be checked and wasn't imported ({}).", source.display(), e))?;
         if health != "ok" {
             return Err(format!("{} is damaged and wasn't imported ({}).", source.display(), first_line(&health)));
         }
@@ -149,9 +154,14 @@ impl Registry {
         // would get, named after the file.
         stamp(&copy, &name_from_file(source))?;
         let found = read_identity(&copy).ok_or_else(|| not_a_folder(source))?;
+        // The ID as Geniuz writes it, in either case. Any other spelling of the same
+        // ID (braces, no hyphens) would pass for a different folder everywhere IDs are
+        // compared as text.
         let uuid = uuid::Uuid::parse_str(&found.uuid)
+            .ok()
             .map(|u| u.to_string().to_uppercase())
-            .map_err(|_| format!("{} has a folder ID Geniuz can't read (\"{}\").", source.display(), found.uuid))?;
+            .filter(|u| u.eq_ignore_ascii_case(&found.uuid))
+            .ok_or_else(|| format!("{} has a folder ID Geniuz can't read (\"{}\").", source.display(), found.uuid))?;
         let short: String = uuid.chars().take(SHORT_ID).collect();
 
         // The same folder, anywhere here.
@@ -196,17 +206,19 @@ impl Registry {
             ));
         }
         // Its memories, under any folder ID: a copy that was given another identity.
-        let mut held: HashMap<String, &Folder> = HashMap::new();
-        for f in scan.folders.iter().chain(archived.iter()) {
-            for id in memory_ids(&f.db_path) {
-                held.insert(id, f);
+        let mut held: HashMap<String, (&str, &str)> = HashMap::new();
+        let known = scan.folders.iter().chain(archived.iter()).map(|f| (f.name.as_str(), f.uuid.as_str(), &f.db_path));
+        let blocked = scan.blocked.iter().map(|b| (b.name.as_str(), b.uuid.as_str(), &b.db_path));
+        for (name, id, db) in known.chain(blocked) {
+            for memory in memory_ids(db) {
+                held.insert(memory, (name, id));
             }
         }
-        if let Some(f) = memory_ids(&copy).iter().find_map(|id| held.get(id)) {
+        if let Some((name, id)) = memory_ids(&copy).iter().find_map(|m| held.get(m)) {
             return Err(format!(
                 "Not imported. This file holds memories that are already in {} ({}). Copies aren't supported.",
-                f.name,
-                f.short_id()
+                name,
+                id.chars().take(SHORT_ID).collect::<String>().to_uppercase()
             ));
         }
 
@@ -231,7 +243,7 @@ impl Registry {
             // An empty folder with this name is most often a placeholder made for the
             // one arriving. Archiving it frees the name; the first folder can't be archived.
             let empty = other.stats().map(|(n, _)| n == 0).unwrap_or(false);
-            if empty && canonical(&other.db_path) != canonical(&self.default_db()) {
+            if empty && self.can_archive(other) {
                 why.push_str(&format!(
                     "\n{} is empty. If it was made as a placeholder for this folder, archive it and import again:\n  geniuz folder archive {}",
                     other.name,
@@ -256,10 +268,11 @@ impl Registry {
         let conn = open_read_write(&copy)?;
         let _ = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()));
         drop(conn);
+        sync(&copy)?;
         let target = self.home.join(&uuid);
         if target.exists() {
             return Err(format!(
-                "{} already exists, and it isn't folder {}. Move it out of the way first; nothing was changed.",
+                "{} already exists, and Geniuz doesn't read it as folder {}. Move it out of the way first; nothing was changed.",
                 target.display(),
                 short
             ));
@@ -276,6 +289,11 @@ impl Registry {
             placed = std::fs::rename(staging, &target);
         }
         placed.map_err(|e| format!("Couldn't put the folder in place: {}", e))?;
+        // The new name, on disk: a crash now must not leave the folder half there.
+        #[cfg(unix)]
+        if let Ok(home) = std::fs::File::open(&self.home) {
+            let _ = home.sync_all();
+        }
         // It is in place from here on, so this can no longer fail: what was checked a
         // moment ago is reported, at its new path.
         let db_path = target.join(DB_FILE);
@@ -299,6 +317,16 @@ impl Registry {
                 let _ = std::fs::remove_dir_all(entry.path());
             }
         }
+    }
+
+    /// Whether `folder archive` would take this folder: not the first folder, not a
+    /// link, and not a directory that was added directly.
+    fn can_archive(&self, folder: &Folder) -> bool {
+        let Some(dir) = folder.db_path.parent() else { return false };
+        let linked = std::fs::symlink_metadata(dir).map(|m| m.file_type().is_symlink()).unwrap_or(true);
+        !linked
+            && canonical(dir) != canonical(&self.home)
+            && !self.added().iter().any(|d| canonical(d) == canonical(dir))
     }
 
     /// Where this folder is if it is here but between two places: closed for a move to
@@ -355,6 +383,15 @@ fn only_our_schema(conn: &Connection) -> Result<(), String> {
     batch.push_str("COMMIT;\n");
     conn.execute_batch(&batch).map_err(fail)?;
     conn.execute_batch(crate::db::SCHEMA).map_err(fail)
+}
+
+/// Have the file's bytes on the disk, not only on their way there.
+fn sync(file: &Path) -> Result<(), String> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(file)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| format!("Couldn't finish writing {}: {}", file.display(), e))
 }
 
 fn not_a_folder(file: &Path) -> String {

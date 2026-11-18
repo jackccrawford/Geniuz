@@ -1506,3 +1506,100 @@ fn a_copy_left_by_an_import_that_was_killed_is_cleared_by_the_next() {
     assert!(!dead.exists());
     assert!(theirs.exists());
 }
+
+#[test]
+fn a_damaged_file_is_refused_and_leaves_nothing() {
+    let (tmp, reg) = setup();
+    let (file, there) = exported(&tmp, "Torn", &[M1, M2]);
+    // Garbage over the middle of the file, past the header and the first page.
+    let mut bytes = std::fs::read(&file).unwrap();
+    let from = 4096.min(bytes.len() / 2);
+    for b in bytes.iter_mut().skip(from).take(8192) {
+        *b = 0xA5;
+    }
+    std::fs::write(&file, &bytes).unwrap();
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("damaged") || err.contains("couldn't be checked") || err.contains("isn't a Geniuz folder"), "{err}");
+    assert!(!reg.home.join(there.uuid.to_uppercase()).exists());
+    let left: Vec<_> = std::fs::read_dir(&reg.home).unwrap().flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".importing-")).collect();
+    assert!(left.is_empty());
+}
+
+#[test]
+fn a_folder_here_under_an_added_directory_or_blocked_counts_as_here() {
+    let (tmp, reg) = setup();
+    // In use under a directory that was added.
+    let shelf = tmp.path().join("shelf");
+    let work = reg.create("Work", "", Some(&shelf)).unwrap();
+    add_memory(&work.db_path, M1);
+    let file = tmp.path().join("work.db");
+    backup_to(&work.db_path, &file).unwrap();
+    assert!(reg.import(&file, Some("Again")).unwrap_err().contains("already here"));
+    // Archived there.
+    reg.archive("Work").unwrap();
+    assert!(reg.import(&file, Some("Again")).unwrap_err().contains("archived"));
+    reg.restore("Work").unwrap();
+
+    // Blocked: two copies of one folder in reach. Its ID and its memories both count.
+    let twin = shelf.join("twin");
+    copy_dir(work.db_path.parent().unwrap(), &twin);
+    assert_eq!(reg.scan().blocked.len(), 2);
+    let err = reg.import(&file, Some("Again")).unwrap_err();
+    assert!(err.contains("already here"), "{err}");
+    // The same memories under a new folder ID, as a copy that was given another identity.
+    let forged = tmp.path().join("forged.db");
+    std::fs::copy(&file, &forged).unwrap();
+    let conn = rusqlite::Connection::open(&forged).unwrap();
+    conn.execute("UPDATE _meta SET value = 'EEEEEEEE-2222-4333-8444-555555555555' WHERE key = 'folder_uuid'", []).unwrap();
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    drop(conn);
+    let _ = std::fs::remove_file(format!("{}-wal", forged.display()));
+    let err = reg.import(&forged, Some("Forged")).unwrap_err();
+    assert!(err.contains("memories that are already in Work"), "{err}");
+}
+
+#[test]
+fn a_folder_id_is_taken_in_the_form_geniuz_writes_in_either_case() {
+    let (tmp, reg) = setup();
+    let set_id = |file: &Path, id: &str| {
+        let conn = rusqlite::Connection::open(file).unwrap();
+        conn.execute("UPDATE _meta SET value = ?1 WHERE key = 'folder_uuid'", [id]).unwrap();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        drop(conn);
+        let _ = std::fs::remove_file(format!("{}-wal", file.display()));
+    };
+    // Lower case is the same ID, and the directory takes the upper-case form.
+    let (lower, there) = exported(&tmp, "Lower", &[M1]);
+    set_id(&lower, &there.uuid.to_lowercase());
+    let got = reg.import(&lower, None).unwrap();
+    assert_eq!(got.folder.db_path, reg.home.join(there.uuid.to_uppercase()).join(DB_FILE));
+    assert!(reg.import(&lower, Some("Twice")).unwrap_err().contains("already here"));
+    // Another spelling of an ID would pass for another folder wherever IDs are compared as text.
+    let (odd, other) = exported(&tmp, "Odd", &[M2]);
+    for spelled in [other.uuid.replace('-', ""), format!("{{{}}}", other.uuid), "not an id".to_string()] {
+        set_id(&odd, &spelled);
+        let err = reg.import(&odd, None).unwrap_err();
+        assert!(err.contains("folder ID Geniuz can't read"), "{err}");
+    }
+}
+
+#[test]
+fn a_name_differing_only_in_case_is_the_same_name_and_a_refusal_for_a_name_leaves_no_copy() {
+    let (tmp, reg) = setup();
+    let mine = reg.create("Field Notes", "", None).unwrap();
+    add_memory(&mine.db_path, M4);
+    let (file, _) = exported(&tmp, "field notes", &[M1]);
+    assert!(reg.import(&file, None).unwrap_err().contains("already a folder called \"Field Notes\""));
+    assert!(reg.import(&file, Some("FIELD NOTES")).unwrap_err().contains("already a folder called"));
+    let left: Vec<_> = std::fs::read_dir(&reg.home).unwrap().flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".importing-")).collect();
+    assert!(left.is_empty());
+    // An empty folder that was added directly can't be archived, so archiving isn't offered for it.
+    let direct = tmp.path().join("direct");
+    crate::db::DatabaseManager::new(direct.join(DB_FILE).to_str().unwrap()).unwrap();
+    reg.add(&direct).unwrap();
+    let (file2, _) = exported(&tmp, "direct", &[M2]);
+    let err = reg.import(&file2, None).unwrap_err();
+    assert!(err.contains("--as") && !err.contains("folder archive"), "{err}");
+}
