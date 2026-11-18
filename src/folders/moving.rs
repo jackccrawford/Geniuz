@@ -177,6 +177,9 @@ pub(super) fn fence_sql(conn: &Connection) -> Result<String, String> {
 ///  3. In the transaction already holding writers off, fence the original with
 ///     triggers. From here it refuses every change, durably, including from a
 ///     connection opened before the move or a writer waiting on the lock.
+///     In that same transaction the original is told which copy it is being closed
+///     for: the move's token, also written in the copy before step 2. An earlier
+///     move's leftover copy carries another token, or none.
 ///  4. Record in the copy that it is final.
 ///  5. Retire the original, then put the copy in place.
 ///
@@ -192,6 +195,19 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
     std::fs::create_dir_all(&archive)
         .map_err(|e| format!("Couldn't create {}: {}", archive.display(), e))?;
 
+    // Three file names in the copy are Geniuz's own while a move is under way, and are
+    // removed when it is done. A file of the person's with one of those names would be
+    // written over and then removed, so the move is refused before anything is touched.
+    for reserved in [MOVE_OWNER, MOVE_COMMITTED, MOVE_TOKEN] {
+        if std::fs::symlink_metadata(dir.join(reserved)).is_ok() {
+            return Err(format!(
+                "{} holds a file called {}, a name Geniuz uses while moving a folder. Rename that file, then move the folder. Nothing was moved.",
+                dir.display(),
+                reserved
+            ));
+        }
+    }
+
     let staging = dest.join(format!("{}{}", MOVING_PREFIX, folder.uuid));
     if staging.exists() {
         return Err(format!("An earlier move left {} behind. Check it, then move it aside.", staging.display()));
@@ -203,6 +219,16 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
     owner
         .lock()
         .map_err(|e| format!("Couldn't lock {}: {}", staging.display(), e))?;
+    // This move's name, in the copy now and in the original when it is closed (step 3).
+    let token = uuid::Uuid::new_v4().simple().to_string();
+    // Written and forced to disk through one handle opened for writing: Windows
+    // refuses to flush a file opened only to read (see the copy loop below).
+    std::fs::File::create(staging.join(MOVE_TOKEN))
+        .and_then(|mut f| {
+            std::io::Write::write_all(&mut f, token.as_bytes())?;
+            f.sync_all()
+        })
+        .map_err(|e| format!("Couldn't write in {}: {}", staging.display(), e))?;
     let entries = std::fs::read_dir(dir).map_err(|e| format!("Couldn't read {}: {}", dir.display(), e))?;
     for entry in entries.flatten() {
         let path = entry.path();
@@ -233,7 +259,10 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
         .map_err(|e| format!("{} The original is untouched; the partial copy is at {}.", e, staging.display()))?;
 
     let fence = fence_sql(&lock).map_err(|e| format!("Couldn't close off the original: {}. Nothing moved.", e))?;
-    lock.execute_batch(&format!("{}COMMIT;", fence))
+    // The token is letters and digits Geniuz made a moment ago, and goes in before the
+    // triggers that close `_meta` with everything else.
+    let named = format!("INSERT OR REPLACE INTO _meta (key, value) VALUES ('{}', '{}');\n", KEY_MOVING_TO, token);
+    lock.execute_batch(&format!("{}{}COMMIT;", named, fence))
         .map_err(|e| format!("Couldn't close off the original: {}. Nothing moved.", e))?;
     drop(lock);
     let committed = staging.join(MOVE_COMMITTED);
@@ -255,7 +284,7 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
 pub(super) fn publish(staging: &Path, target: &Path) -> Result<(), String> {
     std::fs::rename(staging, target)
         .map_err(|e| format!("Couldn't finish the move to {}: {}.", target.display(), e))?;
-    for name in [MOVE_OWNER, MOVE_COMMITTED] {
+    for name in [MOVE_OWNER, MOVE_COMMITTED, MOVE_TOKEN] {
         let _ = std::fs::remove_file(target.join(name));
     }
     Ok(())
@@ -291,13 +320,65 @@ pub(super) fn finish_interrupted_moves(root: &Path, live: &[Folder], paused: &[F
             let archive = root.join(ARCHIVE_DIR);
             let _ = std::fs::create_dir_all(&archive);
             let aside = archive.join(format!("{}{}{}", uuid, ABANDONED_MARK, stamp));
+            // Windows refuses to rename a directory while any file in it is open, and the
+            // lock just taken is a file in this one: held, the rename failed on every
+            // scan and nothing said so (found by SSH on orbit, 18 Nov 2026). So there,
+            // and only there, it is let go first. Everywhere else it is held through the
+            // rename, as it always was, so no other scan can pick this copy up in between.
+            // What another scan could do with it in that moment on Windows is bounded
+            // below: a copy that lacks any memory its original holds is never published.
+            #[cfg(windows)]
+            drop(owner);
             changed |= std::fs::rename(&staging, aside).is_ok();
             continue;
         }
         let original = paused.iter().find(|f| f.uuid.eq_ignore_ascii_case(uuid));
-        if original.is_none() && !staging.join(MOVE_COMMITTED).exists() {
+        let committed = staging.join(MOVE_COMMITTED).exists();
+        if original.is_none() && !committed {
             pending.push(staging);
             continue;
+        }
+        // A closed original was taken as proof that this copy is final. It is proof
+        // only if it was closed for this copy: a later move of the same folder, to
+        // somewhere else, closes the original too, and a copy an earlier move left
+        // here would then be put in place without the memories kept since. Without
+        // the record that this copy is final, it must hold every memory its original
+        // holds, or it waits. (Raised by cubic on #68; the gap was older than that change.)
+        if let (false, Some(original)) = (committed, original) {
+            // Which copy the original was closed for, when it says. A copy with another
+            // name, or with none when the original names one, is not that copy, whatever
+            // it holds: it may be behind in the folder's name, description or face.
+            // (Lemonade's read of this change. An original closed by a Geniuz before
+            // 5.1.7 names no copy, and the memories alone decide, below.)
+            // Only a read that succeeds and finds no name means "closed before 5.1.7".
+            // A read that fails is not that: it waits.
+            let closed_for = open_read_only(&original.db_path).and_then(|c| {
+                c.query_row("SELECT value FROM _meta WHERE key = ?1", [KEY_MOVING_TO], |r| r.get::<_, Option<String>>(0))
+                    .optional()
+                    .map(Option::flatten)
+                    .map_err(|e| e.to_string())
+            });
+            let Ok(closed_for) = closed_for else {
+                pending.push(staging);
+                continue;
+            };
+            let this_copy = std::fs::read_to_string(staging.join(MOVE_TOKEN)).ok().map(|t| t.trim().to_string());
+            if closed_for.is_some() && closed_for != this_copy {
+                pending.push(staging);
+                continue;
+            }
+            // Either side unreadable is not "nothing missing": it waits.
+            let safe = match (try_memory_ids(&staging.join(DB_FILE)), try_memory_ids(&original.db_path)) {
+                (Some(copy), Some(theirs)) => {
+                    let held: HashSet<String> = copy.into_iter().collect();
+                    theirs.iter().all(|id| held.contains(id))
+                }
+                _ => false,
+            };
+            if !safe {
+                pending.push(staging);
+                continue;
+            }
         }
 
         // Only something that really is this folder, complete and readable.

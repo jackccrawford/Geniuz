@@ -49,6 +49,12 @@ const MOVE_OWNER: &str = "move-owner";
 /// In a hidden copy: written once the original is fenced, as proof that the copy is
 /// final. Without this or a fenced original, the copy may have fallen behind.
 const MOVE_COMMITTED: &str = "move-committed";
+/// A file in a hidden copy: one random word naming the move that is making it,
+/// written before anything is copied.
+const MOVE_TOKEN: &str = "move-token";
+/// A `_meta` key in the original: the same word, written in the transaction that
+/// closes it. So a closed original says which copy it was closed for.
+const KEY_MOVING_TO: &str = "moving_to";
 const DOTFILE: &str = ".geniuz-folder";
 const DEFAULT_NAME: &str = "My memory";
 const MAX_NAME: usize = 60;
@@ -782,10 +788,12 @@ fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
 mod across;
 mod archive;
 mod identity;
+mod import;
 mod moving;
 
 pub use across::*;
 pub use identity::identity_at;
+pub use import::Imported;
 pub use moving::backup_to;
 use identity::*;
 use moving::*;

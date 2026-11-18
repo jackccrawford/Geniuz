@@ -31,6 +31,19 @@ pub fn run(cmd: FolderCommand) -> Result<String, String> {
             Ok(format!("Exported {} ({}) to {} ({}).\nIt is a backup to keep: every memory and image, in one file.",
                 f.name, f.short_id(), to.display(), size(bytes)))
         }
+        FolderCommand::Import { file, name } => {
+            let got = reg.import(&file, name.as_deref())?;
+            let f = &got.folder;
+            let mut out = format!("Imported {} ({}): {}.", f.name, f.short_id(), memories(got.memories));
+            if let Some(old) = &got.was_called {
+                out.push_str(&format!(" It was called \"{}\"; its ID is the same.", old));
+            }
+            out.push_str(&format!(
+                "\nIt holds what the folder held when it was exported. {} wasn't changed; keep it as a backup.\nRead it with: geniuz recall -f {}",
+                file.display(), f.short_id()
+            ));
+            Ok(out)
+        }
         FolderCommand::Remove { path } => {
             reg.remove(&path)?;
             Ok(format!("Geniuz no longer looks in {}. Its files weren't touched.", path.display()))

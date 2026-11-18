@@ -280,6 +280,8 @@ fn add_memory(db: &Path, uuid: &str) {
 
 const M1: &str = "aaaaaaaa-2222-3333-4444-555555555555";
 const M2: &str = "bbbbbbbb-2222-3333-4444-555555555555";
+const M3: &str = "cccccccc-2222-3333-4444-555555555555";
+const M4: &str = "dddddddd-2222-3333-4444-555555555555";
 
 #[test]
 fn two_copies_of_an_older_store_get_the_same_identity() {
@@ -357,6 +359,10 @@ fn relocate_refuses_the_first_folder_and_a_directory_of_unknown_stores() {
     assert!(f.db_path.exists());
 }
 
+// Unix only: this holds a connection open across the move, and Windows refuses to rename a
+// directory while a file in it is open. There the move stops with the hint to close what
+// holds it and finishes at the next scan (SSH, measured on orbit, 18 Nov 2026).
+#[cfg(unix)]
 #[test]
 fn crossing_drives_carries_writes_still_in_the_wal_and_retires_the_original() {
     let (tmp, reg) = setup();
@@ -450,6 +456,10 @@ fn a_backup_holds_writes_still_in_the_wal() {
 
 // ---- From the outside review of v5 (Codex Astra, 2 Nov). ----
 
+// Unix only: this holds a connection open across the move, and Windows refuses to rename a
+// directory while a file in it is open. There the move stops with the hint to close what
+// holds it and finishes at the next scan (SSH, measured on orbit, 18 Nov 2026).
+#[cfg(unix)]
 #[test]
 fn review1_a_waiting_writer_cannot_write_to_a_moved_original() {
     let (tmp, reg) = setup();
@@ -480,6 +490,10 @@ fn review3_a_failure_to_retire_never_publishes_a_second_copy() {
     assert!(!dest.join(&f.uuid).exists(), "nothing may be published when the original can't be retired");
 }
 
+// Unix only: this holds a connection open across the move, and Windows refuses to rename a
+// directory while a file in it is open. There the move stops with the hint to close what
+// holds it and finishes at the next scan (SSH, measured on orbit, 18 Nov 2026).
+#[cfg(unix)]
 #[test]
 fn review1_a_waiting_writer_follows_a_move_on_the_same_drive() {
     let (tmp, reg) = setup();
@@ -703,6 +717,10 @@ fn pass2_a_committed_copy_is_finished_even_with_its_original_out_of_reach() {
     assert!(!found.db_path.parent().unwrap().join(MOVE_COMMITTED).exists());
 }
 
+// Unix only: this holds a connection open across the move, and Windows refuses to rename a
+// directory while a file in it is open. There the move stops with the hint to close what
+// holds it and finishes at the next scan (SSH, measured on orbit, 18 Nov 2026).
+#[cfg(unix)]
 #[test]
 fn pass2_the_fence_refuses_every_kind_of_write() {
     let (tmp, reg) = setup();
@@ -1114,4 +1132,675 @@ fn a_moved_folder_refuses_images_and_an_older_file_still_closes() {
     assert!(!sql.contains("images"), "{sql}");
     conn.execute_batch(&sql).unwrap();
     assert!(conn.execute("INSERT INTO memories VALUES ('x')", []).is_err());
+}
+
+// ---- import -------------------------------------------------------------
+
+/// A folder made on "another computer", exported to one file.
+fn exported(tmp: &TempDir, name: &str, memories: &[&str]) -> (PathBuf, Folder) {
+    let there = Registry::new(tmp.path().join(format!("there-{}", name.replace(' ', "-"))));
+    let folder = there.create(name, "made elsewhere", None).unwrap();
+    for id in memories {
+        add_memory(&folder.db_path, id);
+    }
+    let file = tmp.path().join(format!("{}.db", name));
+    backup_to(&folder.db_path, &file).unwrap();
+    (file, folder)
+}
+
+fn rows(db: &Path) -> Vec<(String, Option<String>, String, String)> {
+    let conn = open_read_only(db).unwrap();
+    let mut stmt = conn
+        .prepare("SELECT memory_uuid, parent_uuid, payload, created_at FROM memories ORDER BY memory_uuid")
+        .unwrap();
+    let all = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))).unwrap().flatten().collect();
+    all
+}
+
+#[test]
+fn an_import_is_the_same_folder_with_the_same_memories_and_leaves_the_file_alone() {
+    let (tmp, reg) = setup();
+    let (file, there) = exported(&tmp, "Field notes", &[M1, M2]);
+    // A thread, so the parent link is seen to survive.
+    let conn = rusqlite::Connection::open(&there.db_path).unwrap();
+    conn.execute("INSERT INTO memories (memory_uuid, payload, parent_uuid) VALUES (?1, '{\"g\":\"reply\"}', ?2)", [M3, M1]).unwrap();
+    drop(conn);
+    let file = { let again = tmp.path().join("again.db"); backup_to(&there.db_path, &again).unwrap(); let _ = file; again };
+    let before = std::fs::read(&file).unwrap();
+    // Read from the folder it was exported from: opening the file itself would leave a file beside it.
+    let was = rows(&there.db_path);
+
+    let got = reg.import(&file, None).unwrap();
+    assert_eq!(got.memories, 3);
+    assert_eq!(got.was_called, None);
+    assert!(got.folder.uuid.eq_ignore_ascii_case(&there.uuid), "the folder keeps its ID");
+    assert_eq!(got.folder.name, "Field notes");
+    assert_eq!(got.folder.description, "made elsewhere");
+    assert_eq!(got.folder.db_path, reg.home.join(there.uuid.to_uppercase()).join(DB_FILE));
+    assert_eq!(rows(&got.folder.db_path), was, "every memory, parent, payload and time is the same");
+    assert_eq!(std::fs::read(&file).unwrap(), before, "the file imported from is not changed");
+    assert!(!PathBuf::from(format!("{}-wal", file.display())).exists(), "and nothing is left beside it");
+    assert!(names(&reg).contains(&"Field notes".to_string()));
+    assert_eq!(reg.find(&there.short_id()).unwrap().uuid, got.folder.uuid);
+    // It is a folder like any other: it can be written to.
+    add_memory(&got.folder.db_path, M4);
+    assert_eq!(got.folder.stats().unwrap().0, 4);
+    // Nothing of the work is left in the data directory.
+    let left: Vec<_> = std::fs::read_dir(&reg.home).unwrap().flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".importing-")).collect();
+    assert!(left.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn an_imported_folder_is_private_even_when_the_file_was_not() {
+    use std::os::unix::fs::PermissionsExt;
+    let (tmp, reg) = setup();
+    let (file, _) = exported(&tmp, "Open", &[M1]);
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let got = reg.import(&file, None).unwrap();
+    let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&got.folder.db_path), 0o600);
+    assert_eq!(mode(got.folder.db_path.parent().unwrap()), 0o700);
+    assert_eq!(mode(&file), 0o444, "the file's own permissions are left as they were");
+}
+
+#[test]
+fn a_folder_already_here_is_refused_in_use_or_archived_and_nothing_changes() {
+    let (tmp, reg) = setup();
+    let (file, there) = exported(&tmp, "Work", &[M1]);
+    reg.import(&file, None).unwrap();
+    add_memory(&reg.find("Work").unwrap().db_path, M2);
+
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("already here") && err.contains("never merges"), "{err}");
+    let err = reg.import(&file, Some("Other")).unwrap_err();
+    assert!(err.contains("already here"), "another name doesn't make it another folder: {err}");
+    assert_eq!(reg.find("Work").unwrap().stats().unwrap().0, 2, "what was here is untouched");
+
+    reg.archive("Work").unwrap();
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("archived") && err.contains("folder restore"), "{err}");
+    assert!(reg.scan().folders.iter().all(|f| !f.uuid.eq_ignore_ascii_case(&there.uuid)));
+
+    // One of the folders in use, named as the file to import.
+    let mine = reg.create("Mine", "", None).unwrap();
+    let err = reg.import(&mine.db_path, None).unwrap_err();
+    assert!(err.contains("already one of your folders"), "{err}");
+}
+
+#[test]
+fn memories_already_here_under_another_folder_id_are_refused() {
+    let (tmp, reg) = setup();
+    let here = reg.create("Here", "", None).unwrap();
+    add_memory(&here.db_path, M1);
+    let (file, _) = exported(&tmp, "Copy", &[M1, M2]);
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("already in Here") && err.contains("Copies aren't supported"), "{err}");
+    assert_eq!(names(&reg).len(), 2, "My memory and Here, and nothing else");
+}
+
+#[test]
+fn a_name_already_used_is_refused_with_both_ways_forward_and_as_gives_another() {
+    let (tmp, reg) = setup();
+    let placeholder = reg.create("Compass", "an empty placeholder", None).unwrap();
+    let (file, there) = exported(&tmp, "compass", &[M1]);
+
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("already a folder called \"Compass\""), "{err}");
+    assert!(err.contains("--as") && err.contains(&format!("folder archive {}", placeholder.short_id())), "{err}");
+    // A folder that holds something is not offered for archiving, and neither is the first folder.
+    add_memory(&placeholder.db_path, M4);
+    assert!(!reg.import(&file, None).unwrap_err().contains("folder archive"));
+    let err = reg.import(&file, Some(DEFAULT_NAME)).unwrap_err();
+    assert!(err.contains("--as") && !err.contains("folder archive"), "{err}");
+    assert!(!reg.home.join(there.uuid.to_uppercase()).exists(), "a refused import puts nothing in place");
+
+    // Way one: another name. The ID is the one it came with, and the old name is kept in its history.
+    let got = reg.import(&file, Some("Compass (Joel)")).unwrap();
+    assert_eq!(got.folder.name, "Compass (Joel)");
+    assert_eq!(got.was_called.as_deref(), Some("compass"));
+    assert!(got.folder.uuid.eq_ignore_ascii_case(&there.uuid));
+    let conn = open_read_only(&got.folder.db_path).unwrap();
+    let kept: i64 = conn.query_row("SELECT COUNT(*) FROM _meta WHERE key LIKE 'folder_name@%' AND value = 'compass'", [], |r| r.get(0)).unwrap();
+    assert_eq!(kept, 1);
+
+    // Way two, as on scout: archive the placeholder, and the name is free.
+    let (file2, _) = exported(&tmp, "Tempo", &[M2]);
+    reg.create("Tempo", "", None).unwrap();
+    reg.archive("Tempo").unwrap();
+    assert_eq!(reg.import(&file2, None).unwrap().folder.name, "Tempo");
+
+    // A name that can't be a name is refused before anything is copied.
+    let (file3, _) = exported(&tmp, "Third", &[M3]);
+    assert!(reg.import(&file3, Some("a/b")).is_err());
+    assert!(reg.import(&file3, Some("  ")).is_err());
+}
+
+#[test]
+fn what_is_not_an_export_is_refused_with_the_reason() {
+    let (tmp, reg) = setup();
+    let before = names(&reg);
+
+    let err = reg.import(&tmp.path().join("nothing.db"), None).unwrap_err();
+    assert!(err.contains("Couldn't open"), "{err}");
+    let err = reg.import(tmp.path(), None).unwrap_err();
+    assert!(err.contains("is a directory") && err.contains("folder add"), "{err}");
+
+    let text = tmp.path().join("notes.db");
+    std::fs::write(&text, "these are just words, long enough to hold a header").unwrap();
+    assert!(reg.import(&text, None).unwrap_err().contains("isn't a Geniuz folder"));
+
+    // A database, but not ours.
+    let other = tmp.path().join("other.db");
+    rusqlite::Connection::open(&other).unwrap()
+        .execute_batch("CREATE TABLE memories (memory_uuid TEXT); CREATE TABLE t (x);").unwrap();
+    assert!(reg.import(&other, None).unwrap_err().contains("isn't a Geniuz folder"));
+
+    // Ours, from before 4.0.
+    let old = tmp.path().join("station.db");
+    rusqlite::Connection::open(&old).unwrap()
+        .execute_batch("CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT); INSERT INTO _meta VALUES ('product','geniuz'); CREATE TABLE signals (signal_uuid TEXT);").unwrap();
+    let err = reg.import(&old, None).unwrap_err();
+    assert!(err.contains("before 4.0") && err.contains(crate::db::MIGRATION_SCRIPT), "{err}");
+
+    // A plain copy of a folder in use, with its newest memories still beside it.
+    let (file, _) = exported(&tmp, "Live", &[M1]);
+    std::fs::write(format!("{}-wal", file.display()), b"not yet in the main file").unwrap();
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("unsaved changes") && err.contains("folder export"), "{err}");
+
+    // The closed original of a folder that moved away.
+    let (moved, _) = exported(&tmp, "Moved", &[M2]);
+    let conn = rusqlite::Connection::open(&moved).unwrap();
+    let sql = super::moving::fence_sql(&conn).unwrap();
+    conn.execute_batch(&sql).unwrap();
+    drop(conn);
+    let err = reg.import(&moved, None).unwrap_err();
+    assert!(err.contains("closed original"), "{err}");
+
+    assert_eq!(names(&reg), before, "none of these put a folder in place");
+    let left: Vec<_> = std::fs::read_dir(&reg.home).unwrap().flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".importing-")).collect();
+    assert!(left.is_empty(), "and none left its copy behind");
+}
+
+#[test]
+fn a_4x_store_with_no_identity_is_imported_under_the_id_every_copy_of_it_would_get() {
+    let (tmp, reg) = setup();
+    let file = tmp.path().join("old notes.db");
+    crate::db::DatabaseManager::new(file.to_str().unwrap()).unwrap();
+    add_memory(&file, M1);
+    assert!(read_identity(&file).is_none());
+    let expected = identity_for(&open_read_only(&file).unwrap()).unwrap();
+    let before = std::fs::read(&file).unwrap();
+
+    let got = reg.import(&file, None).unwrap();
+    assert_eq!(got.folder.uuid, expected);
+    assert_eq!(got.folder.name, "old notes", "named after the file");
+    assert_eq!(std::fs::read(&file).unwrap(), before, "the identity went on the copy, not the file");
+    assert!(reg.import(&file, Some("Twice")).unwrap_err().contains("already here"));
+}
+
+fn schema_objects(db: &Path, kind: &str) -> Vec<String> {
+    let conn = open_read_only(db).unwrap();
+    let mut stmt = conn.prepare("SELECT name FROM sqlite_master WHERE type = ?1 ORDER BY name").unwrap();
+    let all = stmt.query_map([kind], |r| r.get(0)).unwrap().flatten().collect();
+    all
+}
+
+/// Found by Antigravity (AD63D580:80173368): a database file carries triggers, and an
+/// imported one would run its writer's triggers inside Geniuz on every later keep.
+#[test]
+fn a_files_own_triggers_and_views_do_not_come_in_and_geniuz_own_do() {
+    let (tmp, reg) = setup();
+    let victim = reg.create("Fleet Room", "", None).unwrap();
+    let ours = {
+        let clean = reg.create("Clean", "", None).unwrap();
+        (schema_objects(&clean.db_path, "trigger"), schema_objects(&clean.db_path, "view"))
+    };
+    assert!(ours.0.contains(&"prevent_memory_delete".to_string()));
+
+    let (file, there) = exported(&tmp, "Gift", &[M1]);
+    let conn = rusqlite::Connection::open(&file).unwrap();
+    conn.execute_batch(&format!(
+        "CREATE TRIGGER steal AFTER INSERT ON memories BEGIN UPDATE _meta SET value = '{v}' WHERE key = 'folder_uuid'; END;
+         CREATE TRIGGER steal_on_rename AFTER INSERT ON _meta BEGIN UPDATE _meta SET value = '{v}' WHERE key = 'folder_uuid'; END;
+         CREATE TRIGGER forget AFTER INSERT ON memories BEGIN SELECT RAISE(IGNORE); END;
+         DROP TRIGGER prevent_memory_delete;
+         CREATE TRIGGER prevent_memory_delete BEFORE DELETE ON memories BEGIN SELECT 1; END;
+         CREATE VIEW peek AS SELECT * FROM memories;
+         PRAGMA wal_checkpoint(TRUNCATE);", v = victim.uuid)).unwrap();
+    drop(conn);
+    for side in ["-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{}", file.display(), side));
+    }
+
+    // With --as, so the rename's own write to _meta happens during the import.
+    let got = reg.import(&file, Some("A gift")).unwrap();
+    assert!(got.folder.uuid.eq_ignore_ascii_case(&there.uuid));
+    assert_eq!(schema_objects(&got.folder.db_path, "trigger"), ours.0, "exactly the triggers Geniuz creates");
+    assert_eq!(schema_objects(&got.folder.db_path, "view"), ours.1, "exactly the views Geniuz creates");
+    // The trigger that kept the name of one of ours is ours again: a memory can't be deleted.
+    let conn = rusqlite::Connection::open(&got.folder.db_path).unwrap();
+    assert!(conn.execute("DELETE FROM memories", []).is_err());
+    drop(conn);
+    // A keep afterwards lands, and the folder is still itself; the other folder is untouched.
+    add_memory(&got.folder.db_path, M2);
+    assert_eq!(got.folder.stats().unwrap().0, 2);
+    assert!(read_identity(&got.folder.db_path).unwrap().uuid.eq_ignore_ascii_case(&there.uuid));
+    assert!(reg.scan().blocked.is_empty());
+    assert_eq!(reg.find("Fleet Room").unwrap().uuid, victim.uuid);
+}
+
+#[test]
+fn a_file_whose_memories_or_meta_is_not_a_table_is_refused() {
+    let (tmp, reg) = setup();
+    for (n, sql) in [
+        "ALTER TABLE memories RENAME TO real; CREATE VIEW memories AS SELECT * FROM real;",
+        "ALTER TABLE _meta RENAME TO real; CREATE VIEW _meta AS SELECT * FROM real;",
+    ].iter().enumerate() {
+        let (file, _) = exported(&tmp, &format!("Odd {}", n), &[M1]);
+        let conn = rusqlite::Connection::open(&file).unwrap();
+        conn.execute_batch("DROP VIEW IF EXISTS memory_full; DROP VIEW IF EXISTS memory_gist; DROP VIEW IF EXISTS memory_chains; DROP VIEW IF EXISTS memory_image; DROP VIEW IF EXISTS image_info;").unwrap();
+        for t in schema_objects(&file, "trigger") {
+            conn.execute_batch(&format!("DROP TRIGGER \"{}\";", t)).unwrap();
+        }
+        conn.execute_batch(sql).unwrap();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        drop(conn);
+        let _ = std::fs::remove_file(format!("{}-wal", file.display()));
+        assert!(reg.import(&file, None).unwrap_err().contains("isn't a Geniuz folder"));
+    }
+    assert_eq!(names(&reg).len(), 1);
+}
+
+#[test]
+fn a_name_carried_in_the_file_must_be_one_geniuz_would_give() {
+    let (tmp, reg) = setup();
+    let real = reg.create("Real", "", None).unwrap();
+    // A name that is another folder's short ID would be found before that folder.
+    let (file, there) = exported(&tmp, "Honest", &[M1]);
+    let conn = rusqlite::Connection::open(&file).unwrap();
+    conn.execute("UPDATE _meta SET value = ?1 WHERE key = 'folder_name'", [real.short_id()]).unwrap();
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    drop(conn);
+    let _ = std::fs::remove_file(format!("{}-wal", file.display()));
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("looks like a folder ID") && err.contains("--as"), "{err}");
+    assert_eq!(reg.find(&real.short_id()).unwrap().uuid, real.uuid);
+    let got = reg.import(&file, Some("Honest")).unwrap();
+    assert!(got.folder.uuid.eq_ignore_ascii_case(&there.uuid));
+    assert_eq!(reg.find(&real.short_id()).unwrap().uuid, real.uuid, "the ID still means the folder it always meant");
+}
+
+#[test]
+fn a_change_left_unfinished_beside_the_file_is_refused_in_either_journal_mode() {
+    let (tmp, reg) = setup();
+    let (file, _) = exported(&tmp, "Half", &[M1]);
+    std::fs::write(format!("{}-journal", file.display()), b"a change that never finished").unwrap();
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("unsaved changes") && err.contains("-journal"), "{err}");
+    // An empty one, as a reader leaves behind, is nothing.
+    std::fs::write(format!("{}-journal", file.display()), b"").unwrap();
+    std::fs::write(format!("{}-wal", file.display()), b"").unwrap();
+    reg.import(&file, None).unwrap();
+}
+
+#[test]
+fn nothing_is_imported_while_a_place_geniuz_reads_cannot_be_looked_in() {
+    let (tmp, reg) = setup();
+    // The folder lives on a drive that was added, and the drive is away.
+    let drive = tmp.path().join("drive");
+    let work = reg.create("Work", "", Some(&drive)).unwrap();
+    add_memory(&work.db_path, M1);
+    let file = tmp.path().join("work.db");
+    backup_to(&work.db_path, &file).unwrap();
+    let away = tmp.path().join("drive-unplugged");
+    std::fs::rename(&drive, &away).unwrap();
+
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("can't look in") && err.contains("folder remove"), "{err}");
+    assert!(!reg.home.join(work.uuid.to_uppercase()).exists());
+
+    // Back again, it is seen, and the import is refused for the right reason.
+    std::fs::rename(&away, &drive).unwrap();
+    assert!(reg.import(&file, None).unwrap_err().contains("already here"));
+}
+
+#[test]
+fn a_folder_part_way_through_a_move_counts_as_here() {
+    let (tmp, reg) = setup();
+    let work = reg.create("Work", "", None).unwrap();
+    add_memory(&work.db_path, M1);
+    let file = tmp.path().join("work.db");
+    backup_to(&work.db_path, &file).unwrap();
+    // As a move across drives leaves it between its two steps: the original closed.
+    let conn = rusqlite::Connection::open(&work.db_path).unwrap();
+    let sql = super::moving::fence_sql(&conn).unwrap();
+    conn.execute_batch(&sql).unwrap();
+    drop(conn);
+    assert!(reg.scan().folders.iter().all(|f| f.uuid != work.uuid), "a closed original isn't in a scan's folders");
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("part-way through a move"), "{err}");
+
+    // And the copy a move was making, with its original out of sight.
+    let (file2, there) = exported(&tmp, "Elsewhere", &[M2]);
+    let half = reg.home.join(format!("{}{}", MOVING_PREFIX, there.uuid));
+    std::fs::create_dir_all(&half).unwrap();
+    let err = reg.import(&file2, None).unwrap_err();
+    assert!(err.contains("can't look in") || err.contains("part-way through a move"), "{err}");
+}
+
+#[test]
+fn a_copy_left_by_an_import_that_was_killed_is_cleared_by_the_next() {
+    let (tmp, reg) = setup();
+    let dead = reg.home.join(".importing-99999-0");
+    std::fs::create_dir_all(&dead).unwrap();
+    std::fs::write(dead.join(DB_FILE), b"a whole copy of someone's notes").unwrap();
+    // Something of the person's own with a similar name is not ours to touch.
+    let theirs = reg.home.join("importing-notes");
+    std::fs::create_dir_all(&theirs).unwrap();
+    let (file, _) = exported(&tmp, "Next", &[M1]);
+    reg.import(&file, None).unwrap();
+    assert!(!dead.exists());
+    assert!(theirs.exists());
+}
+
+#[test]
+fn a_damaged_file_is_refused_and_leaves_nothing() {
+    let (tmp, reg) = setup();
+    let (file, there) = exported(&tmp, "Torn", &[M1, M2]);
+    // Garbage over the middle of the file, past the header and the first page.
+    let mut bytes = std::fs::read(&file).unwrap();
+    let from = 4096.min(bytes.len() / 2);
+    for b in bytes.iter_mut().skip(from).take(8192) {
+        *b = 0xA5;
+    }
+    std::fs::write(&file, &bytes).unwrap();
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("damaged") || err.contains("couldn't be checked") || err.contains("isn't a Geniuz folder"), "{err}");
+    assert!(!reg.home.join(there.uuid.to_uppercase()).exists());
+    let left: Vec<_> = std::fs::read_dir(&reg.home).unwrap().flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".importing-")).collect();
+    assert!(left.is_empty());
+}
+
+#[test]
+fn a_folder_here_under_an_added_directory_or_blocked_counts_as_here() {
+    let (tmp, reg) = setup();
+    // In use under a directory that was added.
+    let shelf = tmp.path().join("shelf");
+    let work = reg.create("Work", "", Some(&shelf)).unwrap();
+    add_memory(&work.db_path, M1);
+    let file = tmp.path().join("work.db");
+    backup_to(&work.db_path, &file).unwrap();
+    assert!(reg.import(&file, Some("Again")).unwrap_err().contains("already here"));
+    // Archived there.
+    reg.archive("Work").unwrap();
+    assert!(reg.import(&file, Some("Again")).unwrap_err().contains("archived"));
+    reg.restore("Work").unwrap();
+
+    // Blocked: two copies of one folder in reach. Its ID and its memories both count.
+    let twin = shelf.join("twin");
+    copy_dir(work.db_path.parent().unwrap(), &twin);
+    assert_eq!(reg.scan().blocked.len(), 2);
+    let err = reg.import(&file, Some("Again")).unwrap_err();
+    assert!(err.contains("already here"), "{err}");
+    // The same memories under a new folder ID, as a copy that was given another identity.
+    let forged = tmp.path().join("forged.db");
+    std::fs::copy(&file, &forged).unwrap();
+    let conn = rusqlite::Connection::open(&forged).unwrap();
+    conn.execute("UPDATE _meta SET value = 'EEEEEEEE-2222-4333-8444-555555555555' WHERE key = 'folder_uuid'", []).unwrap();
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    drop(conn);
+    let _ = std::fs::remove_file(format!("{}-wal", forged.display()));
+    let err = reg.import(&forged, Some("Forged")).unwrap_err();
+    assert!(err.contains("memories that are already in Work"), "{err}");
+}
+
+#[test]
+fn a_folder_id_is_taken_in_the_form_geniuz_writes_in_either_case() {
+    let (tmp, reg) = setup();
+    let set_id = |file: &Path, id: &str| {
+        let conn = rusqlite::Connection::open(file).unwrap();
+        conn.execute("UPDATE _meta SET value = ?1 WHERE key = 'folder_uuid'", [id]).unwrap();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        drop(conn);
+        let _ = std::fs::remove_file(format!("{}-wal", file.display()));
+    };
+    // Lower case is the same ID, and the directory takes the upper-case form.
+    let (lower, there) = exported(&tmp, "Lower", &[M1]);
+    set_id(&lower, &there.uuid.to_lowercase());
+    let got = reg.import(&lower, None).unwrap();
+    assert_eq!(got.folder.db_path, reg.home.join(there.uuid.to_uppercase()).join(DB_FILE));
+    assert!(reg.import(&lower, Some("Twice")).unwrap_err().contains("already here"));
+    // Another spelling of an ID would pass for another folder wherever IDs are compared as text.
+    let (odd, other) = exported(&tmp, "Odd", &[M2]);
+    for spelled in [other.uuid.replace('-', ""), format!("{{{}}}", other.uuid), "not an id".to_string()] {
+        set_id(&odd, &spelled);
+        let err = reg.import(&odd, None).unwrap_err();
+        assert!(err.contains("folder ID Geniuz can't read"), "{err}");
+    }
+}
+
+#[test]
+fn a_name_differing_only_in_case_is_the_same_name_and_a_refusal_for_a_name_leaves_no_copy() {
+    let (tmp, reg) = setup();
+    let mine = reg.create("Field Notes", "", None).unwrap();
+    add_memory(&mine.db_path, M4);
+    let (file, _) = exported(&tmp, "field notes", &[M1]);
+    assert!(reg.import(&file, None).unwrap_err().contains("already a folder called \"Field Notes\""));
+    assert!(reg.import(&file, Some("FIELD NOTES")).unwrap_err().contains("already a folder called"));
+    let left: Vec<_> = std::fs::read_dir(&reg.home).unwrap().flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(".importing-")).collect();
+    assert!(left.is_empty());
+    // An empty folder that was added directly can't be archived, so archiving isn't offered for it.
+    let direct = tmp.path().join("direct");
+    crate::db::DatabaseManager::new(direct.join(DB_FILE).to_str().unwrap()).unwrap();
+    reg.add(&direct).unwrap();
+    let (file2, _) = exported(&tmp, "direct", &[M2]);
+    let err = reg.import(&file2, None).unwrap_err();
+    assert!(err.contains("--as") && !err.contains("folder archive"), "{err}");
+}
+
+/// Lemonade's read of PR #68: IDs that aren't text were never compared, a computed
+/// column is code in a table, and a dangling link at the target read as "nothing there".
+#[test]
+fn memories_whose_ids_cannot_be_read_and_computed_columns_are_refused() {
+    let (tmp, reg) = setup();
+    let finish = |file: &Path, sql: &str| {
+        let conn = rusqlite::Connection::open(file).unwrap();
+        conn.execute_batch(sql).unwrap();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        drop(conn);
+        let _ = std::fs::remove_file(format!("{}-wal", file.display()));
+    };
+    // A memory whose ID is a blob: 36 bytes, so the table's own length check passes.
+    let (blob, _) = exported(&tmp, "Blob", &[M1]);
+    finish(&blob, "DROP TRIGGER IF EXISTS prevent_memory_replace; INSERT INTO memories (memory_uuid, payload) VALUES (CAST('eeeeeeee-2222-3333-4444-555555555555' AS BLOB), '{}');");
+    let err = reg.import(&blob, None).unwrap_err();
+    assert!(err.contains("IDs Geniuz can't read"), "{err}");
+
+    let (computed, _) = exported(&tmp, "Computed", &[M2]);
+    finish(&computed, "ALTER TABLE _meta ADD COLUMN shadow TEXT GENERATED ALWAYS AS (upper(value)) VIRTUAL;");
+    let err = reg.import(&computed, None).unwrap_err();
+    assert!(err.contains("computed column"), "{err}");
+    assert_eq!(names(&reg).len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dangling_link_where_the_folder_would_go_is_something_there() {
+    let (tmp, reg) = setup();
+    let (file, there) = exported(&tmp, "Linked", &[M1]);
+    std::fs::create_dir_all(&reg.home).unwrap();
+    let target = reg.home.join(there.uuid.to_uppercase());
+    std::os::unix::fs::symlink(tmp.path().join("nowhere"), &target).unwrap();
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("already exists"), "{err}");
+    assert!(std::fs::symlink_metadata(&target).unwrap().file_type().is_symlink(), "and it is left as it was");
+}
+
+#[cfg(unix)]
+#[test]
+fn unsaved_changes_are_seen_beside_a_file_whose_name_is_not_text() {
+    use std::os::unix::ffi::OsStringExt;
+    let (tmp, reg) = setup();
+    let (file, _) = exported(&tmp, "Named", &[M1]);
+    let odd = tmp.path().join(std::ffi::OsString::from_vec(b"caf\xe9.db".to_vec()));
+    // Some file systems (APFS) refuse such a name; where one does, there is nothing to test.
+    if std::fs::copy(&file, &odd).is_err() {
+        return;
+    }
+    let mut wal = odd.clone().into_os_string();
+    wal.push("-wal");
+    std::fs::write(&wal, b"not yet in the main file").unwrap();
+    let err = reg.import(&odd, None).unwrap_err();
+    assert!(err.contains("unsaved changes"), "{err}");
+}
+
+/// cubic on #68.
+#[test]
+fn a_table_under_the_name_of_one_of_our_views_and_a_blocked_folders_name_are_refused() {
+    let (tmp, reg) = setup();
+    let (file, _) = exported(&tmp, "Shadow", &[M1]);
+    let conn = rusqlite::Connection::open(&file).unwrap();
+    conn.execute_batch("DROP VIEW memory_chains; CREATE TABLE memory_chains (memory_uuid TEXT, gist TEXT); PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+    drop(conn);
+    let _ = std::fs::remove_file(format!("{}-wal", file.display()));
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("under the name memory_chains"), "{err}");
+
+    // Two copies of one folder in reach: both blocked, and their name is not free.
+    let shelf = tmp.path().join("shelf");
+    let work = reg.create("Work", "", Some(&shelf)).unwrap();
+    copy_dir(work.db_path.parent().unwrap(), &shelf.join("twin"));
+    assert_eq!(reg.scan().blocked.len(), 2);
+    let (other, _) = exported(&tmp, "work", &[M2]);
+    let err = reg.import(&other, None).unwrap_err();
+    assert!(err.contains("blocked") && err.contains("--as"), "{err}");
+    // An archived folder's name is free: that is how a placeholder hands its name over.
+    let (third, _) = exported(&tmp, "Held", &[M3]);
+    reg.create("Held", "", None).unwrap();
+    reg.archive("Held").unwrap();
+    assert_eq!(reg.import(&third, None).unwrap().folder.name, "Held");
+}
+
+/// A copy an earlier move left behind must not be put in place because a later move
+/// of the same folder, to somewhere else, closed the original.
+#[test]
+fn a_copy_that_lacks_memories_its_closed_original_holds_is_not_published() {
+    let (tmp, reg) = setup();
+    let work = reg.create("Work", "", None).unwrap();
+    add_memory(&work.db_path, M1);
+    // What an interrupted move left: a copy without the record that it is final.
+    let dest = tmp.path().join("dest");
+    std::fs::create_dir_all(&dest).unwrap();
+    reg.remember_added(&dest).unwrap();
+    let stale = dest.join(format!("{}{}", MOVING_PREFIX, work.uuid));
+    copy_dir(work.db_path.parent().unwrap(), &stale);
+    // Since then a memory was kept, and another move closed the original.
+    add_memory(&work.db_path, M2);
+    let conn = rusqlite::Connection::open(&work.db_path).unwrap();
+    let sql = super::moving::fence_sql(&conn).unwrap();
+    conn.execute_batch(&sql).unwrap();
+    drop(conn);
+
+    let scan = reg.scan();
+    assert!(!dest.join(&work.uuid).exists(), "the stale copy was not put in place");
+    assert!(stale.exists());
+    assert_eq!(scan.pending_moves.len(), 1);
+    assert_eq!(scan.pending_moves[0].file_name(), stale.file_name());
+    assert!(work.db_path.exists(), "and the original was not retired for it");
+}
+
+/// Lemonade's read of the guard above: holding every memory doesn't make a copy the
+/// one its original was closed for. Two moves, nothing kept between them.
+#[test]
+fn a_copy_from_another_move_is_not_published_even_when_it_holds_every_memory() {
+    let (tmp, reg) = setup();
+    let work = reg.create("Work", "", None).unwrap();
+    add_memory(&work.db_path, M1);
+    let (a, b) = (tmp.path().join("a"), tmp.path().join("b"));
+    for d in [&a, &b] {
+        std::fs::create_dir_all(d).unwrap();
+        reg.remember_added(d).unwrap();
+    }
+    // Move 1, to A, stopped before it closed the original.
+    let at_a = a.join(format!("{}{}", MOVING_PREFIX, work.uuid));
+    copy_dir(work.db_path.parent().unwrap(), &at_a);
+    std::fs::write(at_a.join(MOVE_TOKEN), "first").unwrap();
+    // Move 2, to B, stopped just after closing the original for its own copy.
+    let at_b = b.join(format!("{}{}", MOVING_PREFIX, work.uuid));
+    copy_dir(work.db_path.parent().unwrap(), &at_b);
+    std::fs::write(at_b.join(MOVE_TOKEN), "second").unwrap();
+    let conn = rusqlite::Connection::open(&work.db_path).unwrap();
+    let sql = super::moving::fence_sql(&conn).unwrap();
+    conn.execute_batch(&format!("INSERT OR REPLACE INTO _meta (key, value) VALUES ('{}', 'second');\n{}", KEY_MOVING_TO, sql)).unwrap();
+    drop(conn);
+
+    reg.scan();
+    assert!(at_a.exists() && !a.join(&work.uuid).exists(), "the copy from the other move stays where it is");
+    assert!(b.join(&work.uuid).join(DB_FILE).exists(), "the copy the original was closed for is put in place");
+    assert!(!b.join(&work.uuid).join(MOVE_TOKEN).exists());
+    // With the folder in use again, the other copy is set aside on the next look.
+    let scan = reg.scan();
+    assert!(!at_a.exists());
+    assert!(scan.blocked.is_empty() && scan.pending_moves.is_empty());
+    assert_eq!(canonical(&reg.find("Work").unwrap().db_path), canonical(&b.join(&work.uuid).join(DB_FILE)));
+}
+
+#[test]
+fn a_real_move_across_drives_names_itself_and_an_older_closed_original_still_finishes() {
+    let (tmp, reg) = setup();
+    // What copy_then_retire writes, seen through an interruption after the original is closed.
+    let work = reg.create("Work", "", None).unwrap();
+    add_memory(&work.db_path, M1);
+    let dest = tmp.path().join("dest");
+    std::fs::create_dir_all(&dest).unwrap();
+    let dir = work.db_path.parent().unwrap().to_path_buf();
+    let lock = super::moving::quiesce(&work.db_path).unwrap();
+    let retired = super::moving::copy_then_retire(&dir, &dest, &work, lock).unwrap();
+    let conn = open_read_only(&retired.join(DB_FILE)).unwrap();
+    let named = get_meta(&conn, KEY_MOVING_TO).expect("the closed original names its move");
+    assert_eq!(named.len(), 32);
+    assert!(dest.join(&work.uuid).join(DB_FILE).exists());
+    assert!(!dest.join(&work.uuid).join(MOVE_TOKEN).exists(), "the published folder carries no trace of the move");
+
+    // An original closed by an older Geniuz names no move: its copy still finishes, on its memories.
+    let old = reg.create("Old", "", None).unwrap();
+    add_memory(&old.db_path, M2);
+    let d2 = tmp.path().join("d2");
+    std::fs::create_dir_all(&d2).unwrap();
+    reg.remember_added(&d2).unwrap();
+    let copy = d2.join(format!("{}{}", MOVING_PREFIX, old.uuid));
+    copy_dir(old.db_path.parent().unwrap(), &copy);
+    let conn = rusqlite::Connection::open(&old.db_path).unwrap();
+    let sql = super::moving::fence_sql(&conn).unwrap();
+    conn.execute_batch(&sql).unwrap();
+    drop(conn);
+    reg.scan();
+    assert!(d2.join(&old.uuid).join(DB_FILE).exists());
+}
+
+/// cubic on #68: the copy's bookkeeping files share a directory with whatever else the
+/// folder's directory holds.
+#[test]
+fn a_folder_holding_a_file_with_one_of_the_move_names_is_not_moved() {
+    let (tmp, reg) = setup();
+    let dest = tmp.path().join("dest");
+    std::fs::create_dir_all(&dest).unwrap();
+    for name in [MOVE_OWNER, MOVE_COMMITTED, MOVE_TOKEN] {
+        let work = reg.create(&format!("Work {}", name), "", None).unwrap();
+        add_memory(&work.db_path, M1);
+        let dir = work.db_path.parent().unwrap().to_path_buf();
+        std::fs::write(dir.join(name), b"the person's own file").unwrap();
+        let lock = super::moving::quiesce(&work.db_path).unwrap();
+        let err = super::moving::copy_then_retire(&dir, &dest, &work, lock).unwrap_err();
+        assert!(err.contains(name) && err.contains("Nothing was moved"), "{err}");
+        assert_eq!(std::fs::read(dir.join(name)).unwrap(), b"the person's own file");
+        assert!(!dest.join(format!("{}{}", MOVING_PREFIX, work.uuid)).exists(), "no copy was started");
+        assert_eq!(reg.find(&work.uuid).unwrap().stats().unwrap().0, 1, "and the folder is still in use where it was");
+    }
 }
