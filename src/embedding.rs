@@ -423,6 +423,14 @@ mod host_tests {
         let dir = std::env::temp_dir().join(format!("geniuz-pin-{}-{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
+        // Ours alone, whatever the umask: a note is trusted only in a directory
+        // nobody else can write to, and Ubuntu's default umask (002) makes a new
+        // directory group-writable. Geniuz itself creates its own with 700.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
         dir
     }
 

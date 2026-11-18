@@ -39,19 +39,28 @@ jobs:
           echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
           echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
 
-      - name: Install system ORT (Linux — dynamic link, glibc 2.27 compatible)
+      - name: Install ONNX Runtime 1.22 (Linux, pinned by hash, dynamic link)
         if: runner.os == 'Linux'
         run: |
+          # The runtime comes from our own 5.1.5 release, and must match the hash we
+          # have shipped since 5.0.11. Until 5.1.6 it was fetched from
+          # github.com/microsoft/onnxruntime with no check; that repository went
+          # offline on 17 Nov 2026, and a file that returns under the same name
+          # must not be shipped unseen.
           if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
-            ORT_ARCHIVE="onnxruntime-linux-aarch64-1.22.0"
+            ORT_FROM="geniuz-linux-arm64.tar.gz"
+            ORT_SHA256="0afd69a0ae38c5099fd0e8604dda398ac43dee67cd9c6394b5142b19e82528de"
           else
-            ORT_ARCHIVE="onnxruntime-linux-x64-1.22.0"
+            ORT_FROM="geniuz-linux-amd64.tar.gz"
+            ORT_SHA256="3da6146e14e7b8aaec625dde11d6114c7457c87a5f93d744897da8781e35c673"
           fi
-          curl -sL "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/${ORT_ARCHIVE}.tgz" | tar xz -C /tmp
-          sudo cp /tmp/${ORT_ARCHIVE}/lib/libonnxruntime.so.1.22.0 /usr/local/lib/
+          mkdir -p /tmp/ort && cd /tmp/ort
+          curl -fsSL -o from.tar.gz "https://github.com/jackccrawford/Geniuz/releases/download/v5.1.5/${ORT_FROM}"
+          tar xzf from.tar.gz libonnxruntime.so.1.22.0
+          echo "${ORT_SHA256}  libonnxruntime.so.1.22.0" | sha256sum -c -
+          sudo cp libonnxruntime.so.1.22.0 /usr/local/lib/
           sudo ln -sf libonnxruntime.so.1.22.0 /usr/local/lib/libonnxruntime.so
           sudo ln -sf libonnxruntime.so.1.22.0 /usr/local/lib/libonnxruntime.so.1
-          sudo cp -r /tmp/${ORT_ARCHIVE}/include/* /usr/local/include/
           sudo ldconfig
           echo "ORT_LIB_LOCATION=/usr/local/lib" >> $GITHUB_ENV
           echo "ORT_PREFER_DYNAMIC_LINK=1" >> $GITHUB_ENV
@@ -72,9 +81,10 @@ jobs:
           # Bundle ORT shared library for Linux (dynamic linking)
           if [ "${{ runner.os }}" = "Linux" ]; then
             cp /usr/local/lib/libonnxruntime.so.1.22.0 .
-            # geniuz-embed is the helper that keeps the search model loaded. Without
-            # it every search and every keep loads the model again (about 2 s and
-            # 480 MB on a small laptop). install.sh installs it when it is here.
+            # geniuz-embed is the helper that can keep the search model loaded, as the
+            # Windows installer already ships. It runs only for someone who sets
+            # GENIUZ_EMBED_SPAWN=1; a keep then takes 0.2 s where it took 1.65 s
+            # (explora, 17 Nov 2026). install.sh installs it when it is here.
             tar czf ../../../geniuz-${{ matrix.name }}.tar.gz geniuz geniuz-embed libonnxruntime.so.1.22.0
           else
             tar czf ../../../geniuz-${{ matrix.name }}.tar.gz geniuz
