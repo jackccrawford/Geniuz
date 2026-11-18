@@ -186,7 +186,7 @@ Everything is under `~/.geniuz/` unless you moved it: `memory.db`, one directory
 
 **To back up**, use Export under Data & Export in the dashboard, which saves the folder on screen as one complete file, or `geniuz folder export Work ~/Backups/work.db` from the command line. `geniuz folder export --all ~/Backups/2026-11-17` writes one file per folder into that directory. From the command line an export never overwrites a file, so a nightly job gives each run a new directory, named for its date, and removes old ones itself. Time Machine and similar tools are fine too. A backup is a file to keep, not a folder to use: it holds the same permanent IDs, so Geniuz refuses it while the original is present.
 
-**To bring a folder to another computer**, export it there and import the file here: `geniuz folder import ~/Downloads/clients.db`. It arrives as the same folder: the same ID, and every memory with its own ID and its thread, so an address written anywhere still opens. The file you import from isn't changed. Three things to know:
+**To bring a folder to another computer**, export it there and import the file here: `geniuz folder import ~/Downloads/clients.db`. It arrives as the same folder: the same ID, and every memory with its own ID and its thread, so an address written anywhere still opens. The file you import from isn't changed. Good to know:
 
 - **It holds what the folder held when it was exported.** Nothing is merged, now or later, so stop keeping at the source first, or what is kept there afterwards stays there.
 - **A folder that is already here is refused**, in use or archived. Importing never replaces anything.
