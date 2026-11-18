@@ -574,7 +574,7 @@ fn recall_by_address(reg: &Registry, args: &Value) -> Option<(String, bool)> {
 
 /// Exact words across every folder: the matching lines, newest first, each with
 /// the address that opens its memory.
-fn execute_grep_all(reg: &Registry, grep: &[String], window: &Window, args: &Value) -> (String, bool) {
+pub(crate) fn execute_grep_all(reg: &Registry, grep: &[String], window: &Window, args: &Value) -> (String, bool) {
     let terms = match geniuz::dig::Terms::parse(grep) {
         Ok(t) => t,
         Err(e) => return (format!("Error: {}", e), true),

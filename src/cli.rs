@@ -140,14 +140,15 @@ pub enum Command {
 
     /// Search your memories, by meaning and by their words together
     #[command(
-        after_help = "Examples:\n  geniuz recall \"auth token\"                  Search: by meaning and by words, together\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n  geniuz recall --grep Cubic --since 7d        Lines naming Cubic, past week"
+        after_help = "Examples:\n  geniuz recall \"auth token\"                  Search: by meaning and by words, together\n  geniuz recall --random                       Discover something\n  geniuz recall --full \"auth\"                   Include full content\n  geniuz recall --since 7d \"reviewers\"          Only the past week\n  geniuz recall --since 2026-09-01 --until 2026-09-15\n  geniuz recall --thread 17DB510B              The whole conversation, oldest first\n  geniuz recall --grep Cubic --since 7d        Lines naming Cubic, past week\n  geniuz recall --all --grep Cubic             The same, in every folder"
     )]
     Recall {
         /// Search query, or an address like 13625F6B:3487B9B0 to open that memory
         query: Option<String>,
 
-        /// Search every folder. Each result shows the address that opens it
-        #[arg(long, conflicts_with_all = ["thread", "grep", "random"])]
+        /// Search every folder. Each result shows the address that opens it.
+        /// With --grep: every folder's matching lines
+        #[arg(long, conflicts_with_all = ["thread", "random"])]
         all: bool,
 
         /// Show the whole thread this memory belongs to (a UUID, prefix or address):

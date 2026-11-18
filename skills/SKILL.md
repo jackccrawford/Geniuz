@@ -60,6 +60,7 @@ geniuz recall "who reviewed the PR, was it Cubic"
 # Every line holding exact words, from full content, newest first
 geniuz recall --grep Cubic --since 7d
 geniuz recall --grep Cubic --grep "pull request"   # every term must appear
+geniuz recall --all --grep Cubic                  # the same, in every folder
 
 # A whole thread, root first, from any memory in it
 geniuz recall --thread A1B2C3D4

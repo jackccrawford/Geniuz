@@ -883,6 +883,14 @@ fn run(cli: Cli) -> Result<String, String> {
                 if IN_FOLDER.get().and_then(|f| f.as_deref()).is_some() {
                     return Err("--all searches every folder, so it can't be combined with --in.".to_string());
                 }
+                // Exact words in every folder: the same listing the MCP tool gives
+                // (5.1.6; before it, the command line refused --all with --grep).
+                if !grep.is_empty() {
+                    let reg = geniuz::folders::Registry::from_env();
+                    let args = serde_json::json!({ "limit": limit.unwrap_or(50) });
+                    let (text, failed) = mcp::execute_grep_all(&reg, &grep, &window, &args);
+                    return if failed { Err(text) } else { Ok(text) };
+                }
                 return recall_all(query.as_deref(), keyword, full, &window, limit.unwrap_or(20), json);
             }
 
