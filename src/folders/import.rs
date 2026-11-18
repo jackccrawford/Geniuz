@@ -85,7 +85,11 @@ impl Registry {
         // a word, so it is refused with the way to make a complete one.
         // The same goes for a `-journal` file: a change that was under way and never finished.
         for suffix in ["-wal", "-journal"] {
-            let beside = PathBuf::from(format!("{}{}", source.display(), suffix));
+            // Built from the name itself, not its text: a name that isn't valid text
+            // would otherwise give a path that doesn't exist, and the check would pass.
+            let mut beside = source.as_os_str().to_owned();
+            beside.push(suffix);
+            let beside = PathBuf::from(beside);
             if std::fs::metadata(&beside).map(|m| m.len() > 0).unwrap_or(false) {
                 return Err(format!(
                     "{} has unsaved changes in a file beside it ({}), so it looks like a folder in use, not an export. \
@@ -145,10 +149,20 @@ impl Registry {
             ));
         }
         only_our_schema(&conn).map_err(|e| format!("{} wasn't imported: {}", source.display(), e))?;
+        plain_columns(&conn).map_err(|e| format!("{} wasn't imported: {}", source.display(), e))?;
         let memories: i64 = conn
             .query_row("SELECT COUNT(*) FROM memories", [], |r| r.get(0))
             .map_err(|e| format!("Couldn't read {}: {}", source.display(), e))?;
         drop(conn);
+        // "None of its memories is already here" is checked by ID further down, and
+        // an ID that can't be read as text would not be compared at all. Every memory
+        // must have one that can.
+        if memory_ids(&copy).len() as i64 != memories {
+            return Err(format!(
+                "{} wasn't imported: some of its memories have IDs Geniuz can't read, so it can't tell whether they are already here.",
+                source.display()
+            ));
+        }
 
         // A store from 4.x has no identity yet. It gets the one every copy of it
         // would get, named after the file.
@@ -270,7 +284,7 @@ impl Registry {
         drop(conn);
         sync(&copy)?;
         let target = self.home.join(&uuid);
-        if target.exists() {
+        if std::fs::symlink_metadata(&target).is_ok() {
             return Err(format!(
                 "{} already exists, and Geniuz doesn't read it as folder {}. Move it out of the way first; nothing was changed.",
                 target.display(),
@@ -280,9 +294,19 @@ impl Registry {
         // On Windows a directory can't be renamed while anything holds a file in it
         // open, and a virus scanner or an indexer may be reading the new copy for a
         // moment. Nothing of Geniuz's own is open in it by now, so a short wait is enough.
+        // First the directory itself, on disk: on some file systems a crash after the
+        // rename could otherwise bring the folder back without the file in it.
+        #[cfg(unix)]
+        std::fs::File::open(staging)
+            .and_then(|d| d.sync_all())
+            .map_err(|e| format!("Couldn't finish writing {}: {}", staging.display(), e))?;
+        #[allow(unused_mut)]
         let mut placed = std::fs::rename(staging, &target);
+        // Only there, and only for that refusal: anywhere else an error is final, and
+        // waiting would hold the registry lock for nothing.
+        #[cfg(windows)]
         for _ in 0..10 {
-            if placed.is_ok() {
+            if !matches!(&placed, Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied) {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(200));
@@ -392,6 +416,29 @@ fn sync(file: &Path) -> Result<(), String> {
         .open(file)
         .and_then(|f| f.sync_all())
         .map_err(|e| format!("Couldn't finish writing {}: {}", file.display(), e))
+}
+
+/// The two tables that decide what a folder is and holds must have plain columns: none
+/// computed from an expression of the file's choosing. (A table can also carry CHECK
+/// and DEFAULT expressions. Geniuz registers no SQL functions of its own, so the worst
+/// those can do is refuse a keep or misdate one, in that folder alone; they are left.)
+fn plain_columns(conn: &Connection) -> Result<(), String> {
+    for (table, needed) in [("memories", &["memory_uuid", "payload", "created_at", "parent_uuid"][..]), ("_meta", &["key", "value"][..])] {
+        let mut stmt = conn
+            .prepare(&format!("SELECT name, hidden FROM pragma_table_xinfo('{}')", table))
+            .map_err(|e| format!("its {} table couldn't be read ({})", table, e))?;
+        let columns: Vec<(String, i64)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .and_then(|rows| rows.collect())
+            .map_err(|e| format!("its {} table couldn't be read ({})", table, e))?;
+        if columns.iter().any(|(_, hidden)| *hidden != 0) {
+            return Err(format!("its {} table has a computed column, which Geniuz never writes", table));
+        }
+        if let Some(missing) = needed.iter().find(|n| !columns.iter().any(|(c, _)| c.eq_ignore_ascii_case(n))) {
+            return Err(format!("its {} table has no {} column", table, missing));
+        }
+    }
+    Ok(())
 }
 
 fn not_a_folder(file: &Path) -> String {

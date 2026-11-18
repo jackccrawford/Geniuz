@@ -1603,3 +1603,59 @@ fn a_name_differing_only_in_case_is_the_same_name_and_a_refusal_for_a_name_leave
     let err = reg.import(&file2, None).unwrap_err();
     assert!(err.contains("--as") && !err.contains("folder archive"), "{err}");
 }
+
+/// Lemonade's read of PR #68: IDs that aren't text were never compared, a computed
+/// column is code in a table, and a dangling link at the target read as "nothing there".
+#[test]
+fn memories_whose_ids_cannot_be_read_and_computed_columns_are_refused() {
+    let (tmp, reg) = setup();
+    let finish = |file: &Path, sql: &str| {
+        let conn = rusqlite::Connection::open(file).unwrap();
+        conn.execute_batch(sql).unwrap();
+        conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);").unwrap();
+        drop(conn);
+        let _ = std::fs::remove_file(format!("{}-wal", file.display()));
+    };
+    // A memory whose ID is a blob: 36 bytes, so the table's own length check passes.
+    let (blob, _) = exported(&tmp, "Blob", &[M1]);
+    finish(&blob, "DROP TRIGGER IF EXISTS prevent_memory_replace; INSERT INTO memories (memory_uuid, payload) VALUES (CAST('eeeeeeee-2222-3333-4444-555555555555' AS BLOB), '{}');");
+    let err = reg.import(&blob, None).unwrap_err();
+    assert!(err.contains("IDs Geniuz can't read"), "{err}");
+
+    let (computed, _) = exported(&tmp, "Computed", &[M2]);
+    finish(&computed, "ALTER TABLE _meta ADD COLUMN shadow TEXT GENERATED ALWAYS AS (upper(value)) VIRTUAL;");
+    let err = reg.import(&computed, None).unwrap_err();
+    assert!(err.contains("computed column"), "{err}");
+    assert_eq!(names(&reg).len(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_dangling_link_where_the_folder_would_go_is_something_there() {
+    let (tmp, reg) = setup();
+    let (file, there) = exported(&tmp, "Linked", &[M1]);
+    std::fs::create_dir_all(&reg.home).unwrap();
+    let target = reg.home.join(there.uuid.to_uppercase());
+    std::os::unix::fs::symlink(tmp.path().join("nowhere"), &target).unwrap();
+    let err = reg.import(&file, None).unwrap_err();
+    assert!(err.contains("already exists"), "{err}");
+    assert!(std::fs::symlink_metadata(&target).unwrap().file_type().is_symlink(), "and it is left as it was");
+}
+
+#[cfg(unix)]
+#[test]
+fn unsaved_changes_are_seen_beside_a_file_whose_name_is_not_text() {
+    use std::os::unix::ffi::OsStringExt;
+    let (tmp, reg) = setup();
+    let (file, _) = exported(&tmp, "Named", &[M1]);
+    let odd = tmp.path().join(std::ffi::OsString::from_vec(b"caf\xe9.db".to_vec()));
+    // Some file systems (APFS) refuse such a name; where one does, there is nothing to test.
+    if std::fs::copy(&file, &odd).is_err() {
+        return;
+    }
+    let mut wal = odd.clone().into_os_string();
+    wal.push("-wal");
+    std::fs::write(&wal, b"not yet in the main file").unwrap();
+    let err = reg.import(&odd, None).unwrap_err();
+    assert!(err.contains("unsaved changes"), "{err}");
+}
