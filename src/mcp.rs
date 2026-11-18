@@ -1711,6 +1711,19 @@ pub fn status() -> Result<String, String> {
             }
         }
     }
+    // That is only the folder used when none is named. With several folders, a count
+    // of 0 there reads as "Geniuz is empty" (seen on a new install, 17 Nov 2026).
+    let folders = geniuz::folders::Registry::from_env().scan().folders;
+    if folders.len() > 1 {
+        let memories: i64 = folders.iter().filter_map(|f| f.stats().ok()).map(|(n, _)| n).sum();
+        if let Some(l) = lines.last_mut() {
+            l.push_str(": used when no folder is named");
+        }
+        lines.push(format!(
+            "All folders: {} folders, {} memories in all. An AI connected to Geniuz can read and keep in any of them by name.",
+            folders.len(), memories
+        ));
+    }
 
     if !any_installed {
         lines.push(String::new());

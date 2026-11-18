@@ -367,6 +367,21 @@ pub enum FolderCommand {
         path: PathBuf,
     },
 
+    /// Write a complete copy of a folder to one file, safe to take while Geniuz is in use
+    #[command(
+        after_help = "The copy is one file holding every memory and image of the folder, with the same IDs.\nIt is a backup to keep, not a folder to use: 'folder add' refuses it while the original is here.\nA plain copy of a folder's files can miss recent memories; this can't.\nAn existing file is never overwritten.\n\n  geniuz folder export Work ~/Backups/work.db\n  geniuz folder export --all ~/Backups/2026-11-17     One file per folder, in that directory"
+    )]
+    Export {
+        /// Name or 8-character ID (leave out with --all)
+        #[arg(required_unless_present = "all", conflicts_with = "all")]
+        name: Option<String>,
+        /// The file to write; with --all, the directory to write one file per folder into
+        to: Option<PathBuf>,
+        /// Every folder, each to its own file in a directory
+        #[arg(long, value_name = "DIRECTORY")]
+        all: Option<PathBuf>,
+    },
+
     /// Stop looking in an added directory. Its files aren't touched
     Remove {
         /// The directory
