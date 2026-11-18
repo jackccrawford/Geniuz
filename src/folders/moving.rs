@@ -208,8 +208,13 @@ pub(super) fn copy_then_retire(dir: &Path, dest: &Path, folder: &Folder, lock: C
         .map_err(|e| format!("Couldn't lock {}: {}", staging.display(), e))?;
     // This move's name, in the copy now and in the original when it is closed (step 3).
     let token = uuid::Uuid::new_v4().simple().to_string();
-    std::fs::write(staging.join(MOVE_TOKEN), &token)
-        .and_then(|_| std::fs::File::open(staging.join(MOVE_TOKEN))?.sync_all())
+    // Written and forced to disk through one handle opened for writing: Windows
+    // refuses to flush a file opened only to read (see the copy loop below).
+    std::fs::File::create(staging.join(MOVE_TOKEN))
+        .and_then(|mut f| {
+            std::io::Write::write_all(&mut f, token.as_bytes())?;
+            f.sync_all()
+        })
         .map_err(|e| format!("Couldn't write in {}: {}", staging.display(), e))?;
     let entries = std::fs::read_dir(dir).map_err(|e| format!("Couldn't read {}: {}", dir.display(), e))?;
     for entry in entries.flatten() {
@@ -332,7 +337,18 @@ pub(super) fn finish_interrupted_moves(root: &Path, live: &[Folder], paused: &[F
             // it holds: it may be behind in the folder's name, description or face.
             // (Lemonade's read of this change. An original closed by a Geniuz before
             // 5.1.7 names no copy, and the memories alone decide, below.)
-            let closed_for = open_read_only(&original.db_path).ok().and_then(|c| get_meta(&c, KEY_MOVING_TO));
+            // Only a read that succeeds and finds no name means "closed before 5.1.7".
+            // A read that fails is not that: it waits.
+            let closed_for = open_read_only(&original.db_path).and_then(|c| {
+                c.query_row("SELECT value FROM _meta WHERE key = ?1", [KEY_MOVING_TO], |r| r.get::<_, Option<String>>(0))
+                    .optional()
+                    .map(Option::flatten)
+                    .map_err(|e| e.to_string())
+            });
+            let Ok(closed_for) = closed_for else {
+                pending.push(staging);
+                continue;
+            };
             let this_copy = std::fs::read_to_string(staging.join(MOVE_TOKEN)).ok().map(|t| t.trim().to_string());
             if closed_for.is_some() && closed_for != this_copy {
                 pending.push(staging);
