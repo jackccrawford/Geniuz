@@ -223,3 +223,39 @@ These variables are for unusual setups:
 | `GENIUZ_EMBED_URL`, `GENIUZ_EMBED_MODEL` | The embedding service to try if the built-in model fails to load |
 | `GENIUZ_HOME` | Where Geniuz keeps its files |
 | `GENIUZ_MODELS_PATH` | Where the model is stored |
+
+## Known issues
+
+### Linux: the top-bar menu shows blank items
+
+**What you see.** On Ubuntu (GNOME), clicking the Geniuz icon in the top bar opens a menu with the right number of rows and no text. The items still work if you click them; you can't read them.
+
+**Who gets it.** Seen on one Ubuntu 26.04 computer with Geniuz installed from the `.deb` (5.1.1 and 5.1.7), while the desktop used subpixel ("rgba") font smoothing, which is Ubuntu's default. Another Ubuntu 26.04 computer with the same settings shows the menu correctly, so most people with these settings are not affected, and the cause isn't known yet. The window itself is not affected: open Geniuz from the app list and everything in it reads normally.
+
+**What has fixed it.** Switching font smoothing to grayscale, then restarting Geniuz:
+
+```bash
+gsettings set org.gnome.desktop.interface font-antialiasing 'grayscale'
+```
+
+Quit Geniuz (**File → Quit** in its window, or the last row of the blank menu) and open it again from the app list. If you prefer to click: install GNOME Tweaks (`sudo apt install gnome-tweaks`), open **Fonts**, and set **Antialiasing** to **Standard (grayscale)**.
+
+If the menu is still blank after that, set hinting to medium as well and restart Geniuz again:
+
+```bash
+gsettings set org.gnome.desktop.interface font-hinting 'medium'
+```
+
+Tested on 5.1.7 with grayscale and medium hinting, and on 5.1.1 with grayscale and Ubuntu's default hinting.
+
+**What it changes.** Text across your desktop is smoothed in grey instead of in colour at the edges. Most people don't notice.
+
+**To undo.** This returns both settings to your system's defaults:
+
+```bash
+gsettings reset org.gnome.desktop.interface font-antialiasing
+gsettings reset org.gnome.desktop.interface font-hinting
+```
+
+A proper fix is being worked on, so that the menu reads correctly with any font setting.
+
