@@ -230,7 +230,7 @@ These variables are for unusual setups:
 
 **What you see.** On Ubuntu (GNOME), clicking the Geniuz icon in the top bar opens a menu with the right number of rows and no text. The items still work if you click them; you can't read them.
 
-**Who gets it.** Seen on one Ubuntu 26.04 computer with Geniuz installed from the `.deb` (5.1.1 and 5.1.7), while the desktop used subpixel ("rgba") font smoothing, which is Ubuntu's default. Another Ubuntu 26.04 computer with the same settings shows the menu correctly, so most people with these settings are not affected, and the cause isn't known yet. The window itself is not affected: open Geniuz from the app list and everything in it reads normally.
+**Who gets it.** Seen on one Ubuntu 26.04 computer with Geniuz installed from the `.deb` (5.1.1 and 5.1.7), while the desktop used subpixel ("rgba") font smoothing, which is Ubuntu's default. Another Ubuntu 26.04 computer with the same settings and the same package shows the menu correctly. So the setting alone doesn't cause it, the cause isn't known yet, and two computers can't say how common it is. The window itself is not affected: open Geniuz from the app list and everything in it reads normally.
 
 **What has fixed it.** Switching font smoothing to grayscale, then restarting Geniuz:
 
@@ -240,13 +240,13 @@ gsettings set org.gnome.desktop.interface font-antialiasing 'grayscale'
 
 Quit Geniuz (**File → Quit** in its window, or the last row of the blank menu) and open it again from the app list. If you prefer to click: install GNOME Tweaks (`sudo apt install gnome-tweaks`), open **Fonts**, and set **Antialiasing** to **Standard (grayscale)**.
 
-If the menu is still blank after that, set hinting to medium as well and restart Geniuz again:
+On 5.1.7 this was tested with font hinting set to medium, not with Ubuntu's default. If the menu is still blank after the step above, set hinting to medium as well and restart Geniuz again:
 
 ```bash
 gsettings set org.gnome.desktop.interface font-hinting 'medium'
 ```
 
-Tested on 5.1.7 with grayscale and medium hinting, and on 5.1.1 with grayscale and Ubuntu's default hinting.
+What was tested, on the one computer that shows it: 5.1.7 with grayscale and medium hinting, and 5.1.1 with grayscale and Ubuntu's default hinting. Both made the menu readable.
 
 **What it changes.** Text across your desktop is smoothed in grey instead of in colour at the edges. Most people don't notice.
 
